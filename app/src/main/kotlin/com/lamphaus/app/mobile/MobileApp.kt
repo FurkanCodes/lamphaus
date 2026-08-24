@@ -103,6 +103,7 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
@@ -284,6 +285,11 @@ private fun MobileSignedInApp(
 ) {
     var destination by rememberSaveable { mutableStateOf(MobileDestination.HOME) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var pendingMediaKey by remember { mutableStateOf<String?>(null) }
+    val openMedia: (MediaPreview) -> Unit = { media ->
+        pendingMediaKey = media.stableKey
+        viewModel.loadDetail(media)
+    }
 
     when {
         state.sourcePicker != null -> {
@@ -330,15 +336,29 @@ private fun MobileSignedInApp(
                         when (destination) {
                             MobileDestination.HOME -> MobileHomeScreen(
                                 state = state,
-                                onMedia = viewModel::loadDetail,
+                                onMedia = openMedia,
                                 onAddSource = { settingsOpen = true },
+                                restoreMediaKey = pendingMediaKey,
+                                onFocusRestored = { pendingMediaKey = null },
                             )
-                            MobileDestination.DISCOVER -> MediaGrid(state.allMedia, viewModel::loadDetail)
-                            MobileDestination.LIBRARY -> LibraryScreen(state, viewModel::loadDetail)
+                            MobileDestination.DISCOVER -> MediaGrid(
+                                media = state.allMedia,
+                                onMedia = openMedia,
+                                restoreMediaKey = pendingMediaKey,
+                                onFocusRestored = { pendingMediaKey = null },
+                            )
+                            MobileDestination.LIBRARY -> LibraryScreen(
+                                state = state,
+                                onMedia = openMedia,
+                                restoreMediaKey = pendingMediaKey,
+                                onFocusRestored = { pendingMediaKey = null },
+                            )
                             MobileDestination.SEARCH -> SearchScreen(
                                 state = state,
                                 onSearch = viewModel::searchContent,
-                                onMedia = viewModel::loadDetail,
+                                onMedia = openMedia,
+                                restoreMediaKey = pendingMediaKey,
+                                onFocusRestored = { pendingMediaKey = null },
                             )
                         }
                         if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
@@ -385,27 +405,38 @@ private fun MobileHomeScreen(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
 ) {
     val feature = state.allMedia.firstOrNull()
     LazyColumn(
         contentPadding = PaddingValues(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        if (feature != null) item(key = "feature") { MobileHero(feature, onMedia) }
+        if (feature != null) item(key = "feature") { MobileHero(feature, onMedia, restoreMediaKey, onFocusRestored) }
         if (state.providers.isEmpty() && state.sections.isEmpty()) {
             item { EmptyProviders(Modifier.padding(horizontal = 24.dp), onAddSource) }
         }
         items(state.sections, key = CatalogSection::id) { section ->
-            CatalogRow(section, onMedia)
+            CatalogRow(section, onMedia, restoreMediaKey, onFocusRestored)
         }
     }
 }
 
 @Composable
-private fun MobileHero(media: MediaPreview, onMedia: (MediaPreview) -> Unit) {
+private fun MobileHero(
+    media: MediaPreview,
+    onMedia: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
     Card(
         onClick = { onMedia(media) },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(310.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(310.dp)
+            .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
         shape = RoundedCornerShape(16.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
@@ -434,7 +465,12 @@ private fun MobileHero(media: MediaPreview, onMedia: (MediaPreview) -> Unit) {
 }
 
 @Composable
-private fun CatalogRow(section: CatalogSection, onMedia: (MediaPreview) -> Unit) {
+private fun CatalogRow(
+    section: CatalogSection,
+    onMedia: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.padding(horizontal = 20.dp)) {
             Text(section.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
@@ -452,7 +488,13 @@ private fun CatalogRow(section: CatalogSection, onMedia: (MediaPreview) -> Unit)
                 contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                items(section.items, key = MediaPreview::stableKey) { media -> PosterCard(media, onMedia) }
+                items(section.items, key = MediaPreview::stableKey) { media ->
+                    PosterCard(
+                        media = media,
+                        onMedia = onMedia,
+                        modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
+                    )
+                }
             }
         }
     }
@@ -480,7 +522,12 @@ private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, mod
 }
 
 @Composable
-private fun MediaGrid(media: List<MediaPreview>, onMedia: (MediaPreview) -> Unit) {
+private fun MediaGrid(
+    media: List<MediaPreview>,
+    onMedia: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
     if (media.isEmpty()) {
         EmptyProviders(Modifier.padding(24.dp))
         return
@@ -491,12 +538,25 @@ private fun MediaGrid(media: List<MediaPreview>, onMedia: (MediaPreview) -> Unit
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        items(media, key = MediaPreview::stableKey) { PosterCard(it, onMedia, Modifier.fillMaxWidth()) }
+        items(media, key = MediaPreview::stableKey) { item ->
+            PosterCard(
+                media = item,
+                onMedia = onMedia,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
+            )
+        }
     }
 }
 
 @Composable
-private fun LibraryScreen(state: AppUiState, onMedia: (MediaPreview) -> Unit) {
+private fun LibraryScreen(
+    state: AppUiState,
+    onMedia: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
     val media = state.library.map { it.preview }
     if (media.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center) {
@@ -504,7 +564,7 @@ private fun LibraryScreen(state: AppUiState, onMedia: (MediaPreview) -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text(stringResource(R.string.library_empty_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-    } else MediaGrid(media, onMedia)
+    } else MediaGrid(media, onMedia, restoreMediaKey, onFocusRestored)
 }
 
 @Composable
@@ -512,6 +572,8 @@ private fun SearchScreen(
     state: AppUiState,
     onSearch: (String) -> Unit,
     onMedia: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(query) { onSearch(query) }
@@ -534,7 +596,7 @@ private fun SearchScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                MediaGrid(matches, onMedia)
+                MediaGrid(matches, onMedia, restoreMediaKey, onFocusRestored)
             }
         }
     }

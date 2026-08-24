@@ -103,6 +103,7 @@ import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.SourcePickerState
+import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
@@ -335,7 +336,12 @@ private fun TvSignedIn(
     val initialDestination = if (initialSearch.isNullOrBlank()) TvDestination.HOME else TvDestination.SEARCH
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
     var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination) }
+    var pendingMediaKey by remember { mutableStateOf<String?>(null) }
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
+    val openMedia: (MediaPreview) -> Unit = { media ->
+        pendingMediaKey = media.stableKey
+        viewModel.loadDetail(media)
+    }
 
     if (state.sourcePicker != null) {
         BackHandler { viewModel.closeSourcePicker() }
@@ -350,7 +356,7 @@ private fun TvSignedIn(
     if (state.selectedDetail != null) {
         BackHandler {
             viewModel.clearDetail()
-            focusDestination = destination
+            if (pendingMediaKey == null) focusDestination = destination
         }
         TvDetailScreen(
             detail = state.selectedDetail,
@@ -387,34 +393,42 @@ private fun TvSignedIn(
             when (destination) {
                 TvDestination.HOME -> TvHome(
                     state = state,
-                    onMedia = viewModel::loadDetail,
+                    onMedia = openMedia,
                     initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
                     onAddSource = {
                         destination = TvDestination.SETTINGS
                         focusDestination = TvDestination.SETTINGS
                     },
+                    restoreMediaKey = pendingMediaKey,
+                    onFocusRestored = { pendingMediaKey = null },
                 )
 
                 TvDestination.DISCOVER -> TvMediaGrid(
                     title = stringResource(R.string.discover),
                     media = state.allMedia,
-                    onMedia = viewModel::loadDetail,
+                    onMedia = openMedia,
                     initialFocusRequester = contentFocus.getValue(TvDestination.DISCOVER),
+                    restoreMediaKey = pendingMediaKey,
+                    onFocusRestored = { pendingMediaKey = null },
                 )
 
                 TvDestination.SEARCH -> TvSearch(
                     initialSearch = initialSearch.orEmpty(),
                     state = state,
                     onSearch = viewModel::searchContent,
-                    onMedia = viewModel::loadDetail,
+                    onMedia = openMedia,
                     initialFocusRequester = contentFocus.getValue(TvDestination.SEARCH),
+                    restoreMediaKey = pendingMediaKey,
+                    onFocusRestored = { pendingMediaKey = null },
                 )
 
                 TvDestination.LIBRARY -> TvMediaGrid(
                     title = stringResource(R.string.library),
                     media = state.library.map { it.preview },
-                    onMedia = viewModel::loadDetail,
+                    onMedia = openMedia,
                     initialFocusRequester = contentFocus.getValue(TvDestination.LIBRARY),
+                    restoreMediaKey = pendingMediaKey,
+                    onFocusRestored = { pendingMediaKey = null },
                 )
 
                 TvDestination.SETTINGS -> TvSettings(
@@ -443,6 +457,8 @@ private fun TvHome(
     onMedia: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
     initialFocusRequester: FocusRequester,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
 ) {
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
     var featured by remember(state.allMedia) { mutableStateOf(state.allMedia.firstOrNull()) }
@@ -476,6 +492,7 @@ private fun TvHome(
                     onMedia = onMedia,
                     modifier = Modifier
                         .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
+                        .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
                         .focusRequester(initialFocusRequester),
                 )
             }
@@ -486,6 +503,8 @@ private fun TvHome(
                     items = continueWatching,
                     onMedia = onMedia,
                     onFocused = { focusedCandidate = it },
+                    restoreMediaKey = restoreMediaKey,
+                    onFocusRestored = onFocusRestored,
                 )
             }
         }
@@ -519,6 +538,8 @@ private fun TvHome(
                 section = section,
                 onMedia = onMedia,
                 onFocused = { focusedCandidate = it },
+                restoreMediaKey = restoreMediaKey,
+                onFocusRestored = onFocusRestored,
             )
         }
     }
@@ -529,6 +550,8 @@ private fun TvContinueWatchingRow(
     items: List<Pair<MediaPreview, Float>>,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
         Text(
@@ -552,6 +575,7 @@ private fun TvContinueWatchingRow(
                     media = media,
                     onClick = { onMedia(media) },
                     onFocused = { onFocused(media) },
+                    modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
                     showLabel = true,
                     revealLabelOnFocus = true,
                     watchProgress = progress,
@@ -688,6 +712,8 @@ private fun TvCatalogRow(
     section: CatalogSection,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
         Text(
@@ -718,6 +744,7 @@ private fun TvCatalogRow(
                     media = media,
                     onClick = { onMedia(media) },
                     onFocused = { onFocused(media) },
+                    modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
                     showLabel = true,
                     revealLabelOnFocus = true,
                 )
@@ -732,6 +759,8 @@ private fun TvMediaGrid(
     media: List<MediaPreview>,
     onMedia: (MediaPreview) -> Unit,
     initialFocusRequester: FocusRequester,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         Text(
@@ -773,11 +802,8 @@ private fun TvMediaGrid(
                     TvMediaCard(
                         media = item,
                         onClick = { onMedia(item) },
-                        modifier = if (index == 0) {
-                            Modifier.focusRequester(initialFocusRequester)
-                        } else {
-                            Modifier
-                        },
+                        modifier = (if (index == 0) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                            .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
                         showLabel = true,
                         compactLandscape = true,
                     )
@@ -794,6 +820,8 @@ private fun TvSearch(
     onSearch: (String) -> Unit,
     onMedia: (MediaPreview) -> Unit,
     initialFocusRequester: FocusRequester,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf(initialSearch) }
     var focused by remember { mutableStateOf(false) }
@@ -859,6 +887,7 @@ private fun TvSearch(
                     TvMediaCard(
                         media = media,
                         onClick = { onMedia(media) },
+                        modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
                         showLabel = true,
                         revealLabelOnFocus = true,
                     )
