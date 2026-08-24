@@ -12,6 +12,7 @@ import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderResource
 import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.core.model.StreamFile
 import com.lamphaus.core.model.SubtitleTrack
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -97,7 +98,10 @@ class HttpProviderClient(
             ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
         val payload = fetch(url.toString())
         val items = payload.element.jsonObject.array("metas") ?: JsonArray(emptyList())
-        ProviderResult.Success(items.mapNotNull { (it as? JsonObject)?.toPreview(providerId, query.type) }, payload.stale)
+        ProviderResult.Success(
+            items.mapNotNull { (it as? JsonObject)?.toPreview(providerId, query.type, query.posterShape) },
+            payload.stale,
+        )
     }
 
     override suspend fun meta(
@@ -125,12 +129,6 @@ class HttpProviderClient(
         val streams = payload.element.jsonObject.array("streams") ?: JsonArray(emptyList())
         ProviderResult.Success(streams.mapNotNull { (it as? JsonObject)?.toStream(providerId) }, payload.stale)
     }
-
-    override suspend fun subtitles(
-        manifestUrl: String,
-        type: String,
-        id: String,
-    ): ProviderResult<List<SubtitleTrack>> = subtitles(manifestUrl, type, id, emptyMap())
 
     override suspend fun subtitles(
         manifestUrl: String,
@@ -285,7 +283,11 @@ class HttpProviderClient(
         )
     }
 
-    private fun JsonObject.toPreview(providerId: String, fallbackType: String): MediaPreview? {
+    private fun JsonObject.toPreview(
+        providerId: String,
+        fallbackType: String,
+        catalogPosterShape: String? = null,
+    ): MediaPreview? {
         val itemId = string("id") ?: return null
         val rawType = string("type") ?: fallbackType
         return MediaPreview(
@@ -302,6 +304,7 @@ class HttpProviderClient(
             contentRating = string("contentRating"),
             rating = double("imdbRating") ?: double("rating"),
             providerIds = setOf(providerId),
+            posterShape = string("posterShape") ?: catalogPosterShape,
         )
     }
 
@@ -317,16 +320,22 @@ class HttpProviderClient(
                     episode = video.int("episode"),
                     overview = video.string("overview"),
                     thumbnailUrl = video.string("thumbnail"),
-                    releasedAtEpochMillis = video.long("released"),
+                    releasedAtEpochMillis = video.long("released") ?: video.string("released")?.toEpochMillisOrNull(),
+                    streams = video.array("streams").orEmpty().mapNotNull { stream ->
+                        (stream as? JsonObject)?.toStream(providerId)
+                    },
                 )
             }
         }
         return MediaDetail(
             preview = preview,
-            runtimeMinutes = string("runtime")?.filter(Char::isDigit)?.toIntOrNull(),
+            runtimeMinutes = string("runtime")?.toRuntimeMinutes(),
             cast = strings("cast"),
             directors = strings("director").ifEmpty { strings("directors") },
             episodes = videos,
+            embeddedStreams = array("streams").orEmpty().mapNotNull { stream ->
+                (stream as? JsonObject)?.toStream(providerId)
+            },
         )
     }
 
@@ -342,7 +351,16 @@ class HttpProviderClient(
                 else -> null
             }
         }
-        if (url == null && externalUrl == null && infoHash == null && ytId == null && sourceUrls.isEmpty()) return null
+        val nzbUrl = string("nzbUrl")
+        val rarFiles = streamFiles("rarUrls")
+        val zipFiles = streamFiles("zipUrls")
+        val sevenZipFiles = streamFiles("7zipUrls")
+        val tgzFiles = streamFiles("tgzUrls")
+        val tarFiles = streamFiles("tarUrls")
+        if (
+            url == null && externalUrl == null && infoHash == null && ytId == null && nzbUrl == null &&
+            rarFiles.isEmpty() && zipFiles.isEmpty() && sevenZipFiles.isEmpty() && tgzFiles.isEmpty() && tarFiles.isEmpty()
+        ) return null
         val hints = obj("behaviorHints")
         val proxyHeaders = hints?.obj("proxyHeaders")
         val headers = proxyHeaders?.obj("request")?.entries?.mapNotNull { (key, value) ->
@@ -353,12 +371,21 @@ class HttpProviderClient(
             providerId = providerId,
             name = string("name") ?: "Source",
             title = string("title"),
+            description = string("description"),
             url = url,
             externalUrl = externalUrl,
             infoHash = infoHash,
             fileIndex = int("fileIdx") ?: int("fileIndex"),
             ytId = ytId,
             sourceUrls = sourceUrls,
+            nzbUrl = nzbUrl,
+            servers = strings("servers"),
+            rarFiles = rarFiles,
+            zipFiles = zipFiles,
+            sevenZipFiles = sevenZipFiles,
+            tgzFiles = tgzFiles,
+            tarFiles = tarFiles,
+            fileMustInclude = string("fileMustInclude"),
             filename = string("filename") ?: hints?.string("filename"),
             videoHash = hints?.string("videoHash"),
             videoSize = hints?.long("videoSize"),
@@ -367,6 +394,8 @@ class HttpProviderClient(
             quality = string("quality") ?: string("name")?.qualityHint(),
             headers = headers,
             subtitles = subtitles,
+            notWebReady = hints?.boolean("notWebReady") == true,
+            countryWhitelist = hints?.strings("countryWhitelist").orEmpty(),
         )
     }
 
@@ -401,12 +430,29 @@ class HttpProviderClient(
         (it as? JsonPrimitive)?.contentOrNull
     }
     private fun JsonObject.optionalStrings(key: String): Set<String>? = if (containsKey(key)) strings(key).toSet() else null
+    private fun JsonObject.streamFiles(key: String): List<StreamFile> = array(key).orEmpty().mapNotNull { item ->
+        when (item) {
+            is JsonPrimitive -> item.contentOrNull?.let(::StreamFile)
+            is JsonObject -> item.string("url")?.let { StreamFile(it, item.long("bytes")) }
+            else -> null
+        }
+    }
     private fun String.toMediaType(): MediaType = when (lowercase()) {
         "movie" -> MediaType.MOVIE
         "series" -> MediaType.SERIES
         else -> MediaType.UNKNOWN
     }
     private fun String.qualityHint(): String? = QUALITY.find(this)?.value?.uppercase()
+    private fun String.toEpochMillisOrNull(): Long? = runCatching { java.time.Instant.parse(this).toEpochMilli() }.getOrNull()
+    private fun String.toRuntimeMinutes(): Int? {
+        val hours = Regex("(\\d+)\\s*h", RegexOption.IGNORE_CASE).find(this)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        val minutes = Regex("(\\d+)\\s*m", RegexOption.IGNORE_CASE).find(this)?.groupValues?.get(1)?.toIntOrNull()
+        return when {
+            hours > 0 -> hours * 60 + (minutes ?: 0)
+            minutes != null -> minutes
+            else -> filter(Char::isDigit).toIntOrNull()
+        }
+    }
     private fun String.encode(): String = URLEncoder.encode(this, StandardCharsets.UTF_8).replace("+", "%20")
 
     private class ProviderProtocolException(message: String) : IllegalArgumentException(message)

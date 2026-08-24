@@ -282,7 +282,8 @@ internal fun TvMediaCard(
         label = "card focus",
     )
     val hasLocalPoster = media.id == "fixture:aurora" || media.id == "fixture:glass"
-    val portrait = hasLocalPoster || !media.posterUrl.isNullOrBlank() || media.backgroundUrl.isNullOrBlank()
+    val declaredLandscape = media.posterShape.equals("landscape", ignoreCase = true)
+    val portrait = !declaredLandscape && (hasLocalPoster || !media.posterUrl.isNullOrBlank() || media.backgroundUrl.isNullOrBlank())
     val cardWidth = if (portrait || compactLandscape) {
         TvLayoutTokens.posterWidth
     } else {

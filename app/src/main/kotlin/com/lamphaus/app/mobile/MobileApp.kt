@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -100,6 +101,7 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.DiagnosticsConsent
@@ -148,6 +150,12 @@ fun MobileApp(
             state.externalPlaybackUrl?.let {
                 onExternalPlay(it)
                 viewModel.playbackLaunchHandled()
+            }
+        }
+        LaunchedEffect(state.configurationUrl) {
+            state.configurationUrl?.let {
+                onExternalPlay(it)
+                viewModel.configurationLaunchHandled()
             }
         }
         Surface(
@@ -421,13 +429,15 @@ private fun CatalogRow(section: CatalogSection, onMedia: (MediaPreview) -> Unit)
 
 @Composable
 private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, modifier: Modifier = Modifier) {
+    val landscape = media.posterShape.equals("landscape", ignoreCase = true) ||
+        (media.posterUrl.isNullOrBlank() && !media.backgroundUrl.isNullOrBlank())
     Card(
         onClick = { onMedia(media) },
-        modifier = modifier.width(138.dp),
+        modifier = modifier.width(if (landscape) 220.dp else 138.dp),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        MediaArtwork(media, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
+        MediaArtwork(media, Modifier.fillMaxWidth().aspectRatio(if (landscape) 16f / 9f else 2f / 3f))
         Column(Modifier.padding(10.dp)) {
             Text(media.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val metadata = listOfNotNull(media.releaseYear?.toString(), media.rating?.let { "★ $it" }).joinToString(" · ")
@@ -672,11 +682,20 @@ private fun MobileSourcePickerScreen(
                         )
                     }
                 }
+                picker.failures.values.forEach { error ->
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
                 if (picker.visibleSources.isEmpty()) {
                     Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(picker.visibleSources, key = { source -> "${source.providerId}:${source.sourceLabel}:${source.url}:${source.infoHash}" }) { source ->
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        itemsIndexed(
+                            picker.visibleSources,
+                            key = { index, source -> sourceItemKey(source, index) },
+                        ) { _, source ->
                             Card(onClick = { onSource(source) }, modifier = Modifier.fillMaxWidth()) {
                                 ListItem(
                                     headlineContent = { Text(source.sourceLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -686,7 +705,9 @@ private fun MobileSourcePickerScreen(
                                                 picker.providerLabels[source.providerId],
                                                 source.quality,
                                                 source.mimeType,
-                                                source.infoHash?.let { stringResource(R.string.external_source) },
+                                                if (source.infoHash != null || source.ytId != null || source.externalUrl != null ||
+                                                    source.nzbUrl != null || source.archiveFiles.isNotEmpty()
+                                                ) stringResource(R.string.external_source) else null,
                                             ).joinToString(" · "),
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
@@ -697,9 +718,6 @@ private fun MobileSourcePickerScreen(
                             }
                         }
                     }
-                }
-                picker.failures.values.forEach { error ->
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

@@ -16,6 +16,7 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.ui.AppViewModel
+import com.lamphaus.app.ui.isSafeExternalUri
 import com.lamphaus.app.player.PlayerActivity
 import android.content.Intent
 import androidx.core.content.edit
@@ -95,9 +96,11 @@ class MobileActivity : ComponentActivity() {
     private fun handleIncomingIntent(incoming: Intent?) {
         val data = incoming?.data ?: return
         val scheme = data.scheme?.lowercase()
-        if (scheme == "lamphaus" || scheme == "addon") {
+        if (scheme != "http" && scheme != "https") {
             if (data.host.equals("pair", ignoreCase = true)) {
-                viewModel.reportMessage("Open the television pairing screen to finish setup.")
+                val code = data.getQueryParameter("code") ?: data.pathSegments.firstOrNull()
+                if (code.isNullOrBlank()) viewModel.reportMessage("That pairing link is incomplete.")
+                else viewModel.claimPairingSession(code)
             } else {
                 viewModel.addProvider(data.toString())
             }
@@ -108,7 +111,7 @@ class MobileActivity : ComponentActivity() {
 
     private fun openExternalPlayback(url: String) {
         val uri = runCatching { url.toUri() }.getOrNull()
-        if (uri?.scheme?.lowercase() !in setOf("https", "magnet")) {
+        if (uri == null || !isSafeExternalUri(url)) {
             viewModel.reportMessage("Lamphaus refused an unsafe external source.")
             return
         }

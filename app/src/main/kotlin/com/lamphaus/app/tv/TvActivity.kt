@@ -12,6 +12,7 @@ import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.player.PlayerActivity
 import com.lamphaus.app.ui.AppViewModel
+import com.lamphaus.app.ui.isSafeExternalUri
 
 class TvActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels {
@@ -20,7 +21,6 @@ class TvActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleIncomingIntent(intent)
         setContent {
             TvApp(
                 viewModel = viewModel,
@@ -34,7 +34,6 @@ class TvActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIncomingIntent(intent)
     }
 
     override fun onStart() {
@@ -49,7 +48,7 @@ class TvActivity : ComponentActivity() {
 
     private fun openExternalPlayback(url: String) {
         val uri = runCatching { url.toUri() }.getOrNull()
-        if (uri?.scheme?.lowercase() !in setOf("https", "magnet")) {
+        if (uri == null || !isSafeExternalUri(url)) {
             viewModel.reportMessage("Lamphaus refused an unsafe external source.")
             return
         }
@@ -61,10 +60,4 @@ class TvActivity : ComponentActivity() {
         startActivity(Intent.createChooser(intent, "Open source"))
     }
 
-    private fun handleIncomingIntent(incoming: Intent?) {
-        val data = incoming?.data ?: return
-        if (data.scheme.equals("lamphaus", ignoreCase = true) || data.scheme.equals("addon", ignoreCase = true)) {
-            viewModel.addProvider(data.toString())
-        }
-    }
 }

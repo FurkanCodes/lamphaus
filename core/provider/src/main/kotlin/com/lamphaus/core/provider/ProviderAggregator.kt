@@ -74,12 +74,15 @@ class ProviderAggregator(
     }
 
     fun supports(manifest: ProviderManifest, resource: String, type: String, id: String? = null): Boolean {
-        val descriptor = manifest.resources.firstOrNull { it.name.equals(resource, ignoreCase = true) } ?: return false
-        val supportedTypes = descriptor.types ?: manifest.types
-        val supportedPrefixes = descriptor.idPrefixes ?: manifest.idPrefixes
-        val supportsType = supportedTypes.isEmpty() || supportedTypes.any { it.equals(type, ignoreCase = true) }
-        val supportsId = id == null || supportedPrefixes.isEmpty() || supportedPrefixes.any { id.startsWith(it) }
-        return supportsType && supportsId
+        return manifest.resources
+            .filter { it.name.equals(resource, ignoreCase = true) }
+            .any { descriptor ->
+                val supportedTypes = descriptor.types ?: manifest.types
+                val supportedPrefixes = descriptor.idPrefixes ?: manifest.idPrefixes
+                val supportsType = supportedTypes.isEmpty() || supportedTypes.any { it.equals(type, ignoreCase = true) }
+                val supportsId = id == null || supportedPrefixes.isEmpty() || supportedPrefixes.any { id.startsWith(it) }
+                supportsType && supportsId
+            }
     }
 
     private fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
@@ -90,6 +93,8 @@ class ProviderAggregator(
         releaseYear = releaseYear ?: other.releaseYear,
         genres = (genres + other.genres).distinct(),
         contentRating = contentRating ?: other.contentRating,
+        rating = rating ?: other.rating,
+        posterShape = posterShape ?: other.posterShape,
         providerIds = providerIds + other.providerIds,
     )
 }

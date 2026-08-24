@@ -37,12 +37,6 @@ interface ProviderClient {
         manifestUrl: String,
         type: String,
         id: String,
-    ): ProviderResult<List<SubtitleTrack>> = subtitles(manifestUrl, type, id, emptyMap())
-
-    suspend fun subtitles(
-        manifestUrl: String,
-        type: String,
-        id: String,
-        extras: Map<String, String>,
-    ): ProviderResult<List<SubtitleTrack>> = subtitles(manifestUrl, type, id)
+        extras: Map<String, String> = emptyMap(),
+    ): ProviderResult<List<SubtitleTrack>>
 }

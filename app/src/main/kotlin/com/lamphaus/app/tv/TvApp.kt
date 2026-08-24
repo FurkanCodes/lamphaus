@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -99,6 +100,7 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
@@ -321,7 +323,6 @@ private fun TvSignedIn(
         BackHandler { viewModel.closeSourcePicker() }
         TvSourcePickerScreen(
             picker = state.sourcePicker,
-            onBack = viewModel::closeSourcePicker,
             onProvider = viewModel::selectSourceProvider,
             onSource = viewModel::playSource,
         )
@@ -852,14 +853,11 @@ private fun TvSearch(
 @Composable
 private fun TvSourcePickerScreen(
     picker: com.lamphaus.app.ui.SourcePickerState,
-    onBack: () -> Unit,
     onProvider: (String?) -> Unit,
     onSource: (StreamCandidate) -> Unit,
 ) {
-    val firstSourceFocus = remember { FocusRequester() }
-    LaunchedEffect(picker.loading, picker.visibleSources.size, picker.selectedProviderId) {
-        if (!picker.loading && picker.visibleSources.isNotEmpty()) firstSourceFocus.requestFocus()
-    }
+    val filtersFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { filtersFocus.requestFocus() }
     Box(Modifier.fillMaxSize().padding(TvLayoutTokens.screenHorizontalPadding)) {
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
             Column(
@@ -899,19 +897,22 @@ private fun TvSourcePickerScreen(
             }
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(stringResource(R.string.choose_source), style = MaterialTheme.typography.headlineSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TvFocusableSurface(
-                        onClick = { onProvider(null) },
-                        containerColor = if (picker.selectedProviderId == null) TvFocusTokens.selectedNavigationContainer else TvFocusTokens.defaultContainer,
-                    ) { focused ->
-                        Text(
-                            stringResource(R.string.all_sources),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
-                            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
-                            style = MaterialTheme.typography.labelLarge,
-                        )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item("all") {
+                        TvFocusableSurface(
+                            onClick = { onProvider(null) },
+                            modifier = Modifier.focusRequester(filtersFocus),
+                            containerColor = if (picker.selectedProviderId == null) TvFocusTokens.selectedNavigationContainer else TvFocusTokens.defaultContainer,
+                        ) { focused ->
+                            Text(
+                                stringResource(R.string.all_sources),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
                     }
-                    picker.providerIds.forEach { providerId ->
+                    items(picker.providerIds, key = { it }) { providerId ->
                         TvFocusableSurface(
                             onClick = { onProvider(providerId) },
                             containerColor = if (picker.selectedProviderId == providerId) TvFocusTokens.selectedNavigationContainer else TvFocusTokens.defaultContainer,
@@ -926,20 +927,28 @@ private fun TvSourcePickerScreen(
                         }
                     }
                 }
+                picker.failures.values.forEach { error ->
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                }
                 if (picker.loading) {
                     Text(stringResource(R.string.loading_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else if (picker.visibleSources.isEmpty()) {
                     TvEmptyMark()
                     Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(picker.visibleSources, key = { source: StreamCandidate -> "${source.providerId}:${source.sourceLabel}:${source.url}:${source.infoHash}" }) { source ->
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        itemsIndexed(
+                            picker.visibleSources,
+                            key = { index, source -> sourceItemKey(source, index) },
+                        ) { _, source ->
                             TvFocusableSurface(
                                 onClick = { onSource(source) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(82.dp)
-                                    .then(if (source == picker.visibleSources.firstOrNull()) Modifier.focusRequester(firstSourceFocus) else Modifier),
+                                    .height(82.dp),
                             ) { focused ->
                                 Row(
                                     Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
@@ -959,7 +968,9 @@ private fun TvSourcePickerScreen(
                                                 picker.providerLabels[source.providerId],
                                                 source.quality,
                                                 source.mimeType,
-                                                if (source.infoHash != null || source.ytId != null || source.externalUrl != null) stringResource(R.string.external_source) else null,
+                                                if (source.infoHash != null || source.ytId != null || source.externalUrl != null ||
+                                                    source.nzbUrl != null || source.archiveFiles.isNotEmpty()
+                                                ) stringResource(R.string.external_source) else null,
                                             ).joinToString(" · "),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -971,9 +982,6 @@ private fun TvSourcePickerScreen(
                             }
                         }
                     }
-                }
-                picker.failures.values.forEach { error ->
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

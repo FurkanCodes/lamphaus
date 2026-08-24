@@ -132,6 +132,42 @@ class HttpProviderClientTest {
     }
 
     @Test
+    fun `stream parser keeps archive and Usenet sources`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"streams":[
+                    {"name":"Archive","rarUrls":[{"url":"https://files.example/movie.rar","bytes":1000}],"fileMustInclude":"/.mkv$/i"},
+                    {"name":"Usenet","nzbUrl":"nzb://example/item","servers":["news.example"]}
+                ]}""",
+            ),
+        )
+
+        val streams = (client.streams(server.url("/manifest.json").toString(), "fixture", "movie", "m1") as ProviderResult.Success).value
+
+        assertEquals(2, streams.size)
+        assertEquals("https://files.example/movie.rar", streams[0].rarFiles.single().url)
+        assertEquals("/.mkv$/i", streams[0].fileMustInclude)
+        assertEquals("nzb://example/item", streams[1].nzbUrl)
+        assertEquals(listOf("news.example"), streams[1].servers)
+    }
+
+    @Test
+    fun `metadata parser keeps embedded streams episode dates and runtimes`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"meta":{"id":"show","type":"series","name":"Show","runtime":"1h 32min","streams":[{"name":"Movie","url":"https://cdn.example/movie.mp4"}],"videos":[{"id":"show:1:1","title":"Pilot","released":"2026-08-24T10:00:00.000Z","streams":[{"name":"Episode","url":"https://cdn.example/episode.mp4"}]}]}}""",
+            ),
+        )
+
+        val detail = (client.meta(server.url("/manifest.json").toString(), "fixture", "series", "show") as ProviderResult.Success).value
+
+        assertEquals(92, detail.runtimeMinutes)
+        assertEquals("https://cdn.example/movie.mp4", detail.embeddedStreams.single().url)
+        assertEquals("https://cdn.example/episode.mp4", detail.episodes.single().streams.single().url)
+        assertTrue(detail.episodes.single().releasedAtEpochMillis != null)
+    }
+
+    @Test
     fun `cached catalog is returned stale after a temporary network failure`() = runTest {
         server.enqueue(jsonResponse("""{"metas":[{"id":"m1","type":"movie","name":"Cached"}]}"""))
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
@@ -221,7 +257,12 @@ class HttpProviderClientTest {
             error("Not used")
         override suspend fun streams(manifestUrl: String, providerId: String, type: String, id: String): ProviderResult<List<StreamCandidate>> =
             error("Not used")
-        override suspend fun subtitles(manifestUrl: String, type: String, id: String): ProviderResult<List<SubtitleTrack>> =
+        override suspend fun subtitles(
+            manifestUrl: String,
+            type: String,
+            id: String,
+            extras: Map<String, String>,
+        ): ProviderResult<List<SubtitleTrack>> =
             error("Not used")
     }
 

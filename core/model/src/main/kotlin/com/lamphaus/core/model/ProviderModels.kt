@@ -66,6 +66,7 @@ data class CatalogQuery(
     val skip: Int = 0,
     /** Provider-defined catalog filters, encoded as the protocol's extra path segment. */
     val extras: Map<String, String> = emptyMap(),
+    val posterShape: String? = null,
 )
 
 @Serializable
@@ -83,6 +84,7 @@ data class MediaPreview(
     val contentRating: String? = null,
     val rating: Double? = null,
     val providerIds: Set<String> = emptySet(),
+    val posterShape: String? = null,
 ) {
     val stableKey: String get() = "${rawType.lowercase()}:$id"
 }
@@ -96,6 +98,7 @@ data class Episode(
     val overview: String? = null,
     val thumbnailUrl: String? = null,
     val releasedAtEpochMillis: Long? = null,
+    val streams: List<StreamCandidate> = emptyList(),
 )
 
 @Serializable
@@ -105,6 +108,13 @@ data class MediaDetail(
     val cast: List<String> = emptyList(),
     val directors: List<String> = emptyList(),
     val episodes: List<Episode> = emptyList(),
+    val embeddedStreams: List<StreamCandidate> = emptyList(),
+)
+
+@Serializable
+data class StreamFile(
+    val url: String,
+    val bytes: Long? = null,
 )
 
 @Serializable
@@ -112,12 +122,21 @@ data class StreamCandidate(
     val providerId: String,
     val name: String,
     val title: String? = null,
+    val description: String? = null,
     val url: String? = null,
     val externalUrl: String? = null,
     val infoHash: String? = null,
     val fileIndex: Int? = null,
     val ytId: String? = null,
     val sourceUrls: List<String> = emptyList(),
+    val nzbUrl: String? = null,
+    val servers: List<String> = emptyList(),
+    val rarFiles: List<StreamFile> = emptyList(),
+    val zipFiles: List<StreamFile> = emptyList(),
+    val sevenZipFiles: List<StreamFile> = emptyList(),
+    val tgzFiles: List<StreamFile> = emptyList(),
+    val tarFiles: List<StreamFile> = emptyList(),
+    val fileMustInclude: String? = null,
     val filename: String? = null,
     val videoHash: String? = null,
     val videoSize: Long? = null,
@@ -126,10 +145,16 @@ data class StreamCandidate(
     val quality: String? = null,
     val headers: Map<String, String> = emptyMap(),
     val subtitles: List<SubtitleTrack> = emptyList(),
+    val notWebReady: Boolean = false,
+    val countryWhitelist: List<String> = emptyList(),
 ) {
     val isPlayableInternally: Boolean get() = url?.startsWith("https://", ignoreCase = true) == true
     val sourceLabel: String get() = title?.lineSequence()?.firstOrNull()?.trim().orEmpty()
+        .ifBlank { description?.lineSequence()?.firstOrNull()?.trim().orEmpty() }
         .ifBlank { name.ifBlank { "Source" } }
+
+    val archiveFiles: List<StreamFile>
+        get() = rarFiles + zipFiles + sevenZipFiles + tgzFiles + tarFiles
 }
 
 @Serializable

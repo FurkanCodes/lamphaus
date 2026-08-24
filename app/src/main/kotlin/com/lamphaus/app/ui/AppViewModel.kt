@@ -58,6 +58,8 @@ class AppViewModel(
     private var cloudSyncJob: Job? = null
     private var defaultCatalogJob: Job? = null
     private var searchJob: Job? = null
+    private var detailJob: Job? = null
+    private var sourceJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -149,30 +151,41 @@ class AppViewModel(
             showMessage("Paste an HTTPS add-on address first.")
             return@launch
         }
+        val explicitInstallLink = (runCatching { URI(address).scheme }
+            .getOrNull()
+            ?.let { !it.equals("http", ignoreCase = true) && !it.equals("https", ignoreCase = true) }) == true
         mutableState.update { it.copy(refreshing = true, message = null) }
         val directResult = container.providerClient.manifest(address)
         when (directResult) {
             is ProviderResult.Success -> {
-                saveProvider(address, directResult.value, state.value.providers.size)
-                val suffix = if (directResult.value.behaviorHints.configurationRequired) {
-                    " Finish its setup in the provider's browser page."
-                } else ""
-                showMessage("${directResult.value.name} installed.$suffix Loading catalogs…")
+                if (directResult.value.behaviorHints.configurationRequired && !explicitInstallLink) {
+                    requestProviderConfiguration(address, directResult.value.name)
+                } else {
+                    saveProvider(address, directResult.value, state.value.providers.size)
+                    showMessage("${directResult.value.name} installed. Loading catalogs…")
+                }
             }
             is ProviderResult.Failure -> {
                 when (val discovery = container.providerClient.discoverProviderUrls(address)) {
                     is ProviderResult.Success -> {
                         var installed = 0
+                        var configuration: Pair<String, String>? = null
                         discovery.value.distinct().take(MAX_DISCOVERED_PROVIDERS).forEach { manifestUrl ->
                             when (val manifest = container.providerClient.manifest(manifestUrl)) {
                                 is ProviderResult.Success -> {
-                                    saveProvider(manifestUrl, manifest.value, state.value.providers.size + installed)
-                                    installed += 1
+                                    if (manifest.value.behaviorHints.configurationRequired) {
+                                        if (configuration == null) configuration = manifestUrl to manifest.value.name
+                                    } else {
+                                        saveProvider(manifestUrl, manifest.value, state.value.providers.size + installed)
+                                        installed += 1
+                                    }
                                 }
                                 is ProviderResult.Failure -> Unit
                             }
                         }
-                        if (installed > 0) {
+                        if (configuration != null) {
+                            requestProviderConfiguration(configuration.first, configuration.second)
+                        } else if (installed > 0) {
                             showMessage("Installed $installed add-on${if (installed == 1) "" else "s"}. Loading catalogs…")
                         } else {
                             showMessage(directResult.safeMessage)
@@ -209,9 +222,6 @@ class AppViewModel(
                         val manifest = (container.providerClient.manifest(subscription.manifestUrl) as? ProviderResult.Success)?.value
                         manifest?.catalogs
                             ?.filter { "search" in it.extras && it.requiredExtras.all { extra -> extra == "search" } }
-                            ?.groupBy(ProviderCatalog::type)
-                            ?.values
-                            ?.mapNotNull { catalogs -> catalogs.firstOrNull { it.id == "top" } ?: catalogs.firstOrNull() }
                             .orEmpty()
                             .map { subscription to it }
                     }
@@ -223,7 +233,7 @@ class AppViewModel(
                         container.providerClient.catalog(
                             subscription.manifestUrl,
                             subscription.id,
-                            CatalogQuery(catalog.type, catalog.id, search = queryText),
+                            CatalogQuery(catalog.type, catalog.id, search = queryText, posterShape = catalog.posterShape),
                         )
                     }
                 }.awaitAll()
@@ -238,22 +248,35 @@ class AppViewModel(
     }
 
     fun toggleProvider(providerId: String, enabled: Boolean) = viewModelScope.launch {
-        if (state.value.providers.firstOrNull { it.id == providerId }?.sortOrder?.let { it < 0 } == true) {
+        val current = state.value.providers.firstOrNull { it.id == providerId } ?: return@launch
+        if (current.sortOrder < 0) {
             showMessage("The Lamphaus catalog is always available.")
             return@launch
         }
         container.libraryRepository.setProviderEnabled(providerId, enabled)
+        val updated = current.copy(enabled = enabled, updatedAtEpochMillis = System.currentTimeMillis())
+        (state.value.account as? AccountState.SignedIn)?.userId?.let { userId ->
+            container.cloudSyncGateway.saveProvider(userId, updated).onFailure {
+                showMessage("The add-on changed on this device, but could not sync.")
+            }
+        }
     }
 
     fun removeProvider(providerId: String) = viewModelScope.launch {
-        if (state.value.providers.firstOrNull { it.id == providerId }?.sortOrder?.let { it < 0 } == true) {
+        val current = state.value.providers.firstOrNull { it.id == providerId } ?: return@launch
+        if (current.sortOrder < 0) {
             showMessage("The Lamphaus catalog cannot be removed.")
             return@launch
         }
-        container.libraryRepository.removeProvider(providerId)
-        (state.value.account as? AccountState.SignedIn)?.userId?.let {
-            container.cloudSyncGateway.deleteProvider(it, providerId)
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId
+        if (userId != null) {
+            val deleted = container.cloudSyncGateway.deleteProvider(userId, providerId)
+            if (deleted.isFailure) {
+                showMessage("Could not remove the add-on. Check your connection and try again.")
+                return@launch
+            }
         }
+        container.libraryRepository.removeProvider(providerId)
         showMessage("Add-on removed.")
     }
 
@@ -271,142 +294,155 @@ class AppViewModel(
         state.value.activeProfileId?.let { container.libraryRepository.removeLibrary(it, mediaKey) }
     }
 
-    fun loadDetail(media: MediaPreview) = viewModelScope.launch {
-        mutableState.update { it.copy(selectedDetail = MediaDetail(media), refreshing = true) }
-        if (media.id.startsWith("fixture:")) {
-            mutableState.update {
-                it.copy(
-                    selectedDetail = MediaDetail(media, runtimeMinutes = 52, episodes = if (media.type.name == "SERIES") PreviewMedia.episodes else emptyList()),
-                    refreshing = false,
-                )
-            }
-            return@launch
-        }
-        val enabledProviders = state.value.providers
-            .filter(ProviderSubscription::enabled)
-            .sortedBy(ProviderSubscription::sortOrder)
-        val candidates = enabledProviders
-            .filter { media.providerIds.isEmpty() || it.id in media.providerIds }
-            .ifEmpty { enabledProviders }
-        if (candidates.isEmpty()) {
-            mutableState.update { it.copy(refreshing = false) }
-            return@launch
-        }
-        val details = supervisorScope {
-            candidates.map { provider ->
-                async {
-                    val manifest = container.providerClient.manifest(provider.manifestUrl)
-                    if (manifest !is ProviderResult.Success || !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)) {
-                        null
-                    } else {
-                        container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
-                    }
+    fun loadDetail(media: MediaPreview) {
+        detailJob?.cancel()
+        detailJob = viewModelScope.launch {
+            mutableState.update { it.copy(selectedDetail = MediaDetail(media), refreshing = true) }
+            if (media.id.startsWith("fixture:")) {
+                mutableState.update {
+                    it.copy(
+                        selectedDetail = MediaDetail(media, runtimeMinutes = 52, episodes = if (media.type.name == "SERIES") PreviewMedia.episodes else emptyList()),
+                        refreshing = false,
+                    )
                 }
-            }.awaitAll().filterIsInstance<ProviderResult.Success<MediaDetail>>().map(ProviderResult.Success<MediaDetail>::value)
-        }
-        if (details.isNotEmpty()) {
-            mutableState.update { it.copy(selectedDetail = details.fold(MediaDetail(media), MediaDetail::merge), refreshing = false) }
-        } else {
-            mutableState.update { it.copy(refreshing = false, message = "No metadata provider could load this title.") }
+                return@launch
+            }
+            val candidates = state.value.providers
+                .filter(ProviderSubscription::enabled)
+                .sortedBy(ProviderSubscription::sortOrder)
+            if (candidates.isEmpty()) {
+                mutableState.update { it.copy(refreshing = false) }
+                return@launch
+            }
+            val details = supervisorScope {
+                candidates.map { provider ->
+                    async {
+                        val manifest = container.providerClient.manifest(provider.manifestUrl)
+                        if (manifest !is ProviderResult.Success || !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)) {
+                            null
+                        } else {
+                            container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
+                        }
+                    }
+                }.awaitAll().filterIsInstance<ProviderResult.Success<MediaDetail>>().map(ProviderResult.Success<MediaDetail>::value)
+            }
+            if (details.isNotEmpty()) {
+                mutableState.update { current ->
+                    if (current.selectedDetail?.preview?.stableKey != media.stableKey) current
+                    else current.copy(selectedDetail = details.fold(MediaDetail(media), MediaDetail::merge), refreshing = false)
+                }
+            } else {
+                mutableState.update { current ->
+                    if (current.selectedDetail?.preview?.stableKey != media.stableKey) current
+                    else current.copy(refreshing = false, message = "No metadata provider could load this title.")
+                }
+            }
         }
     }
 
-    fun clearDetail() = mutableState.update { it.copy(selectedDetail = null) }
+    fun clearDetail() {
+        detailJob?.cancel()
+        mutableState.update { it.copy(selectedDetail = null, refreshing = false) }
+    }
 
     /** Loads every compatible stream provider. This intentionally does not select or launch a source. */
-    fun openSources(media: MediaPreview, episode: Episode? = null) = viewModelScope.launch {
-        if (media.id.startsWith("fixture:")) {
-            showMessage("Fixture artwork has no media source. Install a stream add-on to play content.")
-            return@launch
-        }
-        val enabledProviders = state.value.providers
-            .filter(ProviderSubscription::enabled)
-            .sortedBy(ProviderSubscription::sortOrder)
-        if (enabledProviders.isEmpty()) {
-            showMessage("Install a stream add-on to play this title.")
-            return@launch
-        }
-        val videoId = episode?.id ?: media.id
-        mutableState.update {
-            it.copy(
-                refreshing = true,
-                sourcePicker = SourcePickerState(media = media, episode = episode),
-            )
-        }
-        val resolvedProviders = supervisorScope {
-            enabledProviders.map { subscription ->
-                async {
-                    val manifest = container.providerClient.manifest(subscription.manifestUrl)
-                    subscription to (manifest as? ProviderResult.Success)?.value
+    fun openSources(media: MediaPreview, episode: Episode? = null) {
+        sourceJob?.cancel()
+        sourceJob = viewModelScope.launch {
+            if (media.id.startsWith("fixture:")) {
+                showMessage("Fixture artwork has no media source. Install a stream add-on to play content.")
+                return@launch
+            }
+            val videoId = episode?.id ?: media.id
+            mutableState.update {
+                it.copy(
+                    refreshing = true,
+                    sourcePicker = SourcePickerState(media = media, episode = episode),
+                )
+            }
+            val embedded = episode?.streams.orEmpty().ifEmpty {
+                if (episode == null) state.value.selectedDetail?.embeddedStreams.orEmpty() else emptyList()
+            }
+            if (embedded.isNotEmpty()) {
+                val providerNames = state.value.providers.associate { it.id to it.displayName }
+                mutableState.update {
+                    it.copy(
+                        refreshing = false,
+                        sourcePicker = SourcePickerState(
+                            media = media,
+                            episode = episode,
+                            sources = embedded,
+                            providerLabels = embedded.associate { source ->
+                                source.providerId to (providerNames[source.providerId] ?: source.providerId)
+                            },
+                            loading = false,
+                        ),
+                    )
                 }
-            }.awaitAll()
-        }
-        val manifestFailures = resolvedProviders
-            .filter { (_, manifest) -> manifest == null }
-            .associate { (provider, _) -> provider.id to "${provider.displayName} is unavailable." }
-        val streamProviders = resolvedProviders.filter { (_, manifest) ->
-            manifest?.let { container.providerAggregator.supports(it, "stream", media.rawType, videoId) } == true
-        }
-        if (streamProviders.isEmpty()) {
+                return@launch
+            }
+            val enabledProviders = state.value.providers
+                .filter(ProviderSubscription::enabled)
+                .sortedBy(ProviderSubscription::sortOrder)
+            if (enabledProviders.isEmpty()) {
+                mutableState.update { it.copy(refreshing = false, sourcePicker = null) }
+                showMessage("Install a stream add-on to play this title.")
+                return@launch
+            }
+            val resolvedProviders = supervisorScope {
+                enabledProviders.map { subscription ->
+                    async {
+                        val manifest = container.providerClient.manifest(subscription.manifestUrl)
+                        subscription to (manifest as? ProviderResult.Success)?.value
+                    }
+                }.awaitAll()
+            }
+            val manifestFailures = resolvedProviders
+                .filter { (_, manifest) -> manifest == null }
+                .associate { (provider, _) -> provider.id to "${provider.displayName} is unavailable." }
+            val streamProviders = resolvedProviders.filter { (_, manifest) ->
+                manifest?.let { container.providerAggregator.supports(it, "stream", media.rawType, videoId) } == true
+            }
+            if (streamProviders.isEmpty()) {
+                mutableState.update {
+                    it.copy(
+                        refreshing = false,
+                        sourcePicker = it.sourcePicker?.copy(loading = false, failures = manifestFailures),
+                    )
+                }
+                showMessage("No installed add-on supports sources for this title.")
+                return@launch
+            }
+            val streamResults = supervisorScope {
+                streamProviders.map { (subscription, _) ->
+                    async {
+                        subscription to container.providerClient.streams(
+                            subscription.manifestUrl,
+                            subscription.id,
+                            media.rawType,
+                            videoId,
+                        )
+                    }
+                }.awaitAll()
+            }
+            val streams = streamResults.flatMap { (_, result) -> (result as? ProviderResult.Success)?.value.orEmpty() }
+            val labels = streamProviders.associate { (provider, _) -> provider.id to provider.displayName }
+            val failures = manifestFailures + streamResults.mapNotNull { (provider, result) ->
+                (result as? ProviderResult.Failure)?.let { provider.id to it.safeMessage }
+            }.toMap()
             mutableState.update {
                 it.copy(
                     refreshing = false,
-                    sourcePicker = it.sourcePicker?.copy(loading = false, failures = manifestFailures),
+                    sourcePicker = SourcePickerState(
+                        media = media,
+                        episode = episode,
+                        sources = streams,
+                        providerLabels = labels,
+                        failures = failures,
+                        loading = false,
+                    ),
                 )
             }
-            showMessage("No installed add-on supports sources for this title.")
-            return@launch
-        }
-        val streamResults = supervisorScope {
-            streamProviders.map { (subscription, _) ->
-                async {
-                    subscription to container.providerClient.streams(
-                        subscription.manifestUrl,
-                        subscription.id,
-                        media.rawType,
-                        videoId,
-                    )
-                }
-            }.awaitAll()
-        }
-        val streams = streamResults.flatMap { (_, result) -> (result as? ProviderResult.Success)?.value.orEmpty() }
-        val subtitleProviders = resolvedProviders.filter { (_, manifest) ->
-            manifest?.let { container.providerAggregator.supports(it, "subtitles", media.rawType, videoId) } == true
-        }
-        val tracks = supervisorScope {
-            subtitleProviders.map { (subscription, _) ->
-                async {
-                    container.providerClient.subtitles(
-                        subscription.manifestUrl,
-                        media.rawType,
-                        videoId,
-                        extras = buildMap {
-                            episode?.let { put("videoId", it.id) }
-                        },
-                    )
-                }
-            }.awaitAll()
-        }.flatMap { (it as? ProviderResult.Success)?.value.orEmpty() }
-            .distinctBy { it.id }
-        val labels = streamProviders.associate { (provider, _) ->
-            provider.id to provider.displayName
-        }
-        val failures = manifestFailures + streamResults.mapNotNull { (provider, result) ->
-            (result as? ProviderResult.Failure)?.let { provider.id to it.safeMessage }
-        }.toMap()
-        mutableState.update {
-            it.copy(
-                refreshing = false,
-                sourcePicker = SourcePickerState(
-                    media = media,
-                    episode = episode,
-                    sources = streams,
-                    subtitles = tracks,
-                    providerLabels = labels,
-                    failures = failures,
-                    loading = false,
-                ),
-            )
         }
     }
 
@@ -415,52 +451,64 @@ class AppViewModel(
     }
 
     /** Resolves one explicit source. Direct HTTPS is internal; everything else is handed off explicitly. */
-    fun playSource(source: StreamCandidate) = viewModelScope.launch {
-        val picker = state.value.sourcePicker ?: return@launch
-        val direct = source.url?.takeIf { it.startsWith("https://", ignoreCase = true) || (BuildConfig.DEBUG && it.isDebugLocalStream()) }
-            ?: source.sourceUrls.firstOrNull { it.startsWith("https://", ignoreCase = true) || (BuildConfig.DEBUG && it.isDebugLocalStream()) }
-        when {
-            direct != null -> {
-                val videoId = picker.episode?.id ?: picker.media.id
-                val start = state.value.progress.firstOrNull { it.videoId == videoId }?.positionMillis ?: 0
-                mutableState.update {
-                    it.copy(
-                        playbackRequest = PlaybackRequest(
-                            mediaKey = picker.media.stableKey,
-                            videoId = videoId,
-                            title = picker.media.name,
-                            subtitle = picker.episode?.title,
-                            artworkUrl = picker.media.backgroundUrl ?: picker.media.posterUrl,
-                            source = PlaybackSource(
-                                uri = direct,
-                                mimeType = source.mimeType ?: direct.inferMimeType(),
-                                headers = source.headers,
-                                subtitles = (source.subtitles + picker.subtitles).distinctBy(SubtitleTrack::id),
+    fun playSource(source: StreamCandidate) {
+        val picker = state.value.sourcePicker ?: return
+        sourceJob?.cancel()
+        sourceJob = viewModelScope.launch {
+            when (val resolution = resolveSource(source, BuildConfig.DEBUG)) {
+                is SourceResolution.Internal -> {
+                    mutableState.update { it.copy(sourcePicker = it.sourcePicker?.copy(loading = true)) }
+                    val videoId = picker.episode?.id ?: picker.media.id
+                    val tracks = loadSubtitles(picker.media, videoId, source)
+                    val start = state.value.progress.firstOrNull { it.videoId == videoId }?.positionMillis ?: 0
+                    mutableState.update { current ->
+                        if (current.sourcePicker?.media?.stableKey != picker.media.stableKey) current
+                        else current.copy(
+                            playbackRequest = PlaybackRequest(
+                                mediaKey = picker.media.stableKey,
+                                videoId = videoId,
+                                title = picker.media.name,
+                                subtitle = picker.episode?.title,
+                                artworkUrl = picker.media.backgroundUrl ?: picker.media.posterUrl,
+                                source = PlaybackSource(
+                                    uri = resolution.url,
+                                    mimeType = source.mimeType ?: resolution.url.inferMimeType(),
+                                    headers = source.headers,
+                                    subtitles = (source.subtitles + tracks).distinctBy { "${it.language}|${it.url}|${it.id}" },
+                                ),
+                                startPositionMillis = start,
                             ),
-                            startPositionMillis = start,
-                        ),
-                        sourcePicker = null,
-                    )
+                            sourcePicker = null,
+                        )
+                    }
                 }
+                is SourceResolution.External -> mutableState.update { it.copy(externalPlaybackUrl = resolution.uri) }
+                is SourceResolution.Unsupported -> showMessage(resolution.message)
             }
-            source.externalUrl != null -> mutableState.update { it.copy(externalPlaybackUrl = source.externalUrl) }
-            source.ytId != null -> mutableState.update { it.copy(externalPlaybackUrl = "https://youtu.be/${source.ytId}") }
-            source.infoHash != null -> mutableState.update {
-                it.copy(externalPlaybackUrl = "magnet:?xt=urn:btih:${source.infoHash}")
-            }
-            source.url != null -> mutableState.update { it.copy(externalPlaybackUrl = source.url) }
-            else -> showMessage("This source needs an external player that is not installed.")
         }
     }
 
-    fun closeSourcePicker() = mutableState.update { it.copy(sourcePicker = null) }
+    fun closeSourcePicker() {
+        sourceJob?.cancel()
+        mutableState.update { it.copy(sourcePicker = null, refreshing = false) }
+    }
 
     fun playbackLaunchHandled() = mutableState.update { it.copy(playbackRequest = null, externalPlaybackUrl = null) }
+
+    fun configurationLaunchHandled() = mutableState.update { it.copy(configurationUrl = null) }
 
     fun createPairingSession() = viewModelScope.launch {
         container.pairingGateway.createPairingSession("Living room TV").onSuccess { session ->
             mutableState.update { it.copy(pairingSession = session) }
         }.onFailure { showMessage(it.message ?: "Pairing is temporarily unavailable.") }
+    }
+
+    fun claimPairingSession(code: String) = viewModelScope.launch {
+        container.pairingGateway.claimPairingSession(code.trim()).onSuccess {
+            showMessage("TV paired successfully.")
+        }.onFailure {
+            showMessage(it.message ?: "The pairing code is invalid or expired.")
+        }
     }
 
     fun setTheme(theme: ThemePreference) = viewModelScope.launch { container.preferences.setTheme(theme) }
@@ -476,6 +524,54 @@ class AppViewModel(
     }
 
     fun dismissMessage() = mutableState.update { it.copy(message = null) }
+
+    private suspend fun loadSubtitles(
+        media: MediaPreview,
+        videoId: String,
+        source: StreamCandidate,
+    ): List<SubtitleTrack> {
+        val extras = buildMap {
+            source.videoHash?.let { put("videoHash", it) }
+            source.videoSize?.let { put("videoSize", it.toString()) }
+            source.filename?.let { put("filename", it) }
+        }
+        return supervisorScope {
+            state.value.providers
+                .filter(ProviderSubscription::enabled)
+                .sortedBy(ProviderSubscription::sortOrder)
+                .map { subscription ->
+                    async {
+                        val manifest = container.providerClient.manifest(subscription.manifestUrl)
+                        if (manifest !is ProviderResult.Success ||
+                            !container.providerAggregator.supports(manifest.value, "subtitles", media.rawType, videoId)
+                        ) {
+                            emptyList()
+                        } else {
+                            (container.providerClient.subtitles(
+                                subscription.manifestUrl,
+                                media.rawType,
+                                videoId,
+                                extras,
+                            ) as? ProviderResult.Success)?.value.orEmpty()
+                        }
+                    }
+                }.awaitAll().flatten()
+        }.distinctBy { "${it.language}|${it.url}|${it.id}" }
+    }
+
+    private fun requestProviderConfiguration(address: String, providerName: String) {
+        val configurationUrl = address.providerConfigurationUrl()
+        if (configurationUrl == null) {
+            showMessage("$providerName needs browser setup, but its configuration page is invalid.")
+            return
+        }
+        mutableState.update {
+            it.copy(
+                configurationUrl = configurationUrl,
+                message = "Finish $providerName setup in the browser, then choose Install.",
+            )
+        }
+    }
 
     private fun refreshCatalogs() {
         refreshJob?.cancel()
@@ -546,7 +642,8 @@ class AppViewModel(
         displayName: String = manifest.name,
     ) {
         val canonicalAddress = address.canonicalProviderAddress()
-        val installationId = if (manifest.id == DEFAULT_CATALOG_PROVIDER_ID || canonicalAddress == DEFAULT_CATALOG_MANIFEST) {
+        val existingId = state.value.providers.firstOrNull { it.manifestUrl.canonicalProviderAddress() == canonicalAddress }?.id
+        val installationId = existingId ?: if (manifest.id == DEFAULT_CATALOG_PROVIDER_ID || canonicalAddress == DEFAULT_CATALOG_MANIFEST) {
             DEFAULT_CATALOG_PROVIDER_ID
         } else {
             stableInstallationId(manifest.id, canonicalAddress)
@@ -682,12 +779,25 @@ class AppViewModel(
 
 private fun String.canonicalProviderAddress(): String {
     val uri = runCatching { URI(trim()) }.getOrNull() ?: return trim()
-    val transport = if (uri.scheme.equals("lamphaus", ignoreCase = true) || uri.scheme.equals("addon", ignoreCase = true)) {
+    val transport = if (!uri.scheme.equals("http", ignoreCase = true) && !uri.scheme.equals("https", ignoreCase = true) && uri.host != null) {
         URI("https", null, uri.host, uri.port, uri.path, uri.query, null)
     } else uri
+    if (transport.host == null) return trim()
     val path = transport.path.orEmpty()
     val manifestPath = if (path.endsWith("/manifest.json")) path else path.trimEnd('/') + "/manifest.json"
     return URI(transport.scheme, null, transport.host, transport.port, manifestPath, transport.query, null).toString()
+}
+
+private fun String.providerConfigurationUrl(): String? {
+    val uri = runCatching { URI(canonicalProviderAddress()) }.getOrNull() ?: return null
+    if (!uri.scheme.equals("https", ignoreCase = true) || uri.host == null) return null
+    val manifestPath = uri.path.orEmpty()
+    val configurationPath = if (manifestPath.endsWith("/manifest.json")) {
+        manifestPath.removeSuffix("/manifest.json") + "/configure"
+    } else {
+        manifestPath.trimEnd('/') + "/configure"
+    }
+    return URI("https", null, uri.host, uri.port, configurationPath, null, null).toString()
 }
 
 private fun String.inferMimeType(): String? = when {
@@ -697,17 +807,13 @@ private fun String.inferMimeType(): String? = when {
     else -> null
 }
 
-private fun String?.isDebugLocalStream(): Boolean {
-    val uri = this?.let { runCatching { URI(it) }.getOrNull() } ?: return false
-    return uri.scheme.equals("http", ignoreCase = true) && uri.host in setOf("localhost", "127.0.0.1", "10.0.2.2")
-}
-
 private fun ProviderCatalog.defaultQuery(): CatalogQuery? = when {
-    requiredExtras.isEmpty() -> CatalogQuery(type, id)
+    requiredExtras.isEmpty() -> CatalogQuery(type, id, posterShape = posterShape)
     id == "year" && requiredExtras == setOf("genre") -> CatalogQuery(
         type = type,
         catalogId = id,
         genre = Calendar.getInstance().get(Calendar.YEAR).toString(),
+        posterShape = posterShape,
     )
     else -> null
 }
@@ -723,7 +829,21 @@ private fun MediaDetail.merge(other: MediaDetail): MediaDetail = MediaDetail(
     runtimeMinutes = runtimeMinutes ?: other.runtimeMinutes,
     cast = (cast + other.cast).distinct(),
     directors = (directors + other.directors).distinct(),
-    episodes = (episodes + other.episodes).distinctBy(Episode::id),
+    episodes = (episodes + other.episodes)
+        .groupBy(Episode::id)
+        .values
+        .map { versions -> versions.reduce(Episode::merge) },
+    embeddedStreams = (embeddedStreams + other.embeddedStreams).distinctBy(::sourceIdentity),
+)
+
+private fun Episode.merge(other: Episode): Episode = copy(
+    title = title.ifBlank { other.title },
+    season = season ?: other.season,
+    episode = episode ?: other.episode,
+    overview = overview ?: other.overview,
+    thumbnailUrl = thumbnailUrl ?: other.thumbnailUrl,
+    releasedAtEpochMillis = releasedAtEpochMillis ?: other.releasedAtEpochMillis,
+    streams = (streams + other.streams).distinctBy(::sourceIdentity),
 )
 
 private fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
@@ -736,6 +856,18 @@ private fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
     contentRating = contentRating ?: other.contentRating,
     rating = rating ?: other.rating,
     providerIds = providerIds + other.providerIds,
+    posterShape = posterShape ?: other.posterShape,
 )
+
+private fun sourceIdentity(source: StreamCandidate): String = listOfNotNull(
+    source.providerId,
+    source.url,
+    source.externalUrl,
+    source.infoHash,
+    source.fileIndex?.toString(),
+    source.ytId,
+    source.nzbUrl,
+    source.archiveFiles.firstOrNull()?.url,
+).joinToString("|")
 
 private fun StateFlow<AppUiState>.mapActiveProfileId() = map { it.activeProfileId }

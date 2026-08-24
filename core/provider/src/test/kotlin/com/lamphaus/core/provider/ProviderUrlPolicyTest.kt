@@ -48,4 +48,14 @@ class ProviderUrlPolicyTest {
             policy.normalizeManifestUrl("lamphaus://provider.example/configured/manifest.json?token=abc"),
         )
     }
+
+    @Test
+    fun `compatible custom install schemes normalize generically`() {
+        val policy = ProviderUrlPolicy(allowDebugLocalhost = false)
+
+        assertEquals(
+            "https://provider.example/configured/manifest.json?token=abc",
+            policy.normalizeManifestUrl("compatible://provider.example/configured/manifest.json?token=abc"),
+        )
+    }
 }

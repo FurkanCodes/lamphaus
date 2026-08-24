@@ -11,7 +11,6 @@ import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.StreamCandidate
-import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.Episode
 
@@ -27,7 +26,6 @@ data class SourcePickerState(
     val media: MediaPreview,
     val episode: Episode? = null,
     val sources: List<StreamCandidate> = emptyList(),
-    val subtitles: List<SubtitleTrack> = emptyList(),
     val providerLabels: Map<String, String> = emptyMap(),
     val failures: Map<String, String> = emptyMap(),
     val selectedProviderId: String? = null,
@@ -56,6 +54,7 @@ data class AppUiState(
     val pairingSession: PairingSession? = null,
     val playbackRequest: PlaybackRequest? = null,
     val externalPlaybackUrl: String? = null,
+    val configurationUrl: String? = null,
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
