@@ -108,6 +108,41 @@ class HttpProviderClientTest {
     }
 
     @Test
+    fun `manifest parser preserves catalog filter options`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"id":"fixture","name":"Fixture","version":"1","catalogs":[{"type":"movie","id":"top","name":"Popular","genres":["Action","Comedy"],"extra":[{"name":"genre","options":["Action","Comedy"]}]}]}""",
+            ),
+        )
+
+        val manifest = (client.manifest(server.url("/manifest.json").toString()) as ProviderResult.Success).value
+
+        assertEquals(listOf("Action", "Comedy"), manifest.catalogs.single().extraOptions["genre"])
+    }
+
+    @Test
+    fun `catalog normalizes provider supplied preview metadata variants`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"metas":[{"id":"m1","type":"movie","name":"Night Signal","posterUrl":"https://images.example/poster.jpg","backdrop":"https://images.example/backdrop.jpg","overview":"A mystery.","genre":"Drama","content_rating":"PG-13","ratings":{"imdb":"8.4"}}]}""",
+            ),
+        )
+
+        val item = (client.catalog(
+            server.url("/manifest.json").toString(),
+            "fixture.provider",
+            CatalogQuery("movie", "featured"),
+        ) as ProviderResult.Success).value.single()
+
+        assertEquals("https://images.example/poster.jpg", item.posterUrl)
+        assertEquals("https://images.example/backdrop.jpg", item.backgroundUrl)
+        assertEquals("A mystery.", item.description)
+        assertEquals(listOf("Drama"), item.genres)
+        assertEquals("PG-13", item.contentRating)
+        assertEquals(8.4, item.rating)
+    }
+
+    @Test
     fun `stream parser keeps direct external hash youtube sources and embedded subtitles`() = runTest {
         server.enqueue(
             jsonResponse(
@@ -129,6 +164,39 @@ class HttpProviderClientTest {
         assertEquals(2, streams[1].fileIndex)
         assertEquals("abc123", streams[2].ytId)
         assertEquals("https://player.example/watch/1", streams[3].externalUrl)
+    }
+
+    @Test
+    fun `stream parser preserves provider formatting and structured hints`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"streams":[{
+                    "name":"⚡ 4K · Cached",
+                    "title":"Provider title",
+                    "description":"📺 Blu-ray · HEVC\n📦 18.4 GB",
+                    "tag":["2160p","HDR10+"],
+                    "yt_id":"video-id",
+                    "mapIdx":3,
+                    "behaviorHints":{"filename":"Movie.2160p.BluRay.HEVC.mkv","videoSize":19756849561}
+                }]}""",
+            ),
+        )
+
+        val source = (client.streams(
+            server.url("/manifest.json").toString(),
+            "fixture",
+            "movie",
+            "m1",
+        ) as ProviderResult.Success).value.single()
+
+        assertEquals("⚡ 4K · Cached", source.name)
+        assertEquals("Provider title", source.title)
+        assertEquals("📺 Blu-ray · HEVC\n📦 18.4 GB", source.description)
+        assertEquals(listOf("2160p", "HDR10+"), source.tags)
+        assertEquals("Movie.2160p.BluRay.HEVC.mkv", source.filename)
+        assertEquals(19756849561, source.videoSize)
+        assertEquals("video-id", source.ytId)
+        assertEquals(3, source.fileIndex)
     }
 
     @Test

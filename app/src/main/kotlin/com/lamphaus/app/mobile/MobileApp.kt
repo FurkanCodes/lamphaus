@@ -103,6 +103,7 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
@@ -666,7 +667,7 @@ private fun MobileSourcePickerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.choose_source)) },
+                title = {},
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
@@ -726,25 +727,74 @@ private fun MobileSourcePickerScreen(
                             picker.visibleSources,
                             key = { index, source -> sourceItemKey(source, index) },
                         ) { _, source ->
-                            Card(onClick = { onSource(source) }, modifier = Modifier.fillMaxWidth()) {
-                                ListItem(
-                                    headlineContent = { Text(source.sourceLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                    supportingContent = {
+                            val providerLabel = picker.providerLabels[source.providerId]
+                            val presentation = remember(source, providerLabel) {
+                                source.sourcePresentation(providerLabel)
+                            }
+                            Card(
+                                onClick = { onSource(source) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        if (presentation.badges.isNotEmpty()) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                presentation.badges.forEach { badge ->
+                                                    Surface(
+                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        shape = RoundedCornerShape(4.dp),
+                                                    ) {
+                                                        Text(
+                                                            badge,
+                                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                         Text(
-                                            listOfNotNull(
-                                                picker.providerLabels[source.providerId],
-                                                source.quality,
-                                                source.mimeType,
-                                                if (source.infoHash != null || source.ytId != null || source.externalUrl != null ||
-                                                    source.nzbUrl != null || source.archiveFiles.isNotEmpty()
-                                                ) stringResource(R.string.external_source) else null,
-                                            ).joinToString(" · "),
+                                            presentation.title,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.titleMedium,
                                         )
-                                    },
-                                    trailingContent = { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.play)) },
-                                )
+                                        presentation.description?.let { description ->
+                                            Text(
+                                                description,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 3,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                        if (!presentation.usesProviderFormatting) {
+                                            Text(
+                                                buildList {
+                                                    providerLabel?.let(::add)
+                                                    presentation.size?.let(::add)
+                                                    add(stringResource(presentation.transport.labelRes))
+                                                }.distinct().joinToString("  ·  "),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
+                                    }
+                                    Icon(Icons.Outlined.PlayArrow, stringResource(R.string.play))
+                                }
                             }
                         }
                     }

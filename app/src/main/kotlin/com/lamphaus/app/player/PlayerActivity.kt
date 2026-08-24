@@ -9,103 +9,94 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
-import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.media3.common.Player
+import androidx.core.net.toUri
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import androidx.media3.ui.PlayerView
+import coil3.SingletonImageLoader
 import com.google.common.util.concurrent.ListenableFuture
+import com.lamphaus.app.BuildConfig
+import com.lamphaus.app.LamphausApplication
+import com.lamphaus.app.R
+import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.player.LamphausPlaybackService
 import com.lamphaus.core.player.PlaybackHeaderRegistry
 import com.lamphaus.core.player.toMediaItem
-import com.lamphaus.app.LamphausApplication
-import com.lamphaus.app.BuildConfig
-import com.lamphaus.core.data.cloud.AccountState
-import com.lamphaus.core.model.WatchProgress
-import androidx.lifecycle.lifecycleScope
+import java.net.URI
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.net.URI
 
 class PlayerActivity : ComponentActivity() {
-    private var controller: MediaController? = null
+    private val controllerState = mutableStateOf<MediaController?>(null)
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var request: PlaybackRequest? = null
+    private val controller: MediaController? get() = controllerState.value
     private val isTelevision by lazy { packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        request = intent.getStringExtra(EXTRA_REQUEST)?.let { runCatching { JSON.decodeFromString<PlaybackRequest>(it) }.getOrNull() }
-        if (request == null || !request!!.source.uri.isAllowedPlaybackUri()) {
+        request = intent.getStringExtra(EXTRA_REQUEST)
+            ?.let { runCatching { JSON.decodeFromString<PlaybackRequest>(it) }.getOrNull() }
+        val playback = request
+        if (playback == null || !playback.source.uri.isAllowedPlaybackUri()) {
             finish()
             return
         }
-        setContent { PlayerSurface(request!!) { controller = it } }
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+
+        // Browsing can leave several 4K backdrops in Coil's memory cache. Playback needs that
+        // heap for demuxing high-bitrate sources, while artwork remains available on disk.
+        SingletonImageLoader.get(this).memoryCache?.clear()
+        connect(playback)
+        setContent {
+            PlaybackScreen(
+                request = playback,
+                player = controllerState.value,
+                isTelevision = isTelevision,
+                onExit = ::finish,
+                onOpenExternally = ::openExternally,
+                onPlayerViewLayout = ::updatePipSourceRect,
+            )
+        }
     }
 
-    @Composable
-    private fun PlayerSurface(request: PlaybackRequest, onController: (MediaController?) -> Unit) {
-        var player by androidx.compose.runtime.remember { mutableStateOf<MediaController?>(null) }
-        DisposableEffect(request) {
-            PlaybackHeaderRegistry.put(request.source.uri, request.source.headers)
-            val token = SessionToken(this@PlayerActivity, ComponentName(this@PlayerActivity, LamphausPlaybackService::class.java))
-            val future = MediaController.Builder(this@PlayerActivity, token).buildAsync()
-            controllerFuture = future
-            future.addListener(
-                {
-                    runCatching { future.get() }.onSuccess { mediaController ->
-                        player = mediaController
-                        onController(mediaController)
-                        mediaController.setMediaItem(request.toMediaItem(), request.startPositionMillis)
-                        mediaController.prepare()
-                        mediaController.play()
-                    }
-                },
-                ContextCompat.getMainExecutor(this@PlayerActivity),
-            )
-            onDispose {
-                PlaybackHeaderRegistry.remove(request.source.uri)
-                player?.release()
-                player = null
-                onController(null)
-            }
+    private fun connect(playback: PlaybackRequest) {
+        PlaybackHeaderRegistry.begin(playback.source.uri, playback.source.headers)
+        playback.source.subtitles.forEach { subtitle ->
+            PlaybackHeaderRegistry.put(subtitle.url, subtitle.headers)
         }
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            AndroidView(
-                factory = { context ->
-                    PlayerView(context).apply {
-                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                        useController = true
-                        controllerAutoShow = true
-                        setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                        setShowSubtitleButton(true)
-                        addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ -> updatePipSourceRect(view) }
-                    }
-                },
-                update = {
-                    it.player = player
-                    updatePipSourceRect(it)
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        val token = SessionToken(this, ComponentName(this, LamphausPlaybackService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        controllerFuture = future
+        future.addListener(
+            {
+                runCatching { future.get() }.onSuccess { mediaController ->
+                    controllerState.value = mediaController
+                    mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
+                    mediaController.prepare()
+                    mediaController.play()
+                }
+            },
+            ContextCompat.getMainExecutor(this),
+        )
     }
 
     override fun onUserLeaveHint() {
@@ -133,15 +124,30 @@ class PlayerActivity : ComponentActivity() {
         )
     }
 
+    private fun openExternally() {
+        val uri = request?.source?.uri ?: return
+        val viewIntent = Intent(Intent.ACTION_VIEW, uri.toUri()).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+        runCatching {
+            startActivity(Intent.createChooser(viewIntent, getString(R.string.open_with_external_player)))
+        }
+    }
+
     override fun onStop() {
         saveProgress()
-        if (isTelevision && !isChangingConfigurations) controller?.pause()
+        if ((isTelevision || isFinishing) && !isChangingConfigurations) controller?.pause()
         super.onStop()
     }
 
     override fun onDestroy() {
+        val playback = request
+        if (playback != null) {
+            PlaybackHeaderRegistry.end(playback.source.uri, playback.source.subtitles.map { it.url })
+        }
         controllerFuture?.let(MediaController::releaseFuture)
         controllerFuture = null
+        controllerState.value = null
         super.onDestroy()
     }
 

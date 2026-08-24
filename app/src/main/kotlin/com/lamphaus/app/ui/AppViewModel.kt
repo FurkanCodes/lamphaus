@@ -616,8 +616,15 @@ class AppViewModel(
                         manifestResult.safeMessage,
                     )
                     is ProviderResult.Success -> sections += coroutineScope {
-                        manifestResult.value.catalogs.mapNotNull { catalog ->
-                            val query = catalog.defaultQuery() ?: return@mapNotNull null
+                        val includeCuratedGenres = subscription.id == DEFAULT_CATALOG_PROVIDER_ID ||
+                            subscription.manifestUrl == DEFAULT_CATALOG_MANIFEST
+                        manifestResult.value.catalogs.flatMap { catalog ->
+                            catalog.homeRequests(
+                                includeCuratedGenres = includeCuratedGenres,
+                                currentYear = Calendar.getInstance().get(Calendar.YEAR),
+                            )
+                        }.map { request ->
+                            val query = request.query
                             async {
                                 when (val result = container.providerClient.catalog(
                                     subscription.manifestUrl,
@@ -625,14 +632,14 @@ class AppViewModel(
                                     query,
                                 )) {
                                     is ProviderResult.Success -> CatalogSection(
-                                        "${subscription.id}:${catalog.type}:${catalog.id}:${query.genre.orEmpty()}",
-                                        catalog.displayTitle(),
+                                        "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}",
+                                        request.title,
                                         subscription.displayName,
                                         filterForProfile(result.value),
                                     )
                                     is ProviderResult.Failure -> CatalogSection(
-                                        "${subscription.id}:${catalog.type}:${catalog.id}:${query.genre.orEmpty()}",
-                                        catalog.displayTitle(),
+                                        "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}",
+                                        request.title,
                                         subscription.displayName,
                                         emptyList(),
                                         result.safeMessage,
@@ -831,25 +838,12 @@ private fun String.providerConfigurationUrl(): String? {
 private fun String.inferMimeType(): String? = when {
     contains(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
     contains(".mpd", ignoreCase = true) -> "application/dash+xml"
+    contains(".ism", ignoreCase = true) -> "application/vnd.ms-sstr+xml"
+    contains(".mkv", ignoreCase = true) -> "video/x-matroska"
+    contains(".webm", ignoreCase = true) -> "video/webm"
+    contains(".ts", ignoreCase = true) -> "video/mp2t"
     contains(".mp4", ignoreCase = true) -> "video/mp4"
     else -> null
-}
-
-private fun ProviderCatalog.defaultQuery(): CatalogQuery? = when {
-    requiredExtras.isEmpty() -> CatalogQuery(type, id, posterShape = posterShape)
-    id == "year" && requiredExtras == setOf("genre") -> CatalogQuery(
-        type = type,
-        catalogId = id,
-        genre = Calendar.getInstance().get(Calendar.YEAR).toString(),
-        posterShape = posterShape,
-    )
-    else -> null
-}
-
-private fun ProviderCatalog.displayTitle(): String = when (type.lowercase()) {
-    "movie" -> "$name Movies"
-    "series" -> "$name Series"
-    else -> name
 }
 
 private fun MediaDetail.merge(other: MediaDetail): MediaDetail = MediaDetail(

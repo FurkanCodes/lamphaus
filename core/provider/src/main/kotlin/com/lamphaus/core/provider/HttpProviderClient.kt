@@ -253,12 +253,23 @@ class HttpProviderClient(
                         }
                     }
                 }
+                val extraOptions = buildMap {
+                    catalog.array("extra").orEmpty().forEach { extra ->
+                        val definition = extra as? JsonObject ?: return@forEach
+                        val name = definition.string("name") ?: return@forEach
+                        definition.strings("options").takeIf(List<String>::isNotEmpty)?.let { put(name, it) }
+                    }
+                    catalog.strings("genres").takeIf(List<String>::isNotEmpty)?.let { genres ->
+                        putIfAbsent("genre", genres)
+                    }
+                }
                 ProviderCatalog(
                     type = type,
                     id = catalogId,
                     name = catalog.string("name") ?: catalogId,
                     extras = extras,
                     requiredExtras = requiredExtras,
+                    extraOptions = extraOptions,
                     posterShape = catalog.string("posterShape"),
                 )
             }
@@ -295,14 +306,14 @@ class HttpProviderClient(
             type = rawType.toMediaType(),
             rawType = rawType,
             name = string("name") ?: "Untitled",
-            posterUrl = string("poster"),
-            backgroundUrl = string("background"),
-            logoUrl = string("logo") ?: obj("logo")?.string("url"),
-            description = string("description"),
+            posterUrl = firstString("poster", "posterUrl"),
+            backgroundUrl = firstString("background", "backdrop", "backdropUrl"),
+            logoUrl = firstString("logo", "logoUrl") ?: obj("logo")?.string("url"),
+            description = firstString("description", "overview"),
             releaseYear = (string("releaseInfo") ?: string("year"))?.take(4)?.toIntOrNull() ?: int("year"),
-            genres = strings("genres"),
-            contentRating = string("contentRating"),
-            rating = double("imdbRating") ?: double("rating"),
+            genres = stringsOrSingle("genres").ifEmpty { stringsOrSingle("genre") },
+            contentRating = firstString("contentRating", "content_rating", "certification"),
+            rating = ratingValue(),
             providerIds = setOf(providerId),
             posterShape = string("posterShape") ?: catalogPosterShape,
         )
@@ -343,7 +354,7 @@ class HttpProviderClient(
         val url = string("url")
         val externalUrl = string("externalUrl")
         val infoHash = string("infoHash")
-        val ytId = string("ytId")
+        val ytId = string("ytId") ?: string("yt_id")
         val sourceUrls = array("sources").orEmpty().mapNotNull { source ->
             when (source) {
                 is JsonPrimitive -> source.contentOrNull
@@ -367,6 +378,8 @@ class HttpProviderClient(
             value.jsonPrimitive.contentOrNull?.let { key to it }
         }?.toMap().orEmpty()
         val subtitles = array("subtitles").orEmpty().mapNotNull { (it as? JsonObject)?.toSubtitle() }
+        val tags = stringsOrSingle("tag").ifEmpty { stringsOrSingle("tags") }
+        val filename = string("filename") ?: hints?.string("filename")
         return StreamCandidate(
             providerId = providerId,
             name = string("name") ?: "Source",
@@ -375,7 +388,7 @@ class HttpProviderClient(
             url = url,
             externalUrl = externalUrl,
             infoHash = infoHash,
-            fileIndex = int("fileIdx") ?: int("fileIndex"),
+            fileIndex = int("fileIdx") ?: int("fileIndex") ?: int("mapIdx"),
             ytId = ytId,
             sourceUrls = sourceUrls,
             nzbUrl = nzbUrl,
@@ -386,12 +399,16 @@ class HttpProviderClient(
             tgzFiles = tgzFiles,
             tarFiles = tarFiles,
             fileMustInclude = string("fileMustInclude"),
-            filename = string("filename") ?: hints?.string("filename"),
+            filename = filename,
             videoHash = hints?.string("videoHash"),
             videoSize = hints?.long("videoSize"),
             bingeGroup = hints?.string("bingeGroup"),
             mimeType = string("mimeType"),
-            quality = string("quality") ?: string("name")?.qualityHint(),
+            quality = string("quality")
+                ?: tags.firstNotNullOfOrNull { it.qualityHint() }
+                ?: listOfNotNull(string("name"), string("title"), string("description"), filename)
+                    .firstNotNullOfOrNull { it.qualityHint() },
+            tags = tags,
             headers = headers,
             subtitles = subtitles,
             notWebReady = hints?.boolean("notWebReady") == true,
@@ -420,6 +437,8 @@ class HttpProviderClient(
     }
 
     private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
+    private fun JsonObject.firstString(vararg keys: String): String? =
+        keys.firstNotNullOfOrNull { key -> string(key)?.takeIf(String::isNotBlank) }
     private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.intOrNull
     private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
     private fun JsonObject.double(key: String): Double? = this[key]?.jsonPrimitive?.doubleOrNull
@@ -429,7 +448,24 @@ class HttpProviderClient(
     private fun JsonObject.strings(key: String): List<String> = array(key).orEmpty().mapNotNull {
         (it as? JsonPrimitive)?.contentOrNull
     }
+    private fun JsonObject.stringsOrSingle(key: String): List<String> = when (val value = this[key]) {
+        is JsonArray -> value.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        is JsonPrimitive -> value.contentOrNull?.let(::listOf).orEmpty()
+        else -> emptyList()
+    }
     private fun JsonObject.optionalStrings(key: String): Set<String>? = if (containsKey(key)) strings(key).toSet() else null
+    private fun JsonObject.ratingValue(): Double? {
+        val value = double("imdbRating")
+            ?: double("imdb_rating")
+            ?: double("rating")
+            ?: obj("ratings")?.let { ratings ->
+                ratings.double("imdb")
+                    ?: ratings.double("imdbRating")
+                    ?: ratings.double("rating")
+                    ?: ratings.double("value")
+            }
+        return value?.takeIf { it.isFinite() && it in 0.0..10.0 }
+    }
     private fun JsonObject.streamFiles(key: String): List<StreamFile> = array(key).orEmpty().mapNotNull { item ->
         when (item) {
             is JsonPrimitive -> item.contentOrNull?.let(::StreamFile)

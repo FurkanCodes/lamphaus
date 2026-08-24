@@ -54,6 +54,7 @@ internal object TvFocusTokens {
 internal object TvSurfaceTokens {
     val elevated = Color(0xFF1E2023)
     val card = Color(0xFF292A2D)
+    val selectedFilter = Color(0xFF354964)
     val subtleBorder = Color.White.copy(alpha = 0.10f)
     val ratingScrim = Color.Black.copy(alpha = 0.62f)
     val ratingBorder = Color.White.copy(alpha = 0.16f)

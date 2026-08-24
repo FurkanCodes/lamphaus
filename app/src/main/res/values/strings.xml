@@ -72,10 +72,15 @@
     <string name="disable">Disable</string>
     <string name="remove">Remove</string>
     <string name="addon_addresses_hidden">Add-on addresses are hidden after installation.</string>
-    <string name="choose_source">Choose a source</string>
     <string name="all_sources">All sources</string>
     <string name="no_sources">No sources are currently available.</string>
     <string name="loading_sources">Loading sources…</string>
     <string name="loading_library">Lighting your library…</string>
-    <string name="external_source">External source</string>
+    <string name="source_type_direct">Direct</string>
+    <string name="source_type_peer">P2P</string>
+    <string name="source_type_external">External</string>
+    <string name="source_type_video">Video</string>
+    <string name="source_type_archive">Archive</string>
+    <string name="source_type_usenet">Usenet</string>
+    <string name="open_with_external_player">Open with another player</string>
 </resources>

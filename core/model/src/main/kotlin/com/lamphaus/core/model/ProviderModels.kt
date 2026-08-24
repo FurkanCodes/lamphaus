@@ -31,6 +31,7 @@ data class ProviderCatalog(
     val name: String,
     val extras: Set<String> = emptySet(),
     val requiredExtras: Set<String> = emptySet(),
+    val extraOptions: Map<String, List<String>> = emptyMap(),
     val posterShape: String? = null,
 )
 
@@ -143,6 +144,7 @@ data class StreamCandidate(
     val bingeGroup: String? = null,
     val mimeType: String? = null,
     val quality: String? = null,
+    val tags: List<String> = emptyList(),
     val headers: Map<String, String> = emptyMap(),
     val subtitles: List<SubtitleTrack> = emptyList(),
     val notWebReady: Boolean = false,

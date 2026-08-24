@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -102,6 +103,7 @@ import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.SourcePickerState
+import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.Episode
@@ -921,35 +923,21 @@ private fun TvSourcePickerScreen(
                 modifier = Modifier.width(350.dp).fillMaxHeight(),
             )
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(stringResource(R.string.choose_source), style = MaterialTheme.typography.headlineSmall)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item("all") {
-                        TvFocusableSurface(
+                        TvSourceFilterChip(
+                            label = stringResource(R.string.all_sources),
+                            selected = picker.selectedProviderId == null,
                             onClick = { onProvider(null) },
                             modifier = Modifier.focusRequester(filtersFocus),
-                            containerColor = if (picker.selectedProviderId == null) TvFocusTokens.selectedNavigationContainer else TvFocusTokens.defaultContainer,
-                        ) { focused ->
-                            Text(
-                                stringResource(R.string.all_sources),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
-                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
-                                style = MaterialTheme.typography.labelLarge,
-                            )
-                        }
+                        )
                     }
                     items(picker.providerIds, key = { it }) { providerId ->
-                        TvFocusableSurface(
+                        TvSourceFilterChip(
+                            label = picker.providerLabels[providerId] ?: providerId,
+                            selected = picker.selectedProviderId == providerId,
                             onClick = { onProvider(providerId) },
-                            containerColor = if (picker.selectedProviderId == providerId) TvFocusTokens.selectedNavigationContainer else TvFocusTokens.defaultContainer,
-                        ) { focused ->
-                            Text(
-                                picker.providerLabels[providerId] ?: providerId,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
-                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
-                                style = MaterialTheme.typography.labelLarge,
-                                maxLines = 1,
-                            )
-                        }
+                        )
                     }
                 }
                 picker.failures.values.forEach { error ->
@@ -969,39 +957,71 @@ private fun TvSourcePickerScreen(
                             picker.visibleSources,
                             key = { index, source -> sourceItemKey(source, index) },
                         ) { _, source ->
+                            val providerLabel = picker.providerLabels[source.providerId]
+                            val presentation = remember(source, providerLabel) {
+                                source.sourcePresentation(providerLabel)
+                            }
                             TvFocusableSurface(
                                 onClick = { onSource(source) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(82.dp),
+                                    .heightIn(min = 104.dp),
+                                containerColor = TvSurfaceTokens.card,
                             ) { focused ->
+                                val primaryColor = if (focused) {
+                                    TvFocusTokens.focusedContent
+                                } else {
+                                    MaterialTheme.colorScheme.onBackground
+                                }
+                                val secondaryColor = primaryColor.copy(alpha = 0.76f)
                                 Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 ) {
                                     TvIcon(
                                         Icons.Outlined.PlayArrow,
                                         contentDescription = null,
-                                        tint = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = primaryColor,
                                         modifier = Modifier.size(22.dp),
                                     )
-                                    Column(Modifier.weight(1f)) {
-                                        Text(source.sourceLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        if (presentation.badges.isNotEmpty()) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                presentation.badges.forEach { badge ->
+                                                    TvSourceBadge(badge, focused)
+                                                }
+                                            }
+                                        }
                                         Text(
-                                            listOfNotNull(
-                                                picker.providerLabels[source.providerId],
-                                                source.quality,
-                                                source.mimeType,
-                                                if (source.infoHash != null || source.ytId != null || source.externalUrl != null ||
-                                                    source.nzbUrl != null || source.archiveFiles.isNotEmpty()
-                                                ) stringResource(R.string.external_source) else null,
-                                            ).joinToString(" · "),
-                                            maxLines = 1,
+                                            presentation.title,
+                                            color = primaryColor,
+                                            maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
-                                            color = if (focused) TvFocusTokens.focusedContent.copy(alpha = 0.80f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = MaterialTheme.typography.titleSmall,
                                         )
+                                        presentation.description?.let { description ->
+                                            Text(
+                                                description,
+                                                color = secondaryColor,
+                                                maxLines = 3,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                        if (!presentation.usesProviderFormatting) {
+                                            Text(
+                                                buildList {
+                                                    providerLabel?.let(::add)
+                                                    presentation.size?.let(::add)
+                                                    add(stringResource(presentation.transport.labelRes))
+                                                }.distinct().joinToString("  ·  "),
+                                                color = secondaryColor,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1011,6 +1031,51 @@ private fun TvSourcePickerScreen(
             }
         }
     }
+}
+
+@Composable
+private fun TvSourceFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TvFocusableSurface(
+        onClick = onClick,
+        modifier = modifier.semantics { this.selected = selected },
+        containerColor = if (selected) TvSurfaceTokens.selectedFilter else TvSurfaceTokens.card,
+    ) { focused ->
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun TvSourceBadge(label: String, focused: Boolean) {
+    Text(
+        text = label,
+        modifier = Modifier
+            .background(
+                color = if (focused) {
+                    TvFocusTokens.focusedContent.copy(alpha = 0.10f)
+                } else {
+                    TvFocusTokens.beam.copy(alpha = 0.16f)
+                },
+                shape = RoundedCornerShape(3.dp),
+            )
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+    )
 }
 
 @Composable

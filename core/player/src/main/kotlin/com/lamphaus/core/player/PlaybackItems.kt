@@ -11,7 +11,8 @@ fun PlaybackRequest.toMediaItem(): MediaItem {
         MediaItem.SubtitleConfiguration.Builder(subtitle.url.toUri())
             .setId(subtitle.id)
             .setLanguage(subtitle.language)
-            .setMimeType(subtitle.url.subtitleMimeType())
+            .setLabel(subtitle.language)
+            .setMimeType(subtitle.subtitleMimeType())
             .setSelectionFlags(0)
             .build()
     }
@@ -24,14 +25,21 @@ fun PlaybackRequest.toMediaItem(): MediaItem {
             MediaMetadata.Builder()
                 .setTitle(title)
                 .setSubtitle(subtitle)
-            .setArtworkUri(artworkUrl?.toUri())
+                .setArtworkUri(artworkUrl?.toUri())
                 .build(),
         )
         .build()
 }
 
-private fun String.subtitleMimeType(): String = when {
-    endsWith(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
-    endsWith(".ttml", ignoreCase = true) || endsWith(".xml", ignoreCase = true) -> MimeTypes.APPLICATION_TTML
+private fun com.lamphaus.core.model.SubtitleTrack.subtitleMimeType(): String = when {
+    format.equals("vtt", ignoreCase = true) || url.contains(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
+    format.equals("ttml", ignoreCase = true) ||
+        format.equals("xml", ignoreCase = true) ||
+        url.contains(".ttml", ignoreCase = true) ||
+        url.contains(".xml", ignoreCase = true) -> MimeTypes.APPLICATION_TTML
+    format.equals("ssa", ignoreCase = true) ||
+        format.equals("ass", ignoreCase = true) ||
+        url.contains(".ssa", ignoreCase = true) ||
+        url.contains(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
     else -> MimeTypes.APPLICATION_SUBRIP
 }
