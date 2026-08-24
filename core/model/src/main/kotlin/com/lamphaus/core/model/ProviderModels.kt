@@ -18,8 +18,10 @@ enum class MediaType {
 @Serializable
 data class ProviderResource(
     val name: String,
-    val types: Set<String> = emptySet(),
-    val idPrefixes: Set<String> = emptySet(),
+    /** Null means inherit the manifest-level filter. An empty array means all values. */
+    val types: Set<String>? = null,
+    /** Null means inherit the manifest-level filter. An empty array means all values. */
+    val idPrefixes: Set<String>? = null,
 )
 
 @Serializable
@@ -29,6 +31,7 @@ data class ProviderCatalog(
     val name: String,
     val extras: Set<String> = emptySet(),
     val requiredExtras: Set<String> = emptySet(),
+    val posterShape: String? = null,
 )
 
 @Serializable
@@ -41,7 +44,17 @@ data class ProviderManifest(
     val backgroundUrl: String? = null,
     val resources: List<ProviderResource> = emptyList(),
     val types: Set<String> = emptySet(),
+    val idPrefixes: Set<String> = emptySet(),
     val catalogs: List<ProviderCatalog> = emptyList(),
+    val behaviorHints: ProviderBehaviorHints = ProviderBehaviorHints(),
+)
+
+@Serializable
+data class ProviderBehaviorHints(
+    val configurable: Boolean = false,
+    val configurationRequired: Boolean = false,
+    val adult: Boolean = false,
+    val p2p: Boolean = false,
 )
 
 @Serializable
@@ -51,6 +64,8 @@ data class CatalogQuery(
     val search: String? = null,
     val genre: String? = null,
     val skip: Int = 0,
+    /** Provider-defined catalog filters, encoded as the protocol's extra path segment. */
+    val extras: Map<String, String> = emptyMap(),
 )
 
 @Serializable
@@ -99,10 +114,22 @@ data class StreamCandidate(
     val title: String? = null,
     val url: String? = null,
     val externalUrl: String? = null,
+    val infoHash: String? = null,
+    val fileIndex: Int? = null,
+    val ytId: String? = null,
+    val sourceUrls: List<String> = emptyList(),
+    val filename: String? = null,
+    val videoHash: String? = null,
+    val videoSize: Long? = null,
+    val bingeGroup: String? = null,
+    val mimeType: String? = null,
     val quality: String? = null,
     val headers: Map<String, String> = emptyMap(),
+    val subtitles: List<SubtitleTrack> = emptyList(),
 ) {
-    val isPlayableInternally: Boolean get() = url?.startsWith("https://") == true
+    val isPlayableInternally: Boolean get() = url?.startsWith("https://", ignoreCase = true) == true
+    val sourceLabel: String get() = title?.lineSequence()?.firstOrNull()?.trim().orEmpty()
+        .ifBlank { name.ifBlank { "Source" } }
 }
 
 @Serializable
@@ -110,6 +137,8 @@ data class SubtitleTrack(
     val id: String,
     val language: String,
     val url: String,
+    val format: String? = null,
+    val headers: Map<String, String> = emptyMap(),
 )
 
 sealed interface ProviderResult<out T> {

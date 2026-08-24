@@ -32,7 +32,7 @@ class MobileActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        finishPendingEmailLink()
+        handleIncomingIntent(intent)
         setContent {
             MobileApp(
                 viewModel = viewModel,
@@ -43,6 +43,12 @@ class MobileActivity : ComponentActivity() {
                 onExternalPlay = ::openExternalPlayback,
             )
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
     }
 
     private fun requestGoogleSignIn() {
@@ -86,9 +92,23 @@ class MobileActivity : ComponentActivity() {
         viewModel.completeEmailLink(email, link)
     }
 
+    private fun handleIncomingIntent(incoming: Intent?) {
+        val data = incoming?.data ?: return
+        val scheme = data.scheme?.lowercase()
+        if (scheme == "lamphaus" || scheme == "addon") {
+            if (data.host.equals("pair", ignoreCase = true)) {
+                viewModel.reportMessage("Open the television pairing screen to finish setup.")
+            } else {
+                viewModel.addProvider(data.toString())
+            }
+            return
+        }
+        finishPendingEmailLink()
+    }
+
     private fun openExternalPlayback(url: String) {
         val uri = runCatching { url.toUri() }.getOrNull()
-        if (uri?.scheme != "https") {
+        if (uri?.scheme?.lowercase() !in setOf("https", "magnet")) {
             viewModel.reportMessage("Lamphaus refused an unsafe external source.")
             return
         }

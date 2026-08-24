@@ -38,4 +38,14 @@ class ProviderUrlPolicyTest {
         )
         assertNull(policy.normalizeManifestUrl("http://192.168.1.5:8080"))
     }
+
+    @Test
+    fun `neutral add-on links normalize to HTTPS without retaining custom scheme`() {
+        val policy = ProviderUrlPolicy(allowDebugLocalhost = false)
+
+        assertEquals(
+            "https://provider.example/configured/manifest.json?token=abc",
+            policy.normalizeManifestUrl("lamphaus://provider.example/configured/manifest.json?token=abc"),
+        )
+    }
 }

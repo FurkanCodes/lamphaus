@@ -94,6 +94,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
@@ -105,6 +106,7 @@ import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.ProfileKind
 
 private enum class MobileDestination(
@@ -245,6 +247,16 @@ private fun MobileSignedInApp(
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
 
     when {
+        state.sourcePicker != null -> {
+            BackHandler { viewModel.closeSourcePicker() }
+            MobileSourcePickerScreen(
+                picker = state.sourcePicker,
+                widthSizeClass = widthSizeClass,
+                onBack = viewModel::closeSourcePicker,
+                onProvider = viewModel::selectSourceProvider,
+                onSource = viewModel::playSource,
+            )
+        }
         state.selectedDetail != null -> {
             BackHandler { viewModel.clearDetail() }
             MobileDetailScreen(
@@ -252,7 +264,7 @@ private fun MobileSignedInApp(
                 expanded = widthSizeClass == WindowWidthSizeClass.Expanded,
                 inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
                 onBack = viewModel::clearDetail,
-                onPlay = { episode -> viewModel.preparePlayback(state.selectedDetail.preview, episode) },
+                onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
                 onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
             )
         }
@@ -535,6 +547,15 @@ private fun MobileDetailScreen(
     ) { padding ->
         val info: @Composable () -> Unit = {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (!detail.preview.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = detail.preview.logoUrl,
+                        contentDescription = detail.preview.name,
+                        modifier = Modifier.fillMaxWidth().height(64.dp),
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.CenterStart,
+                    )
+                }
                 Text(detail.preview.name, style = MaterialTheme.typography.headlineLarge)
                 Text(
                     listOfNotNull(
@@ -591,6 +612,108 @@ private fun EpisodeRow(episode: com.lamphaus.core.model.Episode, onPlay: (com.la
             }
         },
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MobileSourcePickerScreen(
+    picker: com.lamphaus.app.ui.SourcePickerState,
+    widthSizeClass: WindowWidthSizeClass,
+    onBack: () -> Unit,
+    onProvider: (String?) -> Unit,
+    onSource: (StreamCandidate) -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.choose_source)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (picker.loading) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            return@Scaffold
+        }
+        val content: @Composable () -> Unit = {
+            Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!picker.media.logoUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = picker.media.logoUrl,
+                            contentDescription = picker.media.name,
+                            modifier = Modifier.height(52.dp).fillMaxWidth(),
+                            contentScale = ContentScale.Fit,
+                        )
+                    } else {
+                        Text(picker.media.name, style = MaterialTheme.typography.headlineSmall)
+                    }
+                    picker.episode?.title?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChip(
+                            selected = picker.selectedProviderId == null,
+                            onClick = { onProvider(null) },
+                            label = { Text(stringResource(R.string.all_sources)) },
+                        )
+                    }
+                    items(picker.providerIds, key = { it }) { providerId ->
+                        FilterChip(
+                            selected = picker.selectedProviderId == providerId,
+                            onClick = { onProvider(providerId) },
+                            label = { Text(picker.providerLabels[providerId] ?: providerId) },
+                        )
+                    }
+                }
+                if (picker.visibleSources.isEmpty()) {
+                    Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(picker.visibleSources, key = { source -> "${source.providerId}:${source.sourceLabel}:${source.url}:${source.infoHash}" }) { source ->
+                            Card(onClick = { onSource(source) }, modifier = Modifier.fillMaxWidth()) {
+                                ListItem(
+                                    headlineContent = { Text(source.sourceLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    supportingContent = {
+                                        Text(
+                                            listOfNotNull(
+                                                picker.providerLabels[source.providerId],
+                                                source.quality,
+                                                source.mimeType,
+                                                source.infoHash?.let { stringResource(R.string.external_source) },
+                                            ).joinToString(" · "),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    trailingContent = { Icon(Icons.Outlined.PlayArrow, stringResource(R.string.play)) },
+                                )
+                            }
+                        }
+                    }
+                }
+                picker.failures.values.forEach { error ->
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (widthSizeClass == WindowWidthSizeClass.Expanded) {
+            Row(Modifier.fillMaxSize().padding(padding)) {
+                Box(Modifier.weight(0.35f).fillMaxHeight()) {
+                    MediaArtwork(picker.media, Modifier.fillMaxSize(), preferBackdrop = true)
+                }
+                Box(Modifier.weight(0.65f).fillMaxHeight()) { content() }
+            }
+        } else {
+            Box(Modifier.fillMaxSize().padding(padding)) { content() }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

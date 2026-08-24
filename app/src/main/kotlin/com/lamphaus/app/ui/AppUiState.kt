@@ -10,7 +10,10 @@ import com.lamphaus.core.model.PairingSession
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.ProviderSubscription
+import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.WatchProgress
+import com.lamphaus.core.model.Episode
 
 data class CatalogSection(
     val id: String,
@@ -19,6 +22,25 @@ data class CatalogSection(
     val items: List<MediaPreview>,
     val errorMessage: String? = null,
 )
+
+data class SourcePickerState(
+    val media: MediaPreview,
+    val episode: Episode? = null,
+    val sources: List<StreamCandidate> = emptyList(),
+    val subtitles: List<SubtitleTrack> = emptyList(),
+    val providerLabels: Map<String, String> = emptyMap(),
+    val failures: Map<String, String> = emptyMap(),
+    val selectedProviderId: String? = null,
+    val loading: Boolean = true,
+) {
+    val providerIds: List<String>
+        get() = sources.map(StreamCandidate::providerId).distinct()
+
+    val visibleSources: List<StreamCandidate>
+        get() = selectedProviderId?.let { id -> sources.filter { it.providerId == id } } ?: sources
+
+    fun selectProvider(providerId: String?) = copy(selectedProviderId = providerId)
+}
 
 data class AppUiState(
     val account: AccountState = AccountState.Loading,
@@ -30,6 +52,7 @@ data class AppUiState(
     val library: List<LibraryEntry> = emptyList(),
     val progress: List<WatchProgress> = emptyList(),
     val selectedDetail: MediaDetail? = null,
+    val sourcePicker: SourcePickerState? = null,
     val pairingSession: PairingSession? = null,
     val playbackRequest: PlaybackRequest? = null,
     val externalPlaybackUrl: String? = null,

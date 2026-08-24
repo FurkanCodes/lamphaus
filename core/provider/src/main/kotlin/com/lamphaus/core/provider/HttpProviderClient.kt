@@ -6,6 +6,7 @@ import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.ProviderCatalog
+import com.lamphaus.core.model.ProviderBehaviorHints
 import com.lamphaus.core.model.ProviderFailureKind
 import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderResource
@@ -129,8 +130,15 @@ class HttpProviderClient(
         manifestUrl: String,
         type: String,
         id: String,
+    ): ProviderResult<List<SubtitleTrack>> = subtitles(manifestUrl, type, id, emptyMap())
+
+    override suspend fun subtitles(
+        manifestUrl: String,
+        type: String,
+        id: String,
+        extras: Map<String, String>,
     ): ProviderResult<List<SubtitleTrack>> = guarded {
-        val url = resourceUrl(manifestUrl, "subtitles", type, id)
+        val url = resourceUrl(manifestUrl, "subtitles", type, id, extras)
             ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
         val payload = fetch(url.toString())
         val subtitles = payload.element.jsonObject.array("subtitles") ?: JsonArray(emptyList())
@@ -225,8 +233,8 @@ class HttpProviderClient(
                 is JsonObject -> item.string("name")?.let { resourceName ->
                     ProviderResource(
                         name = resourceName,
-                        types = item.strings("types").toSet(),
-                        idPrefixes = item.strings("idPrefixes").toSet(),
+                        types = item.optionalStrings("types"),
+                        idPrefixes = item.optionalStrings("idPrefixes"),
                     )
                 }
                 else -> null
@@ -247,7 +255,14 @@ class HttpProviderClient(
                         }
                     }
                 }
-                ProviderCatalog(type, catalogId, catalog.string("name") ?: catalogId, extras, requiredExtras)
+                ProviderCatalog(
+                    type = type,
+                    id = catalogId,
+                    name = catalog.string("name") ?: catalogId,
+                    extras = extras,
+                    requiredExtras = requiredExtras,
+                    posterShape = catalog.string("posterShape"),
+                )
             }
         }
         return ProviderManifest(
@@ -255,11 +270,18 @@ class HttpProviderClient(
             name = name,
             version = root.string("version") ?: "0",
             description = root.string("description"),
-            logoUrl = root.string("logo"),
-            backgroundUrl = root.string("background"),
+            logoUrl = root.string("logo") ?: root.obj("logo")?.string("url"),
+            backgroundUrl = root.string("background") ?: root.obj("background")?.string("url"),
             resources = resources,
             types = root.strings("types").toSet(),
+            idPrefixes = root.strings("idPrefixes").toSet(),
             catalogs = catalogs,
+            behaviorHints = ProviderBehaviorHints(
+                configurable = root.obj("behaviorHints")?.boolean("configurable") == true,
+                configurationRequired = root.obj("behaviorHints")?.boolean("configurationRequired") == true,
+                adult = root.obj("behaviorHints")?.boolean("adult") == true,
+                p2p = root.obj("behaviorHints")?.boolean("p2p") == true,
+            ),
         )
     }
 
@@ -273,7 +295,7 @@ class HttpProviderClient(
             name = string("name") ?: "Untitled",
             posterUrl = string("poster"),
             backgroundUrl = string("background"),
-            logoUrl = string("logo"),
+            logoUrl = string("logo") ?: obj("logo")?.string("url"),
             description = string("description"),
             releaseYear = (string("releaseInfo") ?: string("year"))?.take(4)?.toIntOrNull() ?: int("year"),
             genres = strings("genres"),
@@ -311,29 +333,53 @@ class HttpProviderClient(
     private fun JsonObject.toStream(providerId: String): StreamCandidate? {
         val url = string("url")
         val externalUrl = string("externalUrl")
-        if (url == null && externalUrl == null) return null
+        val infoHash = string("infoHash")
+        val ytId = string("ytId")
+        val sourceUrls = array("sources").orEmpty().mapNotNull { source ->
+            when (source) {
+                is JsonPrimitive -> source.contentOrNull
+                is JsonObject -> source.string("url") ?: source.string("externalUrl")
+                else -> null
+            }
+        }
+        if (url == null && externalUrl == null && infoHash == null && ytId == null && sourceUrls.isEmpty()) return null
         val hints = obj("behaviorHints")
-        val headers = hints?.obj("proxyHeaders")?.obj("request")?.entries?.mapNotNull { (key, value) ->
+        val proxyHeaders = hints?.obj("proxyHeaders")
+        val headers = proxyHeaders?.obj("request")?.entries?.mapNotNull { (key, value) ->
             value.jsonPrimitive.contentOrNull?.let { key to it }
         }?.toMap().orEmpty()
+        val subtitles = array("subtitles").orEmpty().mapNotNull { (it as? JsonObject)?.toSubtitle() }
         return StreamCandidate(
             providerId = providerId,
             name = string("name") ?: "Source",
             title = string("title"),
             url = url,
             externalUrl = externalUrl,
+            infoHash = infoHash,
+            fileIndex = int("fileIdx") ?: int("fileIndex"),
+            ytId = ytId,
+            sourceUrls = sourceUrls,
+            filename = string("filename") ?: hints?.string("filename"),
+            videoHash = hints?.string("videoHash"),
+            videoSize = hints?.long("videoSize"),
+            bingeGroup = hints?.string("bingeGroup"),
+            mimeType = string("mimeType"),
             quality = string("quality") ?: string("name")?.qualityHint(),
             headers = headers,
+            subtitles = subtitles,
         )
     }
 
     private fun JsonObject.toSubtitle(): SubtitleTrack? {
         val url = string("url") ?: return null
-        if (!url.startsWith("https://")) return null
         return SubtitleTrack(
             id = string("id") ?: url.hashCode().toString(),
             language = string("lang") ?: string("language") ?: "und",
             url = url,
+            format = string("format") ?: string("ext"),
+            headers = obj("behaviorHints")?.obj("proxyHeaders")?.obj("request")?.entries?.mapNotNull { (key, value) ->
+                value.jsonPrimitive.contentOrNull?.let { key to it }
+            }?.toMap().orEmpty(),
         )
     }
 
@@ -341,6 +387,7 @@ class HttpProviderClient(
         search?.takeIf(String::isNotBlank)?.let { put("search", it) }
         genre?.takeIf(String::isNotBlank)?.let { put("genre", it) }
         if (skip > 0) put("skip", skip.toString())
+        putAll(extras)
     }
 
     private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
@@ -353,6 +400,7 @@ class HttpProviderClient(
     private fun JsonObject.strings(key: String): List<String> = array(key).orEmpty().mapNotNull {
         (it as? JsonPrimitive)?.contentOrNull
     }
+    private fun JsonObject.optionalStrings(key: String): Set<String>? = if (containsKey(key)) strings(key).toSet() else null
     private fun String.toMediaType(): MediaType = when (lowercase()) {
         "movie" -> MediaType.MOVIE
         "series" -> MediaType.SERIES

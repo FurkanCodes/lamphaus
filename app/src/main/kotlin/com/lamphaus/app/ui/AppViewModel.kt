@@ -23,14 +23,19 @@ import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSource
 import com.lamphaus.core.model.Episode
+import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.core.model.SubtitleTrack
+import com.lamphaus.core.model.MediaType
 import java.util.UUID
 import java.net.URI
 import java.util.Calendar
+import java.security.MessageDigest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -149,7 +154,10 @@ class AppViewModel(
         when (directResult) {
             is ProviderResult.Success -> {
                 saveProvider(address, directResult.value, state.value.providers.size)
-                showMessage("${directResult.value.name} installed. Loading catalogs…")
+                val suffix = if (directResult.value.behaviorHints.configurationRequired) {
+                    " Finish its setup in the provider's browser page."
+                } else ""
+                showMessage("${directResult.value.name} installed.$suffix Loading catalogs…")
             }
             is ProviderResult.Failure -> {
                 when (val discovery = container.providerClient.discoverProviderUrls(address)) {
@@ -243,6 +251,9 @@ class AppViewModel(
             return@launch
         }
         container.libraryRepository.removeProvider(providerId)
+        (state.value.account as? AccountState.SignedIn)?.userId?.let {
+            container.cloudSyncGateway.deleteProvider(it, providerId)
+        }
         showMessage("Add-on removed.")
     }
 
@@ -271,21 +282,39 @@ class AppViewModel(
             }
             return@launch
         }
-        val providerId = media.providerIds.firstOrNull()
-        val provider = state.value.providers.firstOrNull { it.id == providerId }
-        if (provider == null) {
+        val enabledProviders = state.value.providers
+            .filter(ProviderSubscription::enabled)
+            .sortedBy(ProviderSubscription::sortOrder)
+        val candidates = enabledProviders
+            .filter { media.providerIds.isEmpty() || it.id in media.providerIds }
+            .ifEmpty { enabledProviders }
+        if (candidates.isEmpty()) {
             mutableState.update { it.copy(refreshing = false) }
             return@launch
         }
-        when (val result = container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)) {
-            is ProviderResult.Success -> mutableState.update { it.copy(selectedDetail = result.value, refreshing = false) }
-            is ProviderResult.Failure -> mutableState.update { it.copy(refreshing = false, message = result.safeMessage) }
+        val details = supervisorScope {
+            candidates.map { provider ->
+                async {
+                    val manifest = container.providerClient.manifest(provider.manifestUrl)
+                    if (manifest !is ProviderResult.Success || !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)) {
+                        null
+                    } else {
+                        container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
+                    }
+                }
+            }.awaitAll().filterIsInstance<ProviderResult.Success<MediaDetail>>().map(ProviderResult.Success<MediaDetail>::value)
+        }
+        if (details.isNotEmpty()) {
+            mutableState.update { it.copy(selectedDetail = details.fold(MediaDetail(media), MediaDetail::merge), refreshing = false) }
+        } else {
+            mutableState.update { it.copy(refreshing = false, message = "No metadata provider could load this title.") }
         }
     }
 
     fun clearDetail() = mutableState.update { it.copy(selectedDetail = null) }
 
-    fun preparePlayback(media: MediaPreview, episode: Episode? = null) = viewModelScope.launch {
+    /** Loads every compatible stream provider. This intentionally does not select or launch a source. */
+    fun openSources(media: MediaPreview, episode: Episode? = null) = viewModelScope.launch {
         if (media.id.startsWith("fixture:")) {
             showMessage("Fixture artwork has no media source. Install a stream add-on to play content.")
             return@launch
@@ -298,8 +327,13 @@ class AppViewModel(
             return@launch
         }
         val videoId = episode?.id ?: media.id
-        mutableState.update { it.copy(refreshing = true) }
-        val resolvedProviders = coroutineScope {
+        mutableState.update {
+            it.copy(
+                refreshing = true,
+                sourcePicker = SourcePickerState(media = media, episode = episode),
+            )
+        }
+        val resolvedProviders = supervisorScope {
             enabledProviders.map { subscription ->
                 async {
                     val manifest = container.providerClient.manifest(subscription.manifestUrl)
@@ -307,56 +341,119 @@ class AppViewModel(
                 }
             }.awaitAll()
         }
+        val manifestFailures = resolvedProviders
+            .filter { (_, manifest) -> manifest == null }
+            .associate { (provider, _) -> provider.id to "${provider.displayName} is unavailable." }
         val streamProviders = resolvedProviders.filter { (_, manifest) ->
-            manifest?.supports("stream", media.rawType, videoId) == true
+            manifest?.let { container.providerAggregator.supports(it, "stream", media.rawType, videoId) } == true
         }
         if (streamProviders.isEmpty()) {
-            showMessage("Install a compatible stream add-on to play this title.")
-            mutableState.update { it.copy(refreshing = false) }
+            mutableState.update {
+                it.copy(
+                    refreshing = false,
+                    sourcePicker = it.sourcePicker?.copy(loading = false, failures = manifestFailures),
+                )
+            }
+            showMessage("No installed add-on supports sources for this title.")
             return@launch
         }
-        val streamResults = coroutineScope {
+        val streamResults = supervisorScope {
             streamProviders.map { (subscription, _) ->
-                async { container.providerClient.streams(subscription.manifestUrl, subscription.id, media.rawType, videoId) }
+                async {
+                    subscription to container.providerClient.streams(
+                        subscription.manifestUrl,
+                        subscription.id,
+                        media.rawType,
+                        videoId,
+                    )
+                }
             }.awaitAll()
         }
-        val streams = streamResults.flatMap { (it as? ProviderResult.Success)?.value.orEmpty() }
+        val streams = streamResults.flatMap { (_, result) -> (result as? ProviderResult.Success)?.value.orEmpty() }
         val subtitleProviders = resolvedProviders.filter { (_, manifest) ->
-            manifest?.supports("subtitles", media.rawType, videoId) == true
+            manifest?.let { container.providerAggregator.supports(it, "subtitles", media.rawType, videoId) } == true
         }
-        val tracks = coroutineScope {
+        val tracks = supervisorScope {
             subtitleProviders.map { (subscription, _) ->
-                async { container.providerClient.subtitles(subscription.manifestUrl, media.rawType, videoId) }
+                async {
+                    container.providerClient.subtitles(
+                        subscription.manifestUrl,
+                        media.rawType,
+                        videoId,
+                        extras = buildMap {
+                            episode?.let { put("videoId", it.id) }
+                        },
+                    )
+                }
             }.awaitAll()
-        }.flatMap { (it as? ProviderResult.Success)?.value.orEmpty() }.distinctBy { it.id }
-        val internal = streams.firstOrNull {
-            it.isPlayableInternally || (BuildConfig.DEBUG && it.url.isDebugLocalStream())
+        }.flatMap { (it as? ProviderResult.Success)?.value.orEmpty() }
+            .distinctBy { it.id }
+        val labels = streamProviders.associate { (provider, _) ->
+            provider.id to provider.displayName
         }
-        val external = streams.firstOrNull { !it.externalUrl.isNullOrBlank() }
-        val internalUrl = internal?.url
-        val externalUrl = external?.externalUrl
+        val failures = manifestFailures + streamResults.mapNotNull { (provider, result) ->
+            (result as? ProviderResult.Failure)?.let { provider.id to it.safeMessage }
+        }.toMap()
+        mutableState.update {
+            it.copy(
+                refreshing = false,
+                sourcePicker = SourcePickerState(
+                    media = media,
+                    episode = episode,
+                    sources = streams,
+                    subtitles = tracks,
+                    providerLabels = labels,
+                    failures = failures,
+                    loading = false,
+                ),
+            )
+        }
+    }
+
+    fun selectSourceProvider(providerId: String?) = mutableState.update {
+        it.copy(sourcePicker = it.sourcePicker?.selectProvider(providerId))
+    }
+
+    /** Resolves one explicit source. Direct HTTPS is internal; everything else is handed off explicitly. */
+    fun playSource(source: StreamCandidate) = viewModelScope.launch {
+        val picker = state.value.sourcePicker ?: return@launch
+        val direct = source.url?.takeIf { it.startsWith("https://", ignoreCase = true) || (BuildConfig.DEBUG && it.isDebugLocalStream()) }
+            ?: source.sourceUrls.firstOrNull { it.startsWith("https://", ignoreCase = true) || (BuildConfig.DEBUG && it.isDebugLocalStream()) }
         when {
-            internalUrl != null -> {
+            direct != null -> {
+                val videoId = picker.episode?.id ?: picker.media.id
                 val start = state.value.progress.firstOrNull { it.videoId == videoId }?.positionMillis ?: 0
                 mutableState.update {
                     it.copy(
                         playbackRequest = PlaybackRequest(
-                            mediaKey = media.stableKey,
+                            mediaKey = picker.media.stableKey,
                             videoId = videoId,
-                            title = media.name,
-                            subtitle = episode?.title,
-                            artworkUrl = media.backgroundUrl ?: media.posterUrl,
-                            source = PlaybackSource(internalUrl, internalUrl.inferMimeType(), internal.headers, tracks),
+                            title = picker.media.name,
+                            subtitle = picker.episode?.title,
+                            artworkUrl = picker.media.backgroundUrl ?: picker.media.posterUrl,
+                            source = PlaybackSource(
+                                uri = direct,
+                                mimeType = source.mimeType ?: direct.inferMimeType(),
+                                headers = source.headers,
+                                subtitles = (source.subtitles + picker.subtitles).distinctBy(SubtitleTrack::id),
+                            ),
                             startPositionMillis = start,
                         ),
+                        sourcePicker = null,
                     )
                 }
             }
-            externalUrl != null -> mutableState.update { it.copy(externalPlaybackUrl = externalUrl) }
-            else -> showMessage("No compatible source is currently available.")
+            source.externalUrl != null -> mutableState.update { it.copy(externalPlaybackUrl = source.externalUrl) }
+            source.ytId != null -> mutableState.update { it.copy(externalPlaybackUrl = "https://youtu.be/${source.ytId}") }
+            source.infoHash != null -> mutableState.update {
+                it.copy(externalPlaybackUrl = "magnet:?xt=urn:btih:${source.infoHash}")
+            }
+            source.url != null -> mutableState.update { it.copy(externalPlaybackUrl = source.url) }
+            else -> showMessage("This source needs an external player that is not installed.")
         }
-        mutableState.update { it.copy(refreshing = false) }
     }
+
+    fun closeSourcePicker() = mutableState.update { it.copy(sourcePicker = null) }
 
     fun playbackLaunchHandled() = mutableState.update { it.copy(playbackRequest = null, externalPlaybackUrl = null) }
 
@@ -448,9 +545,15 @@ class AppViewModel(
         sortOrder: Int,
         displayName: String = manifest.name,
     ) {
+        val canonicalAddress = address.canonicalProviderAddress()
+        val installationId = if (manifest.id == DEFAULT_CATALOG_PROVIDER_ID || canonicalAddress == DEFAULT_CATALOG_MANIFEST) {
+            DEFAULT_CATALOG_PROVIDER_ID
+        } else {
+            stableInstallationId(manifest.id, canonicalAddress)
+        }
         val provider = ProviderSubscription(
-            id = manifest.id,
-            manifestUrl = address,
+            id = installationId,
+            manifestUrl = canonicalAddress,
             displayName = displayName,
             sortOrder = sortOrder,
             updatedAtEpochMillis = System.currentTimeMillis(),
@@ -459,6 +562,17 @@ class AppViewModel(
         (state.value.account as? AccountState.SignedIn)?.userId?.let {
             container.cloudSyncGateway.saveProvider(it, provider)
         }
+    }
+
+    private fun stableInstallationId(manifestId: String, address: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(address.trim().toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val safeManifestId = manifestId
+            .filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }
+            .take(80)
+            .ifBlank { "provider" }
+        return "$safeManifestId@${digest.take(12)}"
     }
 
     private fun ensureDefaultCatalog(providers: List<ProviderSubscription>) {
@@ -566,6 +680,16 @@ class AppViewModel(
     }
 }
 
+private fun String.canonicalProviderAddress(): String {
+    val uri = runCatching { URI(trim()) }.getOrNull() ?: return trim()
+    val transport = if (uri.scheme.equals("lamphaus", ignoreCase = true) || uri.scheme.equals("addon", ignoreCase = true)) {
+        URI("https", null, uri.host, uri.port, uri.path, uri.query, null)
+    } else uri
+    val path = transport.path.orEmpty()
+    val manifestPath = if (path.endsWith("/manifest.json")) path else path.trimEnd('/') + "/manifest.json"
+    return URI(transport.scheme, null, transport.host, transport.port, manifestPath, transport.query, null).toString()
+}
+
 private fun String.inferMimeType(): String? = when {
     contains(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
     contains(".mpd", ignoreCase = true) -> "application/dash+xml"
@@ -594,10 +718,24 @@ private fun ProviderCatalog.displayTitle(): String = when (type.lowercase()) {
     else -> name
 }
 
-private fun ProviderManifest.supports(resourceName: String, type: String, id: String): Boolean = resources.any { resource ->
-    resource.name.equals(resourceName, ignoreCase = true) &&
-        (resource.types.isEmpty() || resource.types.any { it.equals(type, ignoreCase = true) }) &&
-        (resource.idPrefixes.isEmpty() || resource.idPrefixes.any(id::startsWith))
-}
+private fun MediaDetail.merge(other: MediaDetail): MediaDetail = MediaDetail(
+    preview = preview.merge(other.preview),
+    runtimeMinutes = runtimeMinutes ?: other.runtimeMinutes,
+    cast = (cast + other.cast).distinct(),
+    directors = (directors + other.directors).distinct(),
+    episodes = (episodes + other.episodes).distinctBy(Episode::id),
+)
+
+private fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
+    posterUrl = posterUrl ?: other.posterUrl,
+    backgroundUrl = backgroundUrl ?: other.backgroundUrl,
+    logoUrl = logoUrl ?: other.logoUrl,
+    description = description ?: other.description,
+    releaseYear = releaseYear ?: other.releaseYear,
+    genres = (genres + other.genres).distinct(),
+    contentRating = contentRating ?: other.contentRating,
+    rating = rating ?: other.rating,
+    providerIds = providerIds + other.providerIds,
+)
 
 private fun StateFlow<AppUiState>.mapActiveProfileId() = map { it.activeProfileId }

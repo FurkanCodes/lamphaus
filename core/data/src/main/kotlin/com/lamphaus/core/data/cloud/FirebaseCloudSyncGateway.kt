@@ -61,6 +61,13 @@ class FirebaseCloudSyncGateway(
         Unit
     }
 
+    override suspend fun deleteProvider(userId: String, providerId: String): Result<Unit> = runCatching {
+        functions.getHttpsCallable("deleteProviderConfiguration").call(
+            mapOf("providerId" to providerId),
+        ).await()
+        Unit
+    }
+
     override suspend fun providers(userId: String): Result<List<ProviderSubscription>> = runCatching {
         @Suppress("UNCHECKED_CAST")
         val root = functions.getHttpsCallable("listProviderConfigurations").call().await().data as? Map<String, Any?>
@@ -105,4 +112,3 @@ class FirebaseCloudSyncGateway(
 
     private fun Map<String, Any?>.string(key: String): String = this[key] as? String ?: error("Missing $key")
 }
-

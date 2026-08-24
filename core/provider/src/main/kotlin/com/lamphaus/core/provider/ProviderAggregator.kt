@@ -35,7 +35,7 @@ class ProviderAggregator(
         val eligible = providers
             .filter { it.subscription.enabled }
             .sortedBy { it.subscription.sortOrder }
-            .filter { it.manifest.supports("catalog", query.type, null) }
+            .filter { supports(it.manifest, "catalog", query.type, null) }
 
         val results = eligible.map { provider ->
             async {
@@ -67,16 +67,18 @@ class ProviderAggregator(
         resource: String,
         type: String,
         id: String? = null,
-    ): ProviderResult<Unit> = if (manifest.supports(resource, type, id)) {
+    ): ProviderResult<Unit> = if (supports(manifest, resource, type, id)) {
         ProviderResult.Success(Unit)
     } else {
         ProviderResult.Failure(ProviderFailureKind.UNSUPPORTED_CAPABILITY, "This provider does not support that request.")
     }
 
-    private fun ProviderManifest.supports(resource: String, type: String, id: String?): Boolean {
-        val descriptor = resources.firstOrNull { it.name == resource } ?: return false
-        val supportsType = descriptor.types.isEmpty() || type in descriptor.types || type in types
-        val supportsId = id == null || descriptor.idPrefixes.isEmpty() || descriptor.idPrefixes.any(id::startsWith)
+    fun supports(manifest: ProviderManifest, resource: String, type: String, id: String? = null): Boolean {
+        val descriptor = manifest.resources.firstOrNull { it.name.equals(resource, ignoreCase = true) } ?: return false
+        val supportedTypes = descriptor.types ?: manifest.types
+        val supportedPrefixes = descriptor.idPrefixes ?: manifest.idPrefixes
+        val supportsType = supportedTypes.isEmpty() || supportedTypes.any { it.equals(type, ignoreCase = true) }
+        val supportsId = id == null || supportedPrefixes.isEmpty() || supportedPrefixes.any { id.startsWith(it) }
         return supportsType && supportsId
     }
 
@@ -91,4 +93,3 @@ class ProviderAggregator(
         providerIds = providerIds + other.providerIds,
     )
 }
-

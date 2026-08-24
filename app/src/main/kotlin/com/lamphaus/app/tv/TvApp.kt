@@ -88,6 +88,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -103,6 +104,7 @@ import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.StreamCandidate
 import kotlinx.coroutines.delay
 
 @Composable
@@ -315,6 +317,17 @@ private fun TvSignedIn(
     var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination) }
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
 
+    if (state.sourcePicker != null) {
+        BackHandler { viewModel.closeSourcePicker() }
+        TvSourcePickerScreen(
+            picker = state.sourcePicker,
+            onBack = viewModel::closeSourcePicker,
+            onProvider = viewModel::selectSourceProvider,
+            onSource = viewModel::playSource,
+        )
+        return
+    }
+
     if (state.selectedDetail != null) {
         BackHandler {
             viewModel.clearDetail()
@@ -323,7 +336,7 @@ private fun TvSignedIn(
         TvDetailScreen(
             detail = state.selectedDetail,
             inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
-            onPlay = { viewModel.preparePlayback(state.selectedDetail.preview, it) },
+            onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
             onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
         )
         return
@@ -837,6 +850,137 @@ private fun TvSearch(
 }
 
 @Composable
+private fun TvSourcePickerScreen(
+    picker: com.lamphaus.app.ui.SourcePickerState,
+    onBack: () -> Unit,
+    onProvider: (String?) -> Unit,
+    onSource: (StreamCandidate) -> Unit,
+) {
+    val firstSourceFocus = remember { FocusRequester() }
+    LaunchedEffect(picker.loading, picker.visibleSources.size, picker.selectedProviderId) {
+        if (!picker.loading && picker.visibleSources.isNotEmpty()) firstSourceFocus.requestFocus()
+    }
+    Box(Modifier.fillMaxSize().padding(TvLayoutTokens.screenHorizontalPadding)) {
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+            Column(
+                modifier = Modifier.width(390.dp).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                Box(
+                    Modifier.fillMaxWidth().height(240.dp).clip(TvShapeTokens.card),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MediaArtwork(picker.media, Modifier.fillMaxSize(), preferBackdrop = true)
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.82f))),
+                        ),
+                    )
+                    if (!picker.media.logoUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = picker.media.logoUrl,
+                            contentDescription = picker.media.name,
+                            modifier = Modifier.fillMaxWidth(0.82f).height(86.dp).align(Alignment.BottomStart).padding(18.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    } else {
+                        Text(
+                            picker.media.name,
+                            modifier = Modifier.align(Alignment.BottomStart).padding(18.dp),
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                picker.episode?.title?.let {
+                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(stringResource(R.string.choose_source), style = MaterialTheme.typography.headlineSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TvFocusableSurface(
+                        onClick = { onProvider(null) },
+                        containerColor = if (picker.selectedProviderId == null) TvFocusTokens.selectedNavigationContainer else TvFocusTokens.defaultContainer,
+                    ) { focused ->
+                        Text(
+                            stringResource(R.string.all_sources),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    picker.providerIds.forEach { providerId ->
+                        TvFocusableSurface(
+                            onClick = { onProvider(providerId) },
+                            containerColor = if (picker.selectedProviderId == providerId) TvFocusTokens.selectedNavigationContainer else TvFocusTokens.defaultContainer,
+                        ) { focused ->
+                            Text(
+                                picker.providerLabels[providerId] ?: providerId,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                if (picker.loading) {
+                    Text(stringResource(R.string.loading_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (picker.visibleSources.isEmpty()) {
+                    TvEmptyMark()
+                    Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(picker.visibleSources, key = { source: StreamCandidate -> "${source.providerId}:${source.sourceLabel}:${source.url}:${source.infoHash}" }) { source ->
+                            TvFocusableSurface(
+                                onClick = { onSource(source) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(82.dp)
+                                    .then(if (source == picker.visibleSources.firstOrNull()) Modifier.focusRequester(firstSourceFocus) else Modifier),
+                            ) { focused ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                ) {
+                                    TvIcon(
+                                        Icons.Outlined.PlayArrow,
+                                        contentDescription = null,
+                                        tint = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(source.sourceLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                                        Text(
+                                            listOfNotNull(
+                                                picker.providerLabels[source.providerId],
+                                                source.quality,
+                                                source.mimeType,
+                                                if (source.infoHash != null || source.ytId != null || source.externalUrl != null) stringResource(R.string.external_source) else null,
+                                            ).joinToString(" · "),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            color = if (focused) TvFocusTokens.focusedContent.copy(alpha = 0.80f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                picker.failures.values.forEach { error ->
+                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun TvDetailScreen(
     detail: MediaDetail?,
     inLibrary: Boolean,
@@ -905,6 +1049,14 @@ private fun TvDetailScreen(
                         .padding(start = TvLayoutTokens.screenHorizontalPadding, top = 138.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    if (!detail.preview.logoUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = detail.preview.logoUrl,
+                            contentDescription = detail.preview.name,
+                            modifier = Modifier.width(330.dp).height(78.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
                     Text(
                         text = detail.preview.name,
                         style = MaterialTheme.typography.displaySmall,

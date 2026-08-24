@@ -15,6 +15,6 @@ class LocalCloudSyncGateway : CloudSyncGateway {
     override suspend fun saveLibrary(userId: String, entry: LibraryEntry) = Result.success(Unit)
     override suspend fun saveProgress(userId: String, progress: WatchProgress) = Result.success(Unit)
     override suspend fun saveProvider(userId: String, provider: ProviderSubscription) = Result.success(Unit)
+    override suspend fun deleteProvider(userId: String, providerId: String) = Result.success(Unit)
     override suspend fun providers(userId: String) = Result.success(emptyList<ProviderSubscription>())
 }
-

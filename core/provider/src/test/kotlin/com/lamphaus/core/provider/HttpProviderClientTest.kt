@@ -51,6 +51,22 @@ class HttpProviderClientTest {
     }
 
     @Test
+    fun `manifest parser preserves inherited filters and behavior hints`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"id":"configured","name":"Configured","version":"1","types":["movie"],"idPrefixes":["tt"],"resources":[{"name":"meta"},{"name":"stream","types":[],"idPrefixes":["custom:"]}],"behaviorHints":{"configurationRequired":true,"p2p":true}}""",
+            ),
+        )
+
+        val manifest = (client.manifest(server.url("/manifest.json").toString()) as ProviderResult.Success).value
+
+        assertEquals(null, manifest.resources[0].types)
+        assertEquals(setOf("custom:"), manifest.resources[1].idPrefixes)
+        assertTrue(manifest.behaviorHints.configurationRequired)
+        assertTrue(manifest.behaviorHints.p2p)
+    }
+
+    @Test
     fun `catalog encodes filters pagination and parses previews`() = runTest {
         server.enqueue(
             jsonResponse(
@@ -89,6 +105,30 @@ class HttpProviderClientTest {
         val catalog = (result as ProviderResult.Success).value.catalogs.single()
         assertEquals(setOf("genre", "skip"), catalog.extras)
         assertEquals(setOf("genre"), catalog.requiredExtras)
+    }
+
+    @Test
+    fun `stream parser keeps direct external hash youtube sources and embedded subtitles`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"streams":[
+                    {"name":"HTTPS 1080p","url":"https://cdn.example/video.m3u8","behaviorHints":{"proxyHeaders":{"request":{"Authorization":"Bearer test"}}},"subtitles":[{"id":"en","lang":"en","url":"https://cdn.example/en.vtt","format":"vtt"}]},
+                    {"name":"Torrent","infoHash":"0123456789abcdef0123456789abcdef01234567","fileIdx":2,"behaviorHints":{"bingeGroup":"show.1080p"}},
+                    {"name":"Video","ytId":"abc123"},
+                    {"name":"Mirror","externalUrl":"https://player.example/watch/1"}
+                ]}""",
+            ),
+        )
+
+        val result = client.streams(server.url("/manifest.json").toString(), "fixture", "movie", "m1")
+        val streams = (result as ProviderResult.Success).value
+
+        assertEquals(4, streams.size)
+        assertEquals("Bearer test", streams[0].headers["Authorization"])
+        assertEquals("en", streams[0].subtitles.single().language)
+        assertEquals(2, streams[1].fileIndex)
+        assertEquals("abc123", streams[2].ytId)
+        assertEquals("https://player.example/watch/1", streams[3].externalUrl)
     }
 
     @Test

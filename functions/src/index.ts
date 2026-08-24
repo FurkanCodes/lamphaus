@@ -169,10 +169,16 @@ export const listProviderConfigurations = onCall({enforceAppCheck}, async (reque
   };
 });
 
+export const deleteProviderConfiguration = onCall({enforceAppCheck}, async (request) => {
+  const uid = requireAuth(request.auth?.uid);
+  const providerId = cleanString(request.data?.providerId, 160);
+  await db.doc(`users/${uid}/providers/${providerId}`).delete();
+  return {ok: true};
+});
+
 export const deleteAccountData = onCall({enforceAppCheck}, async (request) => {
   const uid = requireAuth(request.auth?.uid);
   await db.recursiveDelete(db.doc(`users/${uid}`));
   await getAuth().deleteUser(uid);
   return {ok: true};
 });
-
