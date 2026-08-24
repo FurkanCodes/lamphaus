@@ -100,6 +100,7 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.SourcePickerState
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.Episode
@@ -852,49 +853,58 @@ private fun TvSearch(
 
 @Composable
 private fun TvSourcePickerScreen(
-    picker: com.lamphaus.app.ui.SourcePickerState,
+    picker: SourcePickerState,
     onProvider: (String?) -> Unit,
     onSource: (StreamCandidate) -> Unit,
 ) {
     val filtersFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { filtersFocus.requestFocus() }
-    Box(Modifier.fillMaxSize().padding(TvLayoutTokens.screenHorizontalPadding)) {
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Column(
-                modifier = Modifier.width(390.dp).fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                Box(
-                    Modifier.fillMaxWidth().height(240.dp).clip(TvShapeTokens.card),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    MediaArtwork(picker.media, Modifier.fillMaxSize(), preferBackdrop = true)
-                    Box(
-                        Modifier.fillMaxSize().background(
-                            Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.82f))),
+    Box(Modifier.fillMaxSize()) {
+        MediaArtwork(
+            media = picker.media,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+            preferBackdrop = true,
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.98f),
+                            0.34f to MaterialTheme.colorScheme.background.copy(alpha = 0.88f),
+                            0.58f to MaterialTheme.colorScheme.background.copy(alpha = 0.38f),
+                            0.76f to MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
+                            1f to MaterialTheme.colorScheme.background.copy(alpha = 0.94f),
                         ),
-                    )
-                    if (!picker.media.logoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = picker.media.logoUrl,
-                            contentDescription = picker.media.name,
-                            modifier = Modifier.fillMaxWidth(0.82f).height(86.dp).align(Alignment.BottomStart).padding(18.dp),
-                            contentScale = ContentScale.Fit,
-                        )
-                    } else {
-                        Text(
-                            picker.media.name,
-                            modifier = Modifier.align(Alignment.BottomStart).padding(18.dp),
-                            style = MaterialTheme.typography.headlineSmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-                picker.episode?.title?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleMedium)
-                }
-            }
+                    ),
+                )
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.34f),
+                            0.64f to Color.Transparent,
+                            1f to MaterialTheme.colorScheme.background.copy(alpha = 0.90f),
+                        ),
+                    ),
+                ),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    start = TvLayoutTokens.screenHorizontalPadding,
+                    top = TvLayoutTokens.screenTopPadding,
+                    end = TvLayoutTokens.screenHorizontalPadding,
+                    bottom = TvLayoutTokens.screenBottomPadding,
+                ),
+            horizontalArrangement = Arrangement.spacedBy(44.dp),
+        ) {
+            TvSourceMediaSummary(
+                picker = picker,
+                modifier = Modifier.width(350.dp).fillMaxHeight(),
+            )
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(stringResource(R.string.choose_source), style = MaterialTheme.typography.headlineSmall)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -984,6 +994,78 @@ private fun TvSourcePickerScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TvSourceMediaSummary(
+    picker: SourcePickerState,
+    modifier: Modifier = Modifier,
+) {
+    val episodeNumber = picker.episode?.let { episode ->
+        listOfNotNull(
+            episode.season?.let { "S$it" },
+            episode.episode?.let { "E$it" },
+        ).joinToString(" • ").ifBlank { null }
+    }
+    val metadata = buildList {
+        episodeNumber?.let(::add)
+        picker.media.contentRating?.takeIf(String::isNotBlank)?.let(::add)
+        picker.media.releaseYear?.let { add(it.toString()) }
+        picker.media.genres.take(2).joinToString(", ").takeIf(String::isNotBlank)?.let(::add)
+        picker.media.rating?.let { add("★ $it") }
+    }.joinToString("  •  ")
+    val description = picker.episode?.overview ?: picker.media.description
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        if (!picker.media.logoUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = picker.media.logoUrl,
+                contentDescription = picker.media.name,
+                modifier = Modifier.width(300.dp).height(92.dp),
+                contentScale = ContentScale.Fit,
+                alignment = Alignment.CenterStart,
+            )
+        } else {
+            Text(
+                text = picker.media.name,
+                style = MaterialTheme.typography.displaySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        picker.episode?.title?.let { title ->
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (metadata.isNotBlank()) {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = metadata,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        description?.takeIf(String::isNotBlank)?.let {
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 5,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
