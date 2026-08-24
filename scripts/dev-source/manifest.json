@@ -1,0 +1,15 @@
+{
+  "id": "lamphaus.dev.source",
+  "name": "Development Source",
+  "version": "1.0.0",
+  "description": "Local source used only for end-to-end development checks.",
+  "types": ["movie"],
+  "resources": ["catalog", "meta", "stream"],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "featured",
+      "name": "Development catalog"
+    }
+  ]
+}

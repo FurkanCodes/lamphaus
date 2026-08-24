@@ -1,0 +1,76 @@
+package com.lamphaus.core.model
+
+import kotlinx.serialization.Serializable
+
+@Serializable
+enum class ProfileKind { ADULT, CHILD }
+
+@Serializable
+data class Profile(
+    val id: String,
+    val name: String,
+    val avatarKey: String,
+    val kind: ProfileKind,
+    val hasPin: Boolean = false,
+    val hideUnrated: Boolean = kind == ProfileKind.CHILD,
+    val updatedAtEpochMillis: Long = 0,
+)
+
+@Serializable
+data class ProviderSubscription(
+    val id: String,
+    val manifestUrl: String,
+    val displayName: String,
+    val enabled: Boolean = true,
+    val sortOrder: Int = 0,
+    val updatedAtEpochMillis: Long = 0,
+)
+
+@Serializable
+data class LibraryEntry(
+    val profileId: String,
+    val mediaKey: String,
+    val preview: MediaPreview,
+    val addedAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
+@Serializable
+data class WatchProgress(
+    val profileId: String,
+    val mediaKey: String,
+    val videoId: String,
+    val positionMillis: Long,
+    val durationMillis: Long,
+    val completed: Boolean,
+    val updatedAtEpochMillis: Long,
+) {
+    val fraction: Float
+        get() = if (durationMillis <= 0) 0f else (positionMillis.toFloat() / durationMillis).coerceIn(0f, 1f)
+}
+
+@Serializable
+data class DeviceRegistration(
+    val id: String,
+    val label: String,
+    val platform: String,
+    val lastSeenAtEpochMillis: Long,
+    val revoked: Boolean = false,
+)
+
+@Serializable
+data class PairingSession(
+    val id: String,
+    val shortCode: String,
+    val qrPayload: String,
+    val expiresAtEpochMillis: Long,
+    val claimed: Boolean = false,
+)
+
+@Serializable
+data class DiagnosticsConsent(
+    val crashReports: Boolean = false,
+    val performanceMetrics: Boolean = false,
+    val updatedAtEpochMillis: Long = 0,
+)
+

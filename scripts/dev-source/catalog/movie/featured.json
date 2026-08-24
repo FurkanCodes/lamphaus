@@ -1,0 +1,13 @@
+{
+  "metas": [
+    {
+      "id": "dev-movie-1",
+      "type": "movie",
+      "name": "Source Check",
+      "description": "Catalog content loaded from an installed development source.",
+      "releaseInfo": "2026",
+      "genres": ["Test"],
+      "contentRating": "PG"
+    }
+  ]
+}
