@@ -58,6 +58,7 @@ data class AppUiState(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
+    val initialContentLoading: Boolean = true,
     val refreshing: Boolean = false,
     val searching: Boolean = false,
     val message: String? = null,

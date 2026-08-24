@@ -75,5 +75,6 @@
     <string name="all_sources">All sources</string>
     <string name="no_sources">No sources are currently available.</string>
     <string name="loading_sources">Loading sources…</string>
+    <string name="loading_library">Lighting your library…</string>
     <string name="external_source">External source</string>
 </resources>

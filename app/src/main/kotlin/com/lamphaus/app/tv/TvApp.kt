@@ -142,7 +142,11 @@ fun TvApp(
                 when (state.account) {
                     AccountState.Loading -> TvLoading()
                     AccountState.SignedOut -> TvPairingScreen(state, viewModel)
-                    is AccountState.SignedIn -> TvSignedIn(state, viewModel, initialSearch)
+                    is AccountState.SignedIn -> if (state.initialContentLoading) {
+                        TvLoading()
+                    } else {
+                        TvSignedIn(state, viewModel, initialSearch)
+                    }
                 }
                 state.message?.let { message ->
                     LaunchedEffect(message) {
@@ -190,43 +194,53 @@ private fun TvLoading() {
         }
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(
-            modifier = Modifier
-                .width(280.dp)
-                .height(72.dp),
-            contentAlignment = Alignment.Center,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier
+                    .width(280.dp)
+                    .height(72.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Image(
-                    painter = painterResource(R.drawable.ic_lamphaus_foreground),
-                    contentDescription = null,
-                    modifier = Modifier.size(44.dp),
-                )
-                Text(
-                    text = stringResource(R.string.app_name).uppercase(),
-                    style = MaterialTheme.typography.headlineMedium.copy(letterSpacing = 1.6.sp),
-                )
-            }
-            if (!reducedMotion) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val x = size.width * sweep.value
-                    drawLine(
-                        color = TvFocusTokens.beam.copy(alpha = 0.12f),
-                        start = androidx.compose.ui.geometry.Offset(x, 4.dp.toPx()),
-                        end = androidx.compose.ui.geometry.Offset(x, size.height - 4.dp.toPx()),
-                        strokeWidth = 12.dp.toPx(),
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Image(
+                        painter = painterResource(R.drawable.ic_lamphaus_foreground),
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp),
                     )
-                    drawLine(
-                        color = TvFocusTokens.beam.copy(alpha = 0.72f),
-                        start = androidx.compose.ui.geometry.Offset(x, 8.dp.toPx()),
-                        end = androidx.compose.ui.geometry.Offset(x, size.height - 8.dp.toPx()),
-                        strokeWidth = 1.dp.toPx(),
+                    Text(
+                        text = stringResource(R.string.app_name).uppercase(),
+                        style = MaterialTheme.typography.headlineMedium.copy(letterSpacing = 1.6.sp),
                     )
                 }
+                if (!reducedMotion) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val x = size.width * sweep.value
+                        drawLine(
+                            color = TvFocusTokens.beam.copy(alpha = 0.12f),
+                            start = androidx.compose.ui.geometry.Offset(x, 4.dp.toPx()),
+                            end = androidx.compose.ui.geometry.Offset(x, size.height - 4.dp.toPx()),
+                            strokeWidth = 12.dp.toPx(),
+                        )
+                        drawLine(
+                            color = TvFocusTokens.beam.copy(alpha = 0.72f),
+                            start = androidx.compose.ui.geometry.Offset(x, 8.dp.toPx()),
+                            end = androidx.compose.ui.geometry.Offset(x, size.height - 8.dp.toPx()),
+                            strokeWidth = 1.dp.toPx(),
+                        )
+                    }
+                }
             }
+            Text(
+                text = stringResource(R.string.loading_library),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }

@@ -73,15 +73,24 @@ class AppViewModel(
             }.collectLatest { snapshot ->
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
                     ?: snapshot.profiles.firstOrNull()?.id
-                mutableState.update {
-                    it.copy(
+                mutableState.update { current ->
+                    val previousUserId = (current.account as? AccountState.SignedIn)?.userId
+                    val nextUserId = (snapshot.account as? AccountState.SignedIn)?.userId
+                    val accountChanged = nextUserId != null && nextUserId != previousUserId
+                    current.copy(
                         account = snapshot.account,
                         profiles = snapshot.profiles,
                         providers = snapshot.providers,
+                        sections = if (accountChanged || nextUserId == null) emptyList() else current.sections,
                         activeProfileId = activeId,
                         theme = snapshot.theme,
                         dynamicColor = snapshot.dynamicColor,
                         diagnostics = snapshot.diagnostics,
+                        initialContentLoading = if (accountChanged || nextUserId == null) {
+                            true
+                        } else {
+                            current.initialContentLoading
+                        },
                     )
                 }
                 if (activeId != snapshot.activeProfileId) container.preferences.setActiveProfile(activeId)
@@ -579,10 +588,20 @@ class AppViewModel(
             val current = state.value
             if (current.account !is AccountState.SignedIn) return@launch
             if (current.providers.isEmpty()) {
+                if (defaultCatalogJob?.isActive == true) {
+                    mutableState.update { it.copy(refreshing = true) }
+                    return@launch
+                }
                 val preview = if (BuildConfig.DEBUG && current.account.userId == "local-development") {
                     listOf(CatalogSection("preview", "Preview library", "Local fixture", PreviewMedia.items))
                 } else emptyList()
-                mutableState.update { it.copy(sections = preview, refreshing = false) }
+                mutableState.update {
+                    it.copy(
+                        sections = preview,
+                        initialContentLoading = false,
+                        refreshing = false,
+                    )
+                }
                 return@launch
             }
             mutableState.update { it.copy(refreshing = true) }
@@ -624,7 +643,13 @@ class AppViewModel(
                     }
                 }
             }
-            mutableState.update { it.copy(sections = sections, refreshing = false) }
+            mutableState.update {
+                it.copy(
+                    sections = sections,
+                    initialContentLoading = false,
+                    refreshing = false,
+                )
+            }
         }
     }
 
@@ -705,7 +730,10 @@ class AppViewModel(
                     sortOrder = DEFAULT_CATALOG_SORT_ORDER,
                     displayName = DEFAULT_CATALOG_DISPLAY_NAME,
                 )
-                is ProviderResult.Failure -> showMessage("The Lamphaus catalog is temporarily unavailable.")
+                is ProviderResult.Failure -> {
+                    mutableState.update { it.copy(initialContentLoading = false, refreshing = false) }
+                    showMessage("The Lamphaus catalog is temporarily unavailable.")
+                }
             }
         }
     }

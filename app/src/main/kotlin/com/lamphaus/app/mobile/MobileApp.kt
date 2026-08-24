@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,6 +93,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -177,7 +179,11 @@ fun MobileApp(
                             onEmailLink = onEmailLink,
                             onDevelopmentSession = viewModel::openDevelopmentSession,
                         )
-                        is AccountState.SignedIn -> MobileSignedInApp(state, viewModel, widthSizeClass)
+                        is AccountState.SignedIn -> if (state.initialContentLoading) {
+                            LoadingScreen()
+                        } else {
+                            MobileSignedInApp(state, viewModel, widthSizeClass)
+                        }
                     }
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
@@ -189,7 +195,31 @@ fun MobileApp(
 @Composable
 private fun LoadingScreen() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_lamphaus_foreground),
+                contentDescription = null,
+                modifier = Modifier.size(56.dp),
+            )
+            Text(
+                text = stringResource(R.string.app_name).uppercase(),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(50)),
+            )
+            Text(
+                text = stringResource(R.string.loading_library),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }
 
