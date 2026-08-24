@@ -43,6 +43,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
@@ -63,6 +64,7 @@ import androidx.tv.material3.Text
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.Profile
 import java.util.Locale
 
 internal enum class TvDestination(
@@ -80,6 +82,7 @@ internal enum class TvDestination(
 @Composable
 internal fun TvTopNavigation(
     selectedDestination: TvDestination,
+    activeProfile: Profile?,
     focusDestination: TvDestination?,
     downFocusRequester: FocusRequester,
     onFocusHandled: () -> Unit,
@@ -101,6 +104,7 @@ internal fun TvTopNavigation(
     ) {
         TvProfileNavigationItem(
             selected = selectedDestination == TvDestination.SETTINGS,
+            profile = activeProfile,
             modifier = Modifier
                 .focusRequester(requesters.getValue(TvDestination.SETTINGS))
                 .focusProperties { down = downFocusRequester },
@@ -145,6 +149,7 @@ internal fun TvTopNavigation(
 @Composable
 private fun TvProfileNavigationItem(
     selected: Boolean,
+    profile: Profile?,
     onFocused: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -158,20 +163,6 @@ private fun TvProfileNavigationItem(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .background(
-                color = when {
-                    focused -> TvFocusTokens.focusedContainer
-                    selected -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.40f)
-                    else -> MaterialTheme.colorScheme.primaryContainer
-                },
-                shape = CircleShape,
-            )
-            .border(
-                width = if (focused) 2.dp else 0.dp,
-                color = if (focused) MaterialTheme.colorScheme.onBackground else Color.Transparent,
-                shape = CircleShape,
-            )
-            .clip(CircleShape)
             .clickable(role = Role.Button, onClick = onClick)
             .focusable()
             .semantics {
@@ -180,10 +171,12 @@ private fun TvProfileNavigationItem(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Image(
-            painter = painterResource(R.drawable.ic_lamphaus_foreground),
-            contentDescription = null,
-            modifier = Modifier.size(26.dp),
+        TvProfileAvatar(
+            name = profile?.name.orEmpty(),
+            avatarKey = profile?.avatarKey.orEmpty(),
+            focused = focused,
+            selected = selected,
+            modifier = Modifier.fillMaxWidth().height(32.dp),
         )
     }
 }
@@ -198,49 +191,63 @@ private fun TvTopNavigationItem(
 ) {
     var focused by remember { mutableStateOf(false) }
     val label = stringResource(destination.labelRes)
-    Row(
-        modifier = modifier
-            .height(32.dp)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
-            .background(
-                color = when {
-                    focused -> TvFocusTokens.selectedNavigationContainer
-                    selected -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.40f)
-                    else -> Color.Transparent
-                },
-                shape = TvShapeTokens.button,
-            )
-            .clip(TvShapeTokens.button)
-            .clickable(role = Role.Tab, onClick = onClick)
-            .focusable()
-            .semantics {
-                this.selected = selected
-                contentDescription = label
-            }
-            .padding(horizontal = if (destination.showLabel) 16.dp else 10.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        modifier = Modifier.height(32.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        if (destination.showLabel) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleSmall,
-                color = when {
-                    focused -> TvFocusTokens.focusedContent
-                    selected -> MaterialTheme.colorScheme.onBackground
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-            )
-        } else {
-            TvIcon(
-                icon = destination.icon,
-                contentDescription = null,
-                tint = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.size(20.dp),
+        Row(
+            modifier = modifier
+                .height(32.dp)
+                .onFocusChanged {
+                    focused = it.isFocused
+                    if (it.isFocused) onFocused()
+                }
+                .background(
+                    color = when {
+                        focused -> TvFocusTokens.selectedNavigationContainer
+                        selected -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.40f)
+                        else -> Color.Transparent
+                    },
+                    shape = TvShapeTokens.button,
+                )
+                .clip(TvShapeTokens.button)
+                .clickable(role = Role.Tab, onClick = onClick)
+                .focusable()
+                .semantics {
+                    this.selected = selected
+                    contentDescription = label
+                }
+                .padding(horizontal = if (destination.showLabel) 16.dp else 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (destination.showLabel) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = when {
+                        focused -> TvFocusTokens.focusedContent
+                        selected -> MaterialTheme.colorScheme.onBackground
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                )
+            } else {
+                TvIcon(
+                    icon = destination.icon,
+                    contentDescription = null,
+                    tint = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        if (selected) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .width(24.dp)
+                    .height(2.dp)
+                    .background(TvFocusTokens.beam, CircleShape),
             )
         }
     }
@@ -255,6 +262,7 @@ internal fun TvMediaCard(
     showLabel: Boolean = true,
     revealLabelOnFocus: Boolean = false,
     compactLandscape: Boolean = false,
+    watchProgress: Float? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val reducedMotion = rememberReducedMotion()
@@ -267,6 +275,11 @@ internal fun TvMediaCard(
         targetValue = if (!revealLabelOnFocus || focused) 1f else 0f,
         animationSpec = if (reducedMotion) snap() else tween(TvMotionTokens.focusDurationMillis),
         label = "card label",
+    )
+    val focusProgress by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(TvMotionTokens.focusDurationMillis),
+        label = "card focus",
     )
     val hasLocalPoster = media.id == "fixture:aurora" || media.id == "fixture:glass"
     val portrait = hasLocalPoster || !media.posterUrl.isNullOrBlank() || media.backgroundUrl.isNullOrBlank()
@@ -296,6 +309,15 @@ internal fun TvMediaCard(
             modifier = Modifier
                 .width(cardWidth)
                 .height(cardHeight)
+                .graphicsLayer {
+                    val scale = 1f + ((TvMotionTokens.focusedArtworkScale - 1f) * focusProgress)
+                    scaleX = scale
+                    scaleY = scale
+                    shadowElevation = 7.dp.toPx() * focusProgress
+                    shape = TvShapeTokens.card
+                    ambientShadowColor = TvFocusTokens.halo
+                    spotShadowColor = TvFocusTokens.halo
+                }
                 .border(
                     width = TvFocusTokens.outlineWidth,
                     color = if (focused) TvFocusTokens.focusedCardOutline else TvSurfaceTokens.subtleBorder,
@@ -337,6 +359,30 @@ internal fun TvMediaCard(
                     )
                 }
             }
+            watchProgress?.coerceIn(0f, 1f)?.takeIf { it > 0f }?.let { progress ->
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .background(Color.Black.copy(alpha = 0.44f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .height(4.dp)
+                            .background(TvFocusTokens.beam),
+                    ) {
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterEnd)
+                                .width(2.dp)
+                                .height(4.dp)
+                                .background(Color.White),
+                        )
+                    }
+                }
+            }
         }
         if (showLabel) {
             Text(
@@ -345,7 +391,10 @@ internal fun TvMediaCard(
                     .fillMaxWidth()
                     .height(20.dp)
                     .padding(top = 4.dp)
-                    .alpha(labelAlpha),
+                    .alpha(labelAlpha)
+                    .graphicsLayer {
+                        translationY = (1f - labelAlpha) * 6.dp.toPx()
+                    },
                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -353,6 +402,63 @@ internal fun TvMediaCard(
                 color = MaterialTheme.colorScheme.onBackground,
             )
         }
+    }
+}
+
+@Composable
+internal fun TvProfileAvatar(
+    name: String,
+    avatarKey: String,
+    focused: Boolean,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+) {
+    val container = when (Math.floorMod(avatarKey.hashCode(), 3)) {
+        0 -> MaterialTheme.colorScheme.primaryContainer
+        1 -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.tertiaryContainer
+    }
+    Box(
+        modifier = modifier
+            .background(
+                color = when {
+                    focused -> TvFocusTokens.focusedContainer
+                    selected -> container.copy(alpha = 0.72f)
+                    else -> container
+                },
+                shape = TvShapeTokens.profile,
+            )
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) TvFocusTokens.beam else TvSurfaceTokens.subtleBorder,
+                shape = TvShapeTokens.profile,
+            )
+            .clip(TvShapeTokens.profile),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.trim().firstOrNull()?.uppercase() ?: "L",
+            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
+        )
+    }
+}
+
+@Composable
+internal fun TvEmptyMark(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(52.dp)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f), TvShapeTokens.profile)
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.30f), TvShapeTokens.profile),
+        contentAlignment = Alignment.Center,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_lamphaus_monochrome),
+            contentDescription = null,
+            modifier = Modifier.size(30.dp),
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
+        )
     }
 }
 

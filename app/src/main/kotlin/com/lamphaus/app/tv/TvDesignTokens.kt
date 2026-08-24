@@ -31,11 +31,19 @@ internal object TvShapeTokens {
     val card = RoundedCornerShape(4.dp)
     val button = RoundedCornerShape(4.dp)
     val hero = RoundedCornerShape(12.dp)
+    val profile = RoundedCornerShape(
+        topStart = 8.dp,
+        topEnd = 2.dp,
+        bottomEnd = 8.dp,
+        bottomStart = 2.dp,
+    )
 }
 
 internal object TvFocusTokens {
     val outlineWidth = 3.dp
-    val focusedCardOutline = Color(0xFFA8C8FF)
+    val beam = Color(0xFFA8C8FF)
+    val focusedCardOutline = beam
+    val halo = beam.copy(alpha = 0.28f)
     val focusedContainer = Color(0xFFE3E2E6)
     val focusedContent = Color(0xFF2F3033)
     val selectedNavigationContainer = Color(0xFFC7C6CA)
@@ -53,5 +61,9 @@ internal object TvSurfaceTokens {
 
 internal object TvMotionTokens {
     const val focusDurationMillis = 160
+    const val heroTransitionDurationMillis = 220
     const val heroUpdateDelayMillis = 240L
+    const val confirmationPulseDurationMillis = 110
+    const val startupSweepDurationMillis = 480
+    const val focusedArtworkScale = 1.02f
 }

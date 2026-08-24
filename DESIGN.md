@@ -33,11 +33,11 @@ Use Inter through Material type roles on TV. The complete scale is defined once 
 
 ## Shape and elevation
 
-Poster cards, buttons, fields, and list rows use 4dp corners. Immersive hero cards use 12dp. Focused TV cards use a stable-size 3dp Lamphaus-blue high-contrast outline; buttons and navigation invert surface/content colors without scaling. Available ratings appear as small neutral poster overlays rather than additional card chrome.
+Poster cards, buttons, fields, and list rows use 4dp corners. Immersive hero cards use 12dp. Focused TV card bounds remain stable while the artwork receives a 2% visual scale, a 3dp Lamphaus-blue outline, and a restrained blue halo. Buttons and navigation retain their existing geometry; selected navigation adds a 24×2dp beam. Available ratings appear as small neutral poster overlays rather than additional card chrome.
 
 ## Motion
 
-State transitions last 150–250ms with fast-out-slow-in or linear-out-slow-in easing. TV focus responds immediately; hero artwork crossfades after a short focus dwell. Remove-animations changes transitions to instant state changes or a minimal crossfade. Nothing auto-advances while the user is reading.
+State transitions last 150–250ms with fast-out-slow-in or linear-out-slow-in easing. TV focus responds in 160ms; labels lift by 6dp while fading in. Hero artwork crossfades in 220ms with a tiny horizontal drift after a short focus dwell. A one-time 480ms beam crosses the loading mark, and adding to the library receives a 220ms confirmation pulse. Remove animations changes these transitions to instant state changes. Nothing auto-advances while the user is reading.
 
 ## Artwork
 

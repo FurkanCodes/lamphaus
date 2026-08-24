@@ -2,7 +2,18 @@ package com.lamphaus.app.tv
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,6 +42,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Person
@@ -46,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -62,6 +75,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -72,6 +86,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -154,8 +169,60 @@ fun TvApp(
 
 @Composable
 private fun TvLoading() {
+    val reducedMotion = rememberReducedMotion()
+    val sweep = remember { Animatable(-0.12f) }
+    LaunchedEffect(reducedMotion) {
+        if (reducedMotion) {
+            sweep.snapTo(1.12f)
+        } else {
+            sweep.animateTo(
+                targetValue = 1.12f,
+                animationSpec = tween(
+                    durationMillis = TvMotionTokens.startupSweepDurationMillis,
+                    easing = LinearEasing,
+                ),
+            )
+        }
+    }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.displayMedium)
+        Box(
+            modifier = Modifier
+                .width(280.dp)
+                .height(72.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_lamphaus_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(44.dp),
+                )
+                Text(
+                    text = stringResource(R.string.app_name).uppercase(),
+                    style = MaterialTheme.typography.headlineMedium.copy(letterSpacing = 1.6.sp),
+                )
+            }
+            if (!reducedMotion) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val x = size.width * sweep.value
+                    drawLine(
+                        color = TvFocusTokens.beam.copy(alpha = 0.12f),
+                        start = androidx.compose.ui.geometry.Offset(x, 4.dp.toPx()),
+                        end = androidx.compose.ui.geometry.Offset(x, size.height - 4.dp.toPx()),
+                        strokeWidth = 12.dp.toPx(),
+                    )
+                    drawLine(
+                        color = TvFocusTokens.beam.copy(alpha = 0.72f),
+                        start = androidx.compose.ui.geometry.Offset(x, 8.dp.toPx()),
+                        end = androidx.compose.ui.geometry.Offset(x, size.height - 8.dp.toPx()),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -269,6 +336,7 @@ private fun TvSignedIn(
     Box(Modifier.fillMaxSize()) {
         TvTopNavigation(
             selectedDestination = destination,
+            activeProfile = state.activeProfile,
             focusDestination = focusDestination,
             downFocusRequester = contentFocus.getValue(destination),
             onFocusHandled = { focusDestination = null },
@@ -346,6 +414,18 @@ private fun TvHome(
 ) {
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
     var featured by remember(state.allMedia) { mutableStateOf(state.allMedia.firstOrNull()) }
+    val allMedia = state.allMedia
+    val continueWatching = remember(state.progress, allMedia) {
+        val mediaByKey = allMedia.associateBy(MediaPreview::stableKey)
+        state.progress
+            .asSequence()
+            .filter { !it.completed && it.fraction in 0.01f..0.98f }
+            .sortedByDescending { it.updatedAtEpochMillis }
+            .mapNotNull { progress ->
+                mediaByKey[progress.mediaKey]?.let { media -> media to progress.fraction }
+            }
+            .toList()
+    }
     LaunchedEffect(focusedCandidate) {
         focusedCandidate?.let {
             delay(TvMotionTokens.heroUpdateDelayMillis)
@@ -368,12 +448,22 @@ private fun TvHome(
                 )
             }
         }
+        if (continueWatching.isNotEmpty()) {
+            item("continue-watching") {
+                TvContinueWatchingRow(
+                    items = continueWatching,
+                    onMedia = onMedia,
+                    onFocused = { focusedCandidate = it },
+                )
+            }
+        }
         if (state.sections.isEmpty()) {
             item("empty") {
                 Column(
                     modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    TvEmptyMark()
                     Text(
                         stringResource(R.string.install_first_addon),
                         style = MaterialTheme.typography.headlineSmall,
@@ -403,12 +493,50 @@ private fun TvHome(
 }
 
 @Composable
+private fun TvContinueWatchingRow(
+    items: List<Pair<MediaPreview, Float>>,
+    onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
+        Text(
+            text = stringResource(R.string.continue_watching),
+            modifier = Modifier
+                .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
+                .semantics { heading() },
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
+            contentPadding = PaddingValues(
+                start = TvLayoutTokens.screenHorizontalPadding,
+                end = TvLayoutTokens.screenHorizontalPadding,
+                bottom = TvLayoutTokens.screenBottomPadding,
+            ),
+        ) {
+            items(items, key = { it.first.stableKey }) { (media, progress) ->
+                TvMediaCard(
+                    media = media,
+                    onClick = { onMedia(media) },
+                    onFocused = { onFocused(media) },
+                    showLabel = true,
+                    revealLabelOnFocus = true,
+                    watchProgress = progress,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun TvHero(
     media: MediaPreview,
     onMedia: (MediaPreview) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val reducedMotion = rememberReducedMotion()
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -424,12 +552,31 @@ private fun TvHero(
             .focusable()
             .semantics { contentDescription = media.name },
     ) {
-        MediaArtwork(
-            media = media,
+        AnimatedContent(
+            targetState = media,
             modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            preferBackdrop = true,
-        )
+            transitionSpec = {
+                if (reducedMotion) {
+                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                } else {
+                    (
+                        fadeIn(tween(TvMotionTokens.heroTransitionDurationMillis)) +
+                            slideInHorizontally(tween(TvMotionTokens.heroTransitionDurationMillis)) { width -> width / 80 }
+                        ) togetherWith (
+                        fadeOut(tween(TvMotionTokens.heroTransitionDurationMillis)) +
+                            slideOutHorizontally(tween(TvMotionTokens.heroTransitionDurationMillis)) { width -> -width / 100 }
+                        )
+                }
+            },
+            label = "hero artwork",
+        ) { featuredMedia ->
+            MediaArtwork(
+                media = featuredMedia,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                preferBackdrop = true,
+            )
+        }
         Box(
             Modifier
                 .fillMaxSize()
@@ -445,6 +592,14 @@ private fun TvHero(
                 .background(
                     Brush.verticalGradient(
                         listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.42f)),
+                    ),
+                )
+                .background(
+                    Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                            0.42f to Color.Transparent,
+                        ),
                     ),
                 ),
         )
@@ -559,12 +714,17 @@ private fun TvMediaGrid(
             style = MaterialTheme.typography.headlineSmall,
         )
         if (media.isEmpty()) {
-            Text(
-                stringResource(R.string.nothing_here),
+            Column(
                 modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyLarge,
-            )
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TvEmptyMark()
+                Text(
+                    stringResource(R.string.nothing_here),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(5),
@@ -650,11 +810,14 @@ private fun TvSearch(
         )
         Spacer(Modifier.height(32.dp))
         if (matches.isEmpty()) {
-            Text(
-                stringResource(R.string.nothing_here),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvEmptyMark()
+                Text(
+                    stringResource(R.string.nothing_here),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
         } else {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
@@ -682,7 +845,25 @@ private fun TvDetailScreen(
 ) {
     if (detail == null) return
     val playFocus = remember(detail.preview.stableKey) { FocusRequester() }
+    val reducedMotion = rememberReducedMotion()
+    val libraryPulse = remember(detail.preview.stableKey) { Animatable(1f) }
+    var previousLibraryState by remember(detail.preview.stableKey) { mutableStateOf(inLibrary) }
     LaunchedEffect(detail.preview.stableKey) { playFocus.requestFocus() }
+    LaunchedEffect(inLibrary) {
+        if (inLibrary && !previousLibraryState && !reducedMotion) {
+            libraryPulse.animateTo(
+                1.04f,
+                tween(TvMotionTokens.confirmationPulseDurationMillis),
+            )
+            libraryPulse.animateTo(
+                1f,
+                tween(TvMotionTokens.confirmationPulseDurationMillis),
+            )
+        } else {
+            libraryPulse.snapTo(1f)
+        }
+        previousLibraryState = inLibrary
+    }
     Box(Modifier.fillMaxSize()) {
         MediaArtwork(
             media = detail.preview,
@@ -763,7 +944,11 @@ private fun TvDetailScreen(
                         )
                         TvAction(
                             label = stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library),
-                            icon = Icons.Outlined.Add,
+                            icon = if (inLibrary) Icons.Outlined.Check else Icons.Outlined.Add,
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = libraryPulse.value
+                                scaleY = libraryPulse.value
+                            },
                             enabled = !inLibrary,
                             onClick = onLibrary,
                         )
@@ -940,10 +1125,12 @@ private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
         }
         items(state.profiles, key = { it.id }) { profile ->
             TvSettingsRow(onClick = { viewModel.selectProfile(profile.id) }) { focused ->
-                TvIcon(
-                    icon = Icons.Outlined.Person,
-                    contentDescription = null,
-                    tint = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
+                TvProfileAvatar(
+                    name = profile.name,
+                    avatarKey = profile.avatarKey,
+                    focused = focused,
+                    selected = state.activeProfileId == profile.id,
+                    modifier = Modifier.size(32.dp),
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
