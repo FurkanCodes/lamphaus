@@ -29,7 +29,9 @@ class AppContainer(context: Context) {
         context,
         LamphausDatabase::class.java,
         "lamphaus.db",
-    ).build()
+    )
+        .fallbackToDestructiveMigrationOnDowngrade()
+        .build()
 
     val preferences = UserPreferences(context)
     val libraryRepository: LibraryRepository = RoomLibraryRepository(
