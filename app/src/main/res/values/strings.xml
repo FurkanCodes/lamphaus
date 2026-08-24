@@ -62,6 +62,7 @@
     <string name="about_lamphaus_body">Your library, compatible content sources, and playback in one calm television experience.</string>
     <string name="media_card_description_rating">%1$s, rated %2$s out of 10</string>
     <string name="episodes">Episodes</string>
+    <string name="cast">Cast</string>
     <string name="add_sources_phone_title">Add sources from your phone</string>
     <string name="add_sources_phone_body">Open Lamphaus settings on your phone to install a source. Your television receives it automatically.</string>
     <string name="https_manifest_address">HTTPS manifest address</string>

@@ -89,6 +89,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.text.HtmlCompat
 import coil3.compose.AsyncImage
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -1210,6 +1211,27 @@ private fun TvDetailScreen(
                             onClick = onLibrary,
                         )
                     }
+                    if (detail.cast.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier.padding(top = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.cast),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                            Text(
+                                text = detail.cast.take(6).joinToString("  •  ") { name ->
+                                    HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString()
+                                },
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
             if (detail.episodes.isNotEmpty()) {
@@ -1233,38 +1255,80 @@ private fun TvDetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                     ) {
                         items(detail.episodes, key = Episode::id) { episode ->
-                            TvFocusableSurface(
+                            TvEpisodeCard(
+                                episode = episode,
+                                fallbackArtworkUrl = detail.preview.backgroundUrl ?: detail.preview.posterUrl,
                                 onClick = { onPlay(episode) },
-                                modifier = Modifier
-                                    .width(268.dp)
-                                    .height(104.dp),
-                                containerColor = TvSurfaceTokens.elevated,
-                            ) { focused ->
-                                Column(
-                                    modifier = Modifier.padding(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                                ) {
-                                    Text(
-                                        stringResource(
-                                            R.string.episode_format,
-                                            episode.season ?: 0,
-                                            episode.episode ?: 0,
-                                        ),
-                                        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.labelMedium,
-                                    )
-                                    Text(
-                                        episode.title,
-                                        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
+                            )
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvEpisodeCard(
+    episode: Episode,
+    fallbackArtworkUrl: String?,
+    onClick: () -> Unit,
+) {
+    val artworkUrl = episode.thumbnailUrl ?: fallbackArtworkUrl
+    TvFocusableSurface(
+        onClick = onClick,
+        modifier = Modifier
+            .width(TvLayoutTokens.landscapeCardWidth)
+            .height(TvLayoutTokens.landscapeCardHeight),
+        containerColor = TvSurfaceTokens.elevated,
+        focusedContainerColor = Color.Transparent,
+    ) { focused ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(TvSurfaceTokens.elevated),
+        ) {
+            if (!artworkUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = artworkUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            val footerColor = if (focused) TvFocusTokens.focusedContainer else TvSurfaceTokens.elevated
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                footerColor.copy(alpha = 0.90f),
+                                footerColor,
+                            ),
+                        ),
+                    )
+                    .padding(start = 16.dp, top = 28.dp, end = 16.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    stringResource(
+                        R.string.episode_format,
+                        episode.season ?: 0,
+                        episode.episode ?: 0,
+                    ),
+                    color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    episode.title,
+                    color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
