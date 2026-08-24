@@ -1064,13 +1064,14 @@ private fun TvDetailScreen(
                             modifier = Modifier.width(330.dp).height(78.dp),
                             contentScale = ContentScale.Fit,
                         )
+                    } else {
+                        Text(
+                            text = detail.preview.name,
+                            style = MaterialTheme.typography.displaySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
-                    Text(
-                        text = detail.preview.name,
-                        style = MaterialTheme.typography.displaySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
                     detail.preview.description?.let {
                         Text(
                             text = it,
