@@ -195,7 +195,7 @@ Lamp-house mark is a vector drawable: `ic_lamphaus_foreground.xml` (house `#4058
 1. ✅ `supabase init` + `link --project-ref uhxfalgfcutwrvlgjgen`
 2. Schema work: local-first when Docker available; else frozen advisor-clean migrations pushed via `supabase db push` (current practice — project was empty)
 3. Dashboard config done/pending: Google provider enabled ✅ (Web ID+secret; Android IDs optional field left empty — audience is the Web client) · redirect allow-list needs `<site>/auth/callback` + Pages URL · custom SMTP before magic-link testing (M7)
-4. Edge Functions deployed via CLI; secrets via `supabase secrets set`. Project runs on new-format API keys: the platform-injected `SUPABASE_SERVICE_ROLE_KEY` is an opaque `sb_secret` — PostgREST accepts it, but **GoTrue admin endpoints require the legacy JWT**, stored as function secret `SERVICE_ROLE_JWT` (claim-pairing-session prefers it). Pairing functions answer CORS preflights (browser `/pair` claims).
+4. Edge Functions deployed via CLI; secrets via `supabase secrets set`. Project runs on new-format API keys: the platform-injected `SUPABASE_SERVICE_ROLE_KEY` is an opaque `sb_secret` — PostgREST accepts it, but **GoTrue admin endpoints require the legacy JWT**, stored as function secret `SERVICE_ROLE_JWT` (claim-pairing-session prefers it). Pairing + provider-config functions answer CORS preflights (browser claims/settings). Provider configs encrypt with `PROVIDER_CONFIG_KEY` (base64 AES-256 key; regenerate ⇒ old rows undecryptable by design).
 5. CI secrets (owner): `SUPABASE_ACCESS_TOKEN` for functions deploys
 6. Local cloud builds (owner): `~/.gradle/gradle.properties` → `lamphaus.supabaseUrl` / `lamphaus.supabasePublishableKey` / `lamphaus.webClientId` ✅ configured
 7. Rewrite `docs/PRODUCTION_SETUP.md` at M8
@@ -234,7 +234,7 @@ Branch: `feature/supabase-migration` · base: main @ `5a34c51`
 | M3 | sync swap (Postgrest+realtime gateway wired into container) | ✅ `8096f26`→`495e584` · live E2E verified 2026-08-25 · PGRST303 retry + empty-cloud seeding (supabase#48123 armor) |
 | Web | Next.js site: pages, design tokens, logo, `/pair` auth+claim, Pages deploy | ✅ static export green · Pages workflow ready · claim call live-pending M4 functions |
 | M4 | TV pairing E2E: functions(create/claim/exchange/register-session) + TV polling + QR live | ✅ `32d44c6`→`95cb9bb` · device E2E verified 2026-08-25: QR claim via web Google sign-in, OTP session minted, devices bound, session survives TV cold start |
-| M5 | provider-config Edge Functions + encryption parity test | ⬜ |
+| M5 | provider-config Edge Functions + encryption parity test | ✅ · functions live E2E verified 2026-08-25 (401 anon · save/upsert/list/delete roundtrip) · AES-256-GCM `v1.<iv>.<ct>` AAD-bound to user+provider, NIST-vector parity test green (`supabase/tests/`) |
 | M6 | device management UI + revoke E2E + delete-account | ⬜ |
 | M7 | magic-link migration + SMTP + pending-email fix | ⬜ |
 | M8 | cutover → delete legacy Firebase files → docs rewrite | ⬜ |
