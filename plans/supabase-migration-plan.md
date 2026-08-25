@@ -87,7 +87,7 @@ Owner confirmed Firestore was never used. Exporter permanently descoped.
 
 | Actor | Identity | Obtained via |
 |---|---|---|
-| Phone user | Supabase account (`auth.users`) | Native Google sign-in in-app (M2); magic-link later (M7) |
+| Phone user | Supabase account (`auth.users`) | Native Google sign-in in-app (M2); magic-link descoped |
 | **Any phone w/o the app** | Same accounts, via web | `/pair` page → Supabase Google OAuth (web PKCE) |
 | TV | A `devices` row bound to a user + that user's GoTrue session | Never signs into Google; inherits identity through pairing |
 
@@ -204,14 +204,14 @@ Lamp-house mark is a vector drawable: `ic_lamphaus_foreground.xml` (house `#4058
 
 - `CLOUD_CONFIGURED` gate remains; Local mode is the permanent escape hatch after every milestone.
 - Big-bang switch acceptable pre-launch; delete legacy files only after full E2E passes (M8).
-- Verification checklist: Google sign-in E2E · magic-link E2E · TV pairing E2E on real device · revocation kills TV instantly · realtime sync across two signed-in devices · account deletion leaves zero rows · advisors clean.
+- Verification checklist: Google sign-in E2E · TV pairing E2E on real device · revocation kills TV instantly · realtime sync across two signed-in devices · account deletion leaves zero rows · advisors clean.
 
 ## 11. Risks & Notes
 
 | Risk | Mitigation |
 |---|---|
 | supabase-kt 3.7.0 realtime API ≠ latest docs (`channel()` needs builder arg; string-filter setter private) | **M3 retry protocol:** pin exact call shapes with a throwaway compile-test BEFORE writing the gateway; or bump library if a newer release matches docs |
-| Magic-link email deliverability | custom SMTP configured before fresh-account testing (M7) |
+| Magic-link email deliverability | descoped with M7 — only relevant if mobile magic-link sign-in returns |
 | Consent screen must be published for web pairing | privacy policy live before public launch (owner input on legal text) |
 | Realtime RLS filtering nuances | explicit cross-profile isolation test in M3 |
 | OAuth client misconfig (nonce/idToken rejection) | fingerprints documented in PRODUCTION_SETUP rewrite |
@@ -236,7 +236,7 @@ Branch: `feature/supabase-migration` · base: main @ `5a34c51`
 | M4 | TV pairing E2E: functions(create/claim/exchange/register-session) + TV polling + QR live | ✅ `32d44c6`→`95cb9bb` · device E2E verified 2026-08-25: QR claim via web Google sign-in, OTP session minted, devices bound, session survives TV cold start |
 | M5 | provider-config Edge Functions + encryption parity test | ✅ · functions live E2E verified 2026-08-25 (401 anon · save/upsert/list/delete roundtrip) · AES-256-GCM `v1.<iv>.<ct>` AAD-bound to user+provider, NIST-vector parity test green (`supabase/tests/`) |
 | M6 | device management UI + revoke E2E + delete-account | ✅ `revoke-device`+`delete-account` functions live (verify_jwt) · `revoke_device` RPC DB-verified 2026-08-25: owner revoke flips flag + destroys bound GoTrue session & refresh tokens; cross-user revoke blocked (`DEVICE_NOT_FOUND_OR_FORBIDDEN`); delete-account cascades all owner tables (FK audit) · settings UI: paired-devices list + disconnect dialog + account deletion · revoked-session RefreshFailure→SignedOut (TV drops to QR). On-device unpair observation pending next TV build. Post-delete register regression fixed: stale `cloudSyncJob` bound to the dead uid silently blocked the successor's sync (profiles never seeded/written) — job now identity-bound, restarted on account change, torn down on signed-out; delete-account additionally wipes the local Room cache (`clearLocalAccountData`, previously never wired) |
-| M7 | magic-link migration + SMTP + pending-email fix | ⬜ |
+| M7 | magic-link migration + SMTP + pending-email fix | ⏸ **Descoped 2026-08-25 (owner)**: Google sign-in covers phone + web pairing, and TV-pairing `generateLink` tokens are programmatic (never hit SMTP). Client stubs (`sendEmailLink`/`completeEmailLink`) stay; revisit post-launch if non-Google email sign-in is wanted |
 | M8 | cutover → delete legacy Firebase files → docs rewrite | ⬜ |
 
 Execution order note: web build precedes M4 (pairing depends on `/pair`). M3 may run parallel or after M2 verification.
