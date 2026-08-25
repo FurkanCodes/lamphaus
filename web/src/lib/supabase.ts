@@ -16,6 +16,30 @@ export function getSupabase(): SupabaseClient {
 
 export class PairingUnavailableError extends Error {}
 
+/**
+ * Nukes every trace of Supabase state from this browser: the stored
+ * session, PKCE leftovers, cached user metadata. Needed because the
+ * pairing page must never present a token belonging to an account that
+ * was deleted elsewhere — signOut alone proved too gentle with zombies.
+ * The pairing code itself travels in the URL, so wiping is safe mid-flow.
+ */
+export async function purgeLocalAuth(): Promise<void> {
+  const supabase = getSupabase();
+  await supabase.auth.signOut().catch(() => {});
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith("sb-") || key.startsWith("lamphaus."))) {
+        doomed.push(key);
+      }
+    }
+    doomed.forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // Storage unavailable (private mode quirks) — signOut already ran.
+  }
+}
+
 export type ClaimResult =
   | { ok: true }
   | {
@@ -56,9 +80,9 @@ export async function claimPairingSession(code: string): Promise<ClaimResult> {
   if (status === 401 || status === 403) {
     // The bearer was rejected: the locally cached session points at an
     // auth user that no longer exists (deleted account, revoked session).
-    // Clear it so the visitor goes through Google sign-in again instead
-    // of looping on dead credentials forever.
-    await supabase.auth.signOut().catch(() => {});
+    // Purge EVERYTHING this browser holds so the next attempt starts
+    // from zero instead of looping on dead credentials.
+    await purgeLocalAuth();
     return { ok: false, kind: "stale-session" };
   }
   if (status === 0 || status >= 500) {

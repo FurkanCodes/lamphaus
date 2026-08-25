@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { LamphausMark } from "@/components/lamphaus-mark";
-import { claimPairingSession, getSupabase } from "@/lib/supabase";
+import { claimPairingSession, getSupabase, purgeLocalAuth } from "@/lib/supabase";
 import { cloudConfigured, withBasePath } from "@/lib/config";
 
 const PENDING_CODE_KEY = "lamphaus.pairCode";
@@ -67,8 +67,11 @@ export default function PairClient() {
           setPhase({ kind: "signed-out", code });
         }
       })
-      .catch(() => {
-        if (active) setPhase({ kind: "not-configured" });
+      .catch(async () => {
+        // Corrupt/unreadable stored session — purge it and fall back to
+        // the sign-in screen instead of spinning forever.
+        await purgeLocalAuth().catch(() => {});
+        if (active) setPhase({ kind: "signed-out", code });
       });
     return () => {
       active = false;
