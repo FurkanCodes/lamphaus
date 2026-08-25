@@ -104,14 +104,15 @@ class SupabaseAccountGateway(
         // a raw RestException.
         CloudLog.w("account.delete rejected (401) → refreshing session once")
         val refreshed = runCatching { supabase.auth.refreshCurrentSession() }
-        if (refreshed.isFailure) {
-            CloudLog.w("account.delete refresh failed (${refreshed.exceptionOrNull()::class.simpleName}) → SignedOut")
+        val refreshError = refreshed.exceptionOrNull()
+        if (refreshError != null) {
+            CloudLog.w("account.delete refresh failed (${refreshError::class.simpleName}) → SignedOut")
             mutableState.value = AccountState.SignedOut
             runCatching { supabase.auth.signOut() }
             return Result.failure(
                 IllegalStateException(
                     "Session expired — sign in again to delete your account",
-                    refreshed.exceptionOrNull(),
+                    refreshError,
                 ),
             )
         }
