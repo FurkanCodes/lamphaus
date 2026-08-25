@@ -117,8 +117,8 @@ class AppViewModel(
             .onFailure { showMessage(it.message ?: "Development session is unavailable.") }
     }
 
-    fun signInWithGoogleToken(token: String) = viewModelScope.launch {
-        container.accountGateway.signInWithGoogleIdToken(token).onFailure { showMessage(it.safeAuthMessage()) }
+    fun signInWithGoogleToken(token: String, nonce: String?) = viewModelScope.launch {
+        container.accountGateway.signInWithGoogleIdToken(token, nonce).onFailure { showMessage(it.safeAuthMessage()) }
     }
 
     fun sendEmailLink(email: String) = viewModelScope.launch {

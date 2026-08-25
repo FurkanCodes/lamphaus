@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.lamphaus.core.data.cloud.AccountGateway
 import com.lamphaus.core.data.cloud.LocalAccountGateway
 import com.lamphaus.core.data.cloud.LocalPairingGateway
+import com.lamphaus.core.data.cloud.SupabaseAccountGateway
 import com.lamphaus.core.data.cloud.LocalCloudSyncGateway
 import com.lamphaus.core.data.cloud.CloudSyncGateway
 import com.lamphaus.core.data.cloud.PairingGateway
@@ -43,8 +44,6 @@ class AppContainer(context: Context) {
     )
     val providerAggregator = ProviderAggregator(providerClient)
 
-    private val localAccount = LocalAccountGateway()
-
     /**
      * Shared Supabase client, present only when cloud credentials are provided via
      * Gradle properties (lamphaus.supabaseUrl / lamphaus.supabasePublishableKey).
@@ -65,8 +64,13 @@ class AppContainer(context: Context) {
         null
     }
 
-    // TODO(M2): swap to SupabaseAccountGateway(supabase)
-    val accountGateway: AccountGateway = localAccount
+    private val localAccount = LocalAccountGateway()
+
+    val accountGateway: AccountGateway = if (supabase != null) {
+        SupabaseAccountGateway(supabase)
+    } else {
+        localAccount
+    }
     // TODO(M4): swap to SupabasePairingGateway(supabase)
     val pairingGateway: PairingGateway = LocalPairingGateway()
     // TODO(M3): swap to SupabaseCloudSyncGateway(supabase)

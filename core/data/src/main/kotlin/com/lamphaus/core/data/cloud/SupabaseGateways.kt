@@ -1,0 +1,85 @@
+package com.lamphaus.core.data.cloud
+
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.Google
+import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.auth.status.SessionStatus
+import io.github.jan.supabase.auth.user.UserInfo
+import io.github.jan.supabase.auth.user.UserSession
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+
+/**
+ * Supabase-backed account state. Mirrors GoTrue session status into [AccountState]
+ * and persists sessions across launches through the platform session manager.
+ */
+class SupabaseAccountGateway(
+    private val supabase: SupabaseClient,
+) : AccountGateway {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mutableState = MutableStateFlow<AccountState>(AccountState.Loading)
+    override val state: StateFlow<AccountState> = mutableState.asStateFlow()
+
+    init {
+        scope.launch {
+            supabase.auth.sessionStatus.collect { status ->
+                when (status) {
+                    is SessionStatus.Authenticated ->
+                        mutableState.value = status.session.toAccountState()
+                    SessionStatus.Initializing ->
+                        mutableState.value = AccountState.Loading
+                    is SessionStatus.NotAuthenticated ->
+                        mutableState.value = AccountState.SignedOut
+                    // A failed refresh keeps the last known state: transient network
+                    // issues must not sign the user out. Revoked sessions surface
+                    // as NotAuthenticated from the SDK once rejected server-side.
+                    is SessionStatus.RefreshFailure -> Unit
+                }
+            }
+        }
+    }
+
+    override suspend fun signInWithGoogleIdToken(idToken: String, nonce: String?): Result<Unit> = runCatching {
+        require(idToken.isNotBlank())
+        supabase.auth.signInWith(IDToken) {
+            this.idToken = idToken
+            provider = Google
+            nonce?.let { this.nonce = it }
+        }
+        Unit
+    }
+
+    override suspend fun sendEmailLink(email: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Magic link sign-in lands in milestone M7."))
+
+    override suspend fun completeEmailLink(email: String, link: String): Result<Unit> =
+        Result.failure(UnsupportedOperationException("Magic link sign-in lands in milestone M7."))
+
+    override suspend fun signOut() {
+        runCatching { supabase.auth.signOut() }
+    }
+
+    private fun UserSession.toAccountState(): AccountState {
+        val user = user ?: return AccountState.SignedOut
+        return AccountState.SignedIn(
+            userId = user.id,
+            displayName = user.displayName(),
+            email = user.email,
+        )
+    }
+
+    private fun UserInfo.displayName(): String? {
+        val metadata = userMetadata.orEmpty()
+        return metadata["name"]?.jsonPrimitive?.contentOrNull
+            ?: metadata["full_name"]?.jsonPrimitive?.contentOrNull
+            ?: metadata["given_name"]?.jsonPrimitive?.contentOrNull
+    }
+}

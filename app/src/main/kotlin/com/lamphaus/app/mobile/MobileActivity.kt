@@ -21,6 +21,8 @@ import com.lamphaus.app.player.PlayerActivity
 import android.content.Intent
 import androidx.core.content.edit
 import androidx.core.net.toUri
+import java.security.MessageDigest
+import java.util.UUID
 import kotlinx.coroutines.launch
 import androidx.credentials.exceptions.NoCredentialException
 
@@ -59,10 +61,18 @@ class MobileActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             try {
+                // Supabase verifies the token against the hashed nonce; the raw
+                // value travels only with the sign-in request.
+                val rawNonce = UUID.randomUUID().toString()
+                val hashedNonce = MessageDigest.getInstance("SHA-256")
+                    .digest(rawNonce.toByteArray())
+                    .joinToString("") { "%02x".format(it) }
+
                 val option = GetGoogleIdOption.Builder()
                     .setServerClientId(BuildConfig.WEB_CLIENT_ID)
                     .setFilterByAuthorizedAccounts(false)
                     .setAutoSelectEnabled(true)
+                    .setNonce(hashedNonce)
                     .build()
                 val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
                 val credential = CredentialManager.create(this@MobileActivity)
@@ -70,7 +80,7 @@ class MobileActivity : ComponentActivity() {
                     .credential
                 if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val token = GoogleIdTokenCredential.createFrom(credential.data).idToken
-                    viewModel.signInWithGoogleToken(token)
+                    viewModel.signInWithGoogleToken(token, rawNonce)
                 } else {
                     viewModel.reportMessage("That credential cannot be used here.")
                 }

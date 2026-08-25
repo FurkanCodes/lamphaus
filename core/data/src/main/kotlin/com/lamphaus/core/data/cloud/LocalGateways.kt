@@ -14,7 +14,7 @@ class LocalAccountGateway : AccountGateway {
         mutableState.value = AccountState.SignedIn("local-development", "Local viewer", null)
     }
 
-    override suspend fun signInWithGoogleIdToken(idToken: String) = Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun signInWithGoogleIdToken(idToken: String, nonce: String?) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun sendEmailLink(email: String) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun completeEmailLink(email: String, link: String) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun signOut() { mutableState.value = AccountState.SignedOut }

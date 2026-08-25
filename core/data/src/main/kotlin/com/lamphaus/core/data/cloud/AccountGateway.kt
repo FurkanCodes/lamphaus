@@ -11,7 +11,12 @@ sealed interface AccountState {
 
 interface AccountGateway {
     val state: StateFlow<AccountState>
-    suspend fun signInWithGoogleIdToken(idToken: String): Result<Unit>
+
+    /**
+     * Exchanges a Google ID token for a platform session. The [nonce] must be the
+     * raw random string whose SHA-256 hash was passed to the credential request.
+     */
+    suspend fun signInWithGoogleIdToken(idToken: String, nonce: String? = null): Result<Unit>
     suspend fun sendEmailLink(email: String): Result<Unit>
     suspend fun completeEmailLink(email: String, link: String): Result<Unit>
     suspend fun signOut()
