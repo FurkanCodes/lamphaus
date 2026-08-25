@@ -66,6 +66,7 @@ class AppViewModel(
     val state: StateFlow<AppUiState> = mutableState.asStateFlow()
     private var refreshJob: Job? = null
     private var cloudSyncJob: Job? = null
+    private var cloudSyncUserId: String? = null
     private var defaultCatalogJob: Job? = null
     private var searchJob: Job? = null
     private var detailJob: Job? = null
@@ -108,6 +109,12 @@ class AppViewModel(
                 if (snapshot.account is AccountState.SignedIn) {
                     ensureDefaultCatalog(snapshot.providers)
                     startCloudSync(snapshot.account.userId, snapshot.profiles)
+                } else if (cloudSyncUserId != null) {
+                    // Sign-out / deletion must retire the collectors bound to
+                    // the previous user's realtime channels.
+                    cloudSyncJob?.cancel()
+                    cloudSyncJob = null
+                    cloudSyncUserId = null
                 }
                 refreshCatalogs()
             }
@@ -622,7 +629,11 @@ class AppViewModel(
 
     fun deleteAccount() = viewModelScope.launch {
         container.accountGateway.deleteAccount().onSuccess {
-            CloudLog.i("settings.account deleted — local session cleared")
+            CloudLog.i("settings.account deleted — wiping local cache, session cleared")
+            // Cloud rows are gone (cascade); without this the stale Room data
+            // would suppress createInitialProfile for the next registration
+            // and leak the old account's content into it via seeding.
+            container.libraryRepository.clearLocalAccountData()
             mutableState.update(AppUiState::clearAccountData)
             showMessage("Your account and all cloud data were deleted.")
         }.onFailure {
@@ -865,7 +876,15 @@ class AppViewModel(
     private fun showMessage(message: String) = mutableState.update { it.copy(message = message) }
 
     private fun startCloudSync(userId: String, profiles: List<Profile>) {
-        if (!BuildConfig.CLOUD_CONFIGURED || cloudSyncJob?.isActive == true) return
+        if (!BuildConfig.CLOUD_CONFIGURED) return
+        // A live job belongs to exactly one user. After sign-out → sign-in
+        // (or a deleted account's successor) a surviving job would still be
+        // bound to the old uid's channels and silently swallow the new
+        // user's sync — including empty-cloud seeding — leaving profiles
+        // unwritten. Restart whenever the identity changes.
+        if (cloudSyncJob?.isActive == true && cloudSyncUserId == userId) return
+        cloudSyncJob?.cancel()
+        cloudSyncUserId = userId
         cloudSyncJob = viewModelScope.launch {
             launch {
                 container.cloudSyncGateway.profiles(userId).collect { cloudProfiles ->
