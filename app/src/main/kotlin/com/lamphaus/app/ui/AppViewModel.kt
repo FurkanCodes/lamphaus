@@ -634,6 +634,8 @@ class AppViewModel(
             // would suppress createInitialProfile for the next registration
             // and leak the old account's content into it via seeding.
             container.libraryRepository.clearLocalAccountData()
+            container.preferences.setActiveProfile(null)
+            devicesLoadedOnce = false
             mutableState.update(AppUiState::clearAccountData)
             showMessage("Your account and all cloud data were deleted.")
         }.onFailure {

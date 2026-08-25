@@ -16,7 +16,8 @@ type Phase =
   | { kind: "claiming"; code: string }
   | { kind: "success" }
   | { kind: "expired" }
-  | { kind: "unavailable"; detail?: string };
+  | { kind: "unavailable"; detail?: string }
+  | { kind: "network"; detail?: string };
 
 export default function PairClient() {
   const searchParams = useSearchParams();
@@ -35,6 +36,8 @@ export default function PairClient() {
       // Cached credentials were rejected (deleted account / revoked
       // session) and have been cleared — ask for a fresh sign-in.
       setPhase({ kind: "signed-out", code: claimCode });
+    } else if (result.kind === "network") {
+      setPhase({ kind: "network", detail: result.detail });
     } else {
       setPhase({ kind: "unavailable", detail: result.detail });
     }
@@ -168,15 +171,33 @@ export default function PairClient() {
         </>
       )}
 
+      {phase.kind === "network" && (
+        <>
+          <h1 className="font-display text-2xl font-semibold">
+            Can&apos;t reach the pairing service.
+          </h1>
+          <p className="mt-3 leading-relaxed text-fg-muted">
+            Check your connection, then show a fresh QR on the TV and try
+            again.
+          </p>
+          {phase.detail && (
+            <p className="mt-4 text-xs text-fg-muted">{phase.detail}</p>
+          )}
+        </>
+      )}
+
       {phase.kind === "unavailable" && (
         <>
           <h1 className="font-display text-2xl font-semibold">
-            Pairing service isn't live yet.
+            Something went wrong while linking.
           </h1>
           <p className="mt-3 leading-relaxed text-fg-muted">
-            The claim endpoint ships with the next milestone. Your sign-in
-            worked — the TV just can't be linked until then.
+            Your sign-in worked, but the TV could not be linked just now.
+            Please try again in a minute.
           </p>
+          {phase.detail && (
+            <p className="mt-4 text-xs text-fg-muted">{phase.detail}</p>
+          )}
         </>
       )}
     </div>

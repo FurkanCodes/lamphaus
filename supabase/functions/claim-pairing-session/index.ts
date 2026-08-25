@@ -19,11 +19,13 @@ const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_JWT") ??
 
 // Browsers preflight every call from the /pair page; without these headers
 // the request dies before POST ever runs and pairing looks "not live".
+// x-supabase-api-version is sent by newer supabase-js releases — a missing
+// entry makes the BROWSER cancel the request right after a 204 preflight.
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-supabase-api-version",
 };
 
 function json(body: unknown, status = 200): Response {
