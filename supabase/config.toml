@@ -382,3 +382,16 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+# ── Edge Functions — M4 TV pairing ──────────────────────────────────────
+# create/exchange are called by unauthenticated TVs: their protection is
+# IP-hash rate limiting + single-use SHA-256-hashed codes instead of a
+# bearer JWT (see supabase/functions/*/index.ts). claim MUST stay gated.
+[functions.create-pairing-session]
+verify_jwt = false
+
+[functions.exchange-device-grant]
+verify_jwt = false
+
+[functions.claim-pairing-session]
+verify_jwt = true
