@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Local env files — real keys stay out of the repo (CI injects its own)
+.env
+.env.local
+.env.*.local

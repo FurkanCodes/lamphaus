@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/*
+ * Lamphaus web tokens — canonical values ported from MobileTheme.kt
+ * (dark scheme) and TvDesignTokens.kt; see plans/supabase-migration-plan.md §8.1.
+ * Semantic names only: dark-first, light values reserved for later.
+ * Anti-references honored: no glass, no gradients.
+ */
+@theme {
+  --color-bg: #090a0d;
+  --color-surface: #15171e;
+  --color-surface-raised: #1e2023;
+  --color-surface-card: #292a2d;
+  --color-surface-variant: #30323a;
+
+  --color-fg: #f2f3fa;
+  --color-fg-muted: #c6c8d2;
+  --color-fg-subtle: #90929d;
+
+  --color-primary: #afc2ff;
+  --color-on-primary: #10234f;
+  --color-primary-container: #293f72;
+  --color-on-primary-container: #dce2ff;
+
+  --color-secondary: #68d4e8;
+  --color-on-secondary: #00363f;
+  --color-secondary-container: #004f5c;
+  --color-on-secondary-container: #a8edfa;
+
+  --color-outline: #90929d;
+  --color-beam: #a8c8ff;
+
+  --radius-card: 4px;
+  --radius-hero: 12px;
+
+  --font-display: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: var(--color-beam);
+  color: var(--color-on-primary);
+}
+
+/* Focus ring mirrors the TV focus outline (TvFocusTokens.beam). */
+:focus-visible {
+  outline: 2px solid var(--color-beam);
+  outline-offset: 2px;
+}
+
+/* One orchestrated entrance per page load; transform+opacity only.
+   Easing is ease-out-quint — objects decelerate, they don't bounce. */
+@keyframes lamphaus-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: lamphaus-rise 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.rise-2 { animation-delay: 80ms; }
+.rise-3 { animation-delay: 160ms; }
+.rise-4 { animation-delay: 240ms; }
+.rise-5 { animation-delay: 320ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .rise-2,
+  .rise-3,
+  .rise-4,
+  .rise-5 {
+    animation: none;
+  }
+}

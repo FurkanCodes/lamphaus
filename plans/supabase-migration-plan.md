@@ -232,7 +232,7 @@ Branch: `feature/supabase-migration` · base: main @ `5a34c51`
 | M1b | `user_settings` table (synced settings) | ✅ `fb62066` |
 | M2 | mobile Google sign-in (gateway+nonce+wiring) | ✅ `3badbe9` · live E2E verified 2026-08-25 |
 | M3 | sync swap (Postgrest+realtime gateway wired into container) | ✅ `8096f26`→`495e584` · live E2E verified 2026-08-25 · PGRST303 retry + empty-cloud seeding (supabase#48123 armor) |
-| Web | Next.js site: pages, design tokens, logo, `/pair` auth+claim, Pages deploy | ⬜ (critical path for M4) |
+| Web | Next.js site: pages, design tokens, logo, `/pair` auth+claim, Pages deploy | ✅ static export green · Pages workflow ready · claim call live-pending M4 functions |
 | M4 | TV pairing E2E: functions(create/claim/exchange/register-session) + TV polling + QR live | ⬜ |
 | M5 | provider-config Edge Functions + encryption parity test | ⬜ |
 | M6 | device management UI + revoke E2E + delete-account | ⬜ |
