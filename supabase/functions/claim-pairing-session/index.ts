@@ -124,18 +124,61 @@ Deno.serve(async (req) => {
   }
   const link = await linkRes.json();
 
-  const deviceId = crypto.randomUUID();
-  const deviceRow = await rest("devices", {
-    method: "POST",
-    body: JSON.stringify({
-      id: deviceId,
-      user_id: user.id,
-      label: typeof session.device_label === "string" && session.device_label
-        ? session.device_label
-        : "Television",
-    }),
-  });
-  if (!deviceRow.ok) return json({ error: "device_create_failed" }, 500);
+  // Find-or-create ONE devices entry per physical TV: a re-pairing TV
+  // (revoked, deleted-account recovery, expiry) must reactivate its old
+  // row instead of cloning it. Without device_key (legacy sessions) we
+  // always insert, exactly as before.
+  const deviceKey =
+    typeof session.device_key === "string" && session.device_key
+      ? session.device_key
+      : null;
+  let deviceId: string;
+  let insertedNew = false;
+  if (deviceKey) {
+    const existing = await rest(
+      `devices?user_id=eq.${user.id}&device_key=eq.${encodeURIComponent(deviceKey)}&select=id`,
+    )
+      .then((r) => r.json())
+      .catch(() => []);
+    if (Array.isArray(existing) && existing.length > 0) {
+      // Re-activate: the old bound session is long dead (that's why the
+      // TV shows a QR); register_device_session binds the fresh one.
+      const reused = await rest(`devices?id=eq.${existing[0].id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          revoked: false,
+          auth_session_id: null,
+          label:
+            typeof session.device_label === "string" && session.device_label
+              ? session.device_label
+              : "Television",
+        }),
+      });
+      if (!reused.ok) return json({ error: "device_create_failed" }, 500);
+      deviceId = existing[0].id;
+    } else {
+      deviceId = crypto.randomUUID();
+      insertedNew = true;
+    }
+  } else {
+    deviceId = crypto.randomUUID();
+    insertedNew = true;
+  }
+  if (insertedNew) {
+    const deviceRow = await rest("devices", {
+      method: "POST",
+      body: JSON.stringify({
+        id: deviceId,
+        user_id: user.id,
+        label:
+          typeof session.device_label === "string" && session.device_label
+            ? session.device_label
+            : "Television",
+        device_key: deviceKey,
+      }),
+    });
+    if (!deviceRow.ok) return json({ error: "device_create_failed" }, 500);
+  }
 
   // Atomic claim+grant in ONE statement: only an unclaimed, unexchanged,
   // live session matches, so racing phones produce exactly one winner.
@@ -158,8 +201,11 @@ Deno.serve(async (req) => {
     .catch(() => []);
 
   if (!Array.isArray(claimed) || claimed.length === 0) {
-    // Lost the race or dead code — remove the orphan device row best-effort.
-    await rest(`devices?id=eq.${deviceId}`, { method: "DELETE" });
+    // Lost the race or dead code — remove the ORPHANED row best-effort,
+    // but never a reused pre-existing device entry.
+    if (insertedNew) {
+      await rest(`devices?id=eq.${deviceId}`, { method: "DELETE" });
+    }
     return json({ error: "invalid_or_expired_code" }, 410);
   }
 

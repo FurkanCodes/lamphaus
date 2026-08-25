@@ -34,10 +34,11 @@ class SupabasePairingGateway(
     private val supabase: SupabaseClient,
 ) : PairingGateway {
 
-    override suspend fun createPairingSession(deviceLabel: String): Result<PairingSession> =
+    override suspend fun createPairingSession(deviceLabel: String, deviceKey: String?): Result<PairingSession> =
         CloudLog.tracedResult("pairing.create", "label=$deviceLabel") {
             val body = invoke("create-pairing-session") {
                 put("device_label", deviceLabel)
+                if (!deviceKey.isNullOrBlank()) put("device_key", deviceKey)
             }
             PairingSession(
                 id = body.string("session_id"),

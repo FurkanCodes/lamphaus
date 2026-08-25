@@ -24,7 +24,7 @@ class LocalAccountGateway : AccountGateway {
 }
 
 class LocalPairingGateway : PairingGateway {
-    override suspend fun createPairingSession(deviceLabel: String): Result<PairingSession> {
+    override suspend fun createPairingSession(deviceLabel: String, deviceKey: String?): Result<PairingSession> {
         val id = UUID.randomUUID().toString()
         return Result.success(
             PairingSession(

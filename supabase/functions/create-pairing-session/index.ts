@@ -92,6 +92,13 @@ Deno.serve(async (req) => {
     typeof body.device_label === "string" && body.device_label.trim()
       ? body.device_label.trim().slice(0, 40)
       : "Television";
+  // Hardware-bound identity (ANDROID_ID): lets claim() reuse the same
+  // devices row instead of cloning one per re-pair. Sanitized hard.
+  const deviceKey =
+    typeof body.device_key === "string" &&
+      /^[A-Za-z0-9._-]{8,128}$/.test(body.device_key.trim())
+      ? body.device_key.trim()
+      : null;
 
   const sessionId = crypto.randomUUID();
   const shortCode = randomShortCode();
@@ -104,6 +111,7 @@ Deno.serve(async (req) => {
       id: sessionId,
       code_hash: codeHash,
       device_label: deviceLabel,
+      device_key: deviceKey,
       expires_at: expiresAt,
     }),
   });

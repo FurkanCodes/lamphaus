@@ -1,6 +1,7 @@
 package com.lamphaus.app
 
 import android.content.Context
+import android.provider.Settings
 import androidx.room.Room
 import com.lamphaus.core.data.cloud.AccountGateway
 import com.lamphaus.core.data.cloud.LocalAccountGateway
@@ -35,6 +36,18 @@ class AppContainer(context: Context) {
     )
         .fallbackToDestructiveMigrationOnDowngrade()
         .build()
+
+    /**
+     * Hardware-bound pairing identity (plan D3 refinement): ANDROID_ID is
+     * stable per device + signing key and needs no permissions. Lets the
+     * claim endpoint reuse ONE devices row per physical TV instead of
+     * cloning a new row on every re-pair.
+     */
+    val pairingDeviceKey: String? =
+        Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ANDROID_ID,
+        )?.takeIf { it.length >= 8 }
 
     val preferences = UserPreferences(context)
     val libraryRepository: LibraryRepository = RoomLibraryRepository(

@@ -529,7 +529,7 @@ class AppViewModel(
         pairingPollJob?.cancel()
         pairingPollJob = viewModelScope.launch {
             CloudLog.i("tv.pairing creating session…")
-            container.pairingGateway.createPairingSession(PAIRING_DEVICE_LABEL).onSuccess { session ->
+            container.pairingGateway.createPairingSession(PAIRING_DEVICE_LABEL, container.pairingDeviceKey).onSuccess { session ->
                 mutableState.update { it.copy(pairingSession = session) }
                 pollForDeviceGrant(session)
             }.onFailure {

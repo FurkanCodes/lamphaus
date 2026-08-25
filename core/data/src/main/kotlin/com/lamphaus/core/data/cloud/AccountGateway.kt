@@ -26,7 +26,7 @@ interface AccountGateway {
 }
 
 interface PairingGateway {
-    suspend fun createPairingSession(deviceLabel: String): Result<PairingSession>
+    suspend fun createPairingSession(deviceLabel: String, deviceKey: String?): Result<PairingSession>
     suspend fun claimPairingSession(shortCode: String): Result<Unit>
     suspend fun exchangeDeviceGrant(sessionId: String): Result<DeviceGrant>
     suspend fun listDevices(): Result<List<PairedDevice>>
