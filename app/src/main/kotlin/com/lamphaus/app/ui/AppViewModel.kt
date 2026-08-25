@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -768,6 +769,25 @@ class AppViewModel(
             // that cannot exist in Postgres; keep them out of cloud sync.
             val cloudBackedProfiles = profiles.filter { profile ->
                 runCatching { UUID.fromString(profile.id) }.isSuccess
+            }
+            // Freshly linked accounts start empty in Postgres: profiles created
+            // before sign-in (or whose first push landed in an auth outage)
+            // would otherwise stay device-local forever, because only
+            // post-sign-in mutations are pushed. Seed once while the cloud holds
+            // no profiles; afterwards the inbound collectors own convergence.
+            launch {
+                val cloudIsEmpty = container.cloudSyncGateway.profiles(userId).first().isEmpty()
+                if (cloudIsEmpty) {
+                    cloudBackedProfiles.forEach { profile ->
+                        container.cloudSyncGateway.saveProfile(userId, profile)
+                    }
+                    cloudBackedProfiles.forEach { profile ->
+                        container.libraryRepository.library(profile.id).first()
+                            .forEach { container.cloudSyncGateway.saveLibrary(userId, it) }
+                        container.libraryRepository.progress(profile.id).first()
+                            .forEach { container.cloudSyncGateway.saveProgress(userId, it) }
+                    }
+                }
             }
             cloudBackedProfiles.forEach { profile ->
                 launch {

@@ -14,9 +14,11 @@ import io.github.jan.supabase.postgrest.query.filter.FilterOperation
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.selectAsFlow
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -44,6 +46,7 @@ class SupabaseCloudSyncGateway(
     override fun profiles(userId: String): Flow<List<Profile>> =
         supabase.from(TABLE_PROFILES)
             .selectAsFlow(ProfileRow::id, filter = FilterOperation("user_id", FilterOperator.EQ, userId))
+            .retryOnFreshTokenRejection()
             .map { rows -> rows.map { it.toModel() } }
             .recoverWithEmpty()
 
@@ -53,6 +56,7 @@ class SupabaseCloudSyncGateway(
                 listOf(LibraryEntryRow::profileId, LibraryEntryRow::mediaKey),
                 filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
             )
+            .retryOnFreshTokenRejection()
             .map { rows -> rows.map { it.toModel(json) } }
             .recoverWithEmpty()
 
@@ -62,22 +66,61 @@ class SupabaseCloudSyncGateway(
                 listOf(WatchProgressRow::profileId, WatchProgressRow::videoId),
                 filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
             )
+            .retryOnFreshTokenRejection()
             .map { rows -> rows.map { it.toModel() } }
             .recoverWithEmpty()
 
     override suspend fun saveProfile(userId: String, profile: Profile): Result<Unit> = runCatching {
-        supabase.from(TABLE_PROFILES)
-            .upsert(listOf(ProfileRow.of(userId, profile))) { onConflict = "id" }
+        withFreshTokenRetry {
+            supabase.from(TABLE_PROFILES)
+                .upsert(listOf(ProfileRow.of(userId, profile))) { onConflict = "id" }
+        }
     }
 
     override suspend fun saveLibrary(userId: String, entry: LibraryEntry): Result<Unit> = runCatching {
-        supabase.from(TABLE_LIBRARY)
-            .upsert(listOf(LibraryEntryRow.of(userId, entry, json))) { onConflict = "profile_id,media_key" }
+        withFreshTokenRetry {
+            supabase.from(TABLE_LIBRARY)
+                .upsert(listOf(LibraryEntryRow.of(userId, entry, json))) { onConflict = "profile_id,media_key" }
+        }
     }
 
     override suspend fun saveProgress(userId: String, progress: WatchProgress): Result<Unit> = runCatching {
-        supabase.from(TABLE_PROGRESS)
-            .upsert(listOf(WatchProgressRow.of(userId, progress))) { onConflict = "profile_id,video_id" }
+        withFreshTokenRetry {
+            supabase.from(TABLE_PROGRESS)
+                .upsert(listOf(WatchProgressRow.of(userId, progress))) { onConflict = "profile_id,video_id" }
+        }
+    }
+
+    // ── fresh-token rejection retry ──────────────────────────────────────
+    // During platform incidents (supabase#48123) the Data API's JWT validator
+    // clock trails Auth by more than its 30s skew allowance, so tokens minted
+    // seconds earlier are rejected with PGRST303 ("JWT issued at future").
+    // Only young tokens fail; brief spaced retries heal every affected call
+    // while unrelated errors still surface immediately.
+
+    private fun Throwable.isFreshTokenRejection(): Boolean =
+        message?.contains("PGRST303", ignoreCase = true) == true
+
+    private suspend fun <T> withFreshTokenRetry(block: suspend () -> T): T {
+        var backoffMillis = FRESH_TOKEN_RETRY_BACKOFF_MILLIS
+        repeat(FRESH_TOKEN_RETRY_ATTEMPTS - 1) {
+            try {
+                return block()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (!error.isFreshTokenRejection()) throw error
+                delay(backoffMillis)
+                backoffMillis *= 2
+            }
+        }
+        return block()
+    }
+
+    private fun <T> Flow<T>.retryOnFreshTokenRejection(): Flow<T> = retryWhen { cause, attempt ->
+        val willRetry = cause.isFreshTokenRejection() && attempt < FRESH_TOKEN_RETRY_ATTEMPTS - 1L
+        if (willRetry) delay(FRESH_TOKEN_RETRY_BACKOFF_MILLIS * (attempt + 1))
+        willRetry
     }
 
     // ── Provider configs travel through Edge Functions from M5 (deny-all RLS).
@@ -193,6 +236,8 @@ class SupabaseCloudSyncGateway(
 
     companion object {
         private const val TAG = "SupabaseSync"
+        private const val FRESH_TOKEN_RETRY_ATTEMPTS = 3
+        private const val FRESH_TOKEN_RETRY_BACKOFF_MILLIS = 2_000L
         private const val TABLE_PROFILES = "profiles"
         private const val TABLE_LIBRARY = "library_entries"
         private const val TABLE_PROGRESS = "watch_progress"
