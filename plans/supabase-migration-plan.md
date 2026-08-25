@@ -168,7 +168,7 @@ RLS smoke tests PASSED: owner read ✓ cross-user denial ✓ forged user_id reje
 | `LamphausApplication.kt` / manifest | Firebase init + meta-data flags removed | ✅ M0 |
 | `SupabaseGateways.kt` (new) | AccountGateway impl: sessionStatus→AccountState, IDToken+nonce sign-in | ✅ M2 |
 | `MobileActivity.kt` / `AppViewModel.kt` | nonce generation + pass-through | ✅ M2 |
-| `SupabaseCloudSyncGateway.kt` (new) | typed Postgrest DTOs + realtime Flows | ⬜ M3 (reverted once — see §11 note) |
+| `SupabaseCloudSyncGateway.kt` (new) | typed Postgrest DTOs + realtime Flows | ✅ M3 |
 | `TvApp.kt` / `AppViewModel.kt` | polling loop + exchange + auto-transition | ⬜ M4 |
 | Mobile settings section (new) | paired-devices list + revoke | ⬜ M6 |
 | Magic-link methods | OTP implementation replacing stubs | ⬜ M7 |
@@ -230,8 +230,8 @@ Branch: `feature/supabase-migration` · base: main @ `5a34c51`
 | M0 | scaffold · link project · minSdk 26 · de-Firebase gradle/code · CI-parity build | ✅ `21ebb09` |
 | M1 | schema(7tbl)+RLS+realtime+advisors green | ✅ `372da82` |
 | M1b | `user_settings` table (synced settings) | ✅ `fb62066` |
-| M2 | mobile Google sign-in (gateway+nonce+wiring) | ✅ code `3badbe9` · live E2E pending owner run |
-| M3 | sync swap (Postgrest+realtime gateway wired into container) | ⏸ reverted once — retry with §11 protocol |
+| M2 | mobile Google sign-in (gateway+nonce+wiring) | ✅ `3badbe9` · live E2E verified 2026-08-25 |
+| M3 | sync swap (Postgrest+realtime gateway wired into container) | ✅ `8096f26`→`495e584` · live E2E verified 2026-08-25 · PGRST303 retry + empty-cloud seeding (supabase#48123 armor) |
 | Web | Next.js site: pages, design tokens, logo, `/pair` auth+claim, Pages deploy | ⬜ (critical path for M4) |
 | M4 | TV pairing E2E: functions(create/claim/exchange/register-session) + TV polling + QR live | ⬜ |
 | M5 | provider-config Edge Functions + encryption parity test | ⬜ |
