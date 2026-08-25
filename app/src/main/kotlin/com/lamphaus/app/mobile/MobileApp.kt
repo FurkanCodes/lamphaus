@@ -1046,20 +1046,22 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                 )
             }
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item { SettingsHeading(stringResource(R.string.account)) }
-            item {
-                Text(
-                    stringResource(R.string.delete_account_explanation),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            item {
-                TextButton(onClick = { deleteAccountOpen = true }) {
+            if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
+                item { SettingsHeading(stringResource(R.string.account)) }
+                item {
                     Text(
-                        stringResource(R.string.delete_account),
-                        color = MaterialTheme.colorScheme.error,
+                        stringResource(R.string.delete_account_explanation),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                item {
+                    TextButton(onClick = { deleteAccountOpen = true }) {
+                        Text(
+                            stringResource(R.string.delete_account),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
         }
