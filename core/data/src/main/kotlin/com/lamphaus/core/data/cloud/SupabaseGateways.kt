@@ -9,6 +9,7 @@ import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
 import io.github.jan.supabase.exceptions.RestException
+import io.github.jan.supabase.exceptions.UnauthorizedRestException
 import io.github.jan.supabase.functions.functions
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
@@ -90,7 +91,34 @@ class SupabaseAccountGateway(
     override suspend fun completeEmailLink(email: String, link: String): Result<Unit> =
         Result.failure(UnsupportedOperationException("Magic link sign-in lands in milestone M7."))
 
-    override suspend fun deleteAccount(): Result<Unit> =
+    override suspend fun deleteAccount(): Result<Unit> {
+        val attempt = invokeDeleteAccount()
+        if (attempt.isSuccess || attempt.exceptionOrNull() !is UnauthorizedRestException) {
+            return attempt
+        }
+        // A session revoked elsewhere (revoke-device, global logout from the
+        // pairing page) leaves a JWT that still looks valid but points at a
+        // deleted GoTrue session — every call answers 401 until the tokens
+        // are replaced. Refresh once and retry; if even the refresh is
+        // rejected, drop to SignedOut with an actionable message instead of
+        // a raw RestException.
+        CloudLog.w("account.delete rejected (401) → refreshing session once")
+        val refreshed = runCatching { supabase.auth.refreshCurrentSession() }
+        if (refreshed.isFailure) {
+            CloudLog.w("account.delete refresh failed (${refreshed.exceptionOrNull()::class.simpleName}) → SignedOut")
+            mutableState.value = AccountState.SignedOut
+            runCatching { supabase.auth.signOut() }
+            return Result.failure(
+                IllegalStateException(
+                    "Session expired — sign in again to delete your account",
+                    refreshed.exceptionOrNull(),
+                ),
+            )
+        }
+        return invokeDeleteAccount()
+    }
+
+    private suspend fun invokeDeleteAccount(): Result<Unit> =
         CloudLog.tracedResult("account.delete") {
             supabase.functions.buildEdgeFunction("delete-account").invoke("{}") {
                 contentType(ContentType.Application.Json)

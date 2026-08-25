@@ -25,7 +25,12 @@ export class PairingUnavailableError extends Error {}
  */
 export async function purgeLocalAuth(): Promise<void> {
   const supabase = getSupabase();
-  await supabase.auth.signOut().catch(() => {});
+  // scope:'local' — kill ONLY this browser's server-side session. The
+  // default ('global') signs the user out on EVERY device, so pairing a TV
+  // used to silently log out the phone mid-flow (delete-account then failed
+  // with session_not_found → 401). The localStorage wipe below still
+  // removes this browser's cached copies either way.
+  await supabase.auth.signOut({ scope: "local" }).catch(() => {});
   try {
     const doomed: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {

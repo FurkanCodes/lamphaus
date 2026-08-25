@@ -29,15 +29,27 @@ function json(body: unknown, status = 200): Response {
 
 async function requireUser(
   req: Request,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string } | { error: string }> {
   const authorization = req.headers.get("Authorization");
-  if (!authorization) return null;
+  if (!authorization) return { error: "unauthorized" };
   const res = await fetch(`${SB_URL}/auth/v1/user`, {
     headers: { apikey: ANON_KEY, Authorization: authorization },
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    // A JWT whose session was revoked elsewhere (global logout, revoke-device,
+    // pairing purge) is still cryptographically valid — GoTrue answers 403
+    // session_not_found. Surface that distinctly so clients prompt a
+    // re-login instead of a generic failure.
+    return {
+      error:
+        body?.error_code === "session_not_found"
+          ? "session_expired"
+          : "unauthorized",
+    };
+  }
   const user = await res.json();
-  return typeof user?.id === "string" ? user : null;
+  return typeof user?.id === "string" ? user : { error: "unauthorized" };
 }
 
 Deno.serve(async (req) => {
@@ -45,7 +57,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   const user = await requireUser(req);
-  if (!user) return json({ error: "unauthorized" }, 401);
+  if ("error" in user) return json({ error: user.error }, 401);
 
   const deleted = await fetch(
     `${SB_URL}/auth/v1/admin/users/${user.id}`,
