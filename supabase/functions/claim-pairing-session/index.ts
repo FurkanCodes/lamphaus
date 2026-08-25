@@ -10,7 +10,12 @@
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// GoTrue's admin API parses the Bearer as a JWT; on new-API-key projects the
+// platform-injected SUPABASE_SERVICE_ROLE_KEY is an opaque sb_secret that
+// PostgREST happily takes but GoTrue rejects ("invalid number of segments").
+// Prefer an explicitly-set legacy JWT when present.
+const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_JWT") ??
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 // Browsers preflight every call from the /pair page; without these headers
 // the request dies before POST ever runs and pairing looks "not live".
