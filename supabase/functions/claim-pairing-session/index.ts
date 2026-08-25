@@ -78,31 +78,21 @@ Deno.serve(async (req) => {
   if (!code) return json({ error: "missing_code" }, 400);
   const codeHash = await sha256Hex(code);
 
-  // Atomic claim: only an unclaimed, unexchanged, live session matches.
-  const claimed = await rest(
+  // Read the live session first: dead codes exit here without touching GoTrue,
+  // and we need device_label for the devices row later.
+  const found = await rest(
     `pairing_sessions?code_hash=eq.${codeHash}&claimed_by=is.null&exchanged=eq.false&expires_at=gte.now()`,
-    {
-      method: "PATCH",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({
-        claimed_by: user.id,
-        claimed_at: new Date().toISOString(),
-      }),
-    },
   )
     .then((r) => r.json())
     .catch(() => []);
-
-  if (!Array.isArray(claimed) || claimed.length === 0) {
+  if (!Array.isArray(found) || found.length === 0) {
     return json({ error: "invalid_or_expired_code" }, 410);
   }
-  const session = claimed[0];
+  const session = found[0];
 
-  // Mint the TV's login grant. admin.generateLink sends no email — it just
-  // returns the material. We hand the TV the email_otp because supabase-kt's
-  // verifyEmailOtp consumes it through the supported SDK path and yields a
-  // normal SDK-managed session (plan D2 outcome, friendlier than parsing the
-  // action_link redirect fragment).
+  // Mint everything BEFORE claiming: if GoTrue or the devices insert fails,
+  // the code stays unclaimed and the user can simply retry — a half-written
+  // session would leave the TV stuck on "consumed" forever.
   const linkRes = await fetch(`${SB_URL}/auth/v1/admin/generate_link`, {
     method: "POST",
     headers: {
@@ -112,7 +102,19 @@ Deno.serve(async (req) => {
     },
     body: JSON.stringify({ type: "magiclink", email: user.email }),
   });
-  if (!linkRes.ok) return json({ error: "grant_mint_failed" }, 502);
+  if (!linkRes.ok) {
+    // Surface the upstream reason (e.g. GoTrue key-format rejections) so
+    // failures are diagnosable from the client instead of a bare 502.
+    const detail = await linkRes.text().catch(() => "");
+    return json(
+      {
+        error: "grant_mint_failed",
+        upstream_status: linkRes.status,
+        upstream_detail: detail.slice(0, 200),
+      },
+      502,
+    );
+  }
   const link = await linkRes.json();
 
   const deviceId = crypto.randomUUID();
@@ -121,20 +123,38 @@ Deno.serve(async (req) => {
     body: JSON.stringify({
       id: deviceId,
       user_id: user.id,
-      label: session.device_label ?? "Television",
+      label: typeof session.device_label === "string" && session.device_label
+        ? session.device_label
+        : "Television",
     }),
   });
   if (!deviceRow.ok) return json({ error: "device_create_failed" }, 500);
 
-  await rest(`pairing_sessions?id=eq.${session.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      grant_email: user.email,
-      grant_otp: link.email_otp,
-      granted_at: new Date().toISOString(),
-      device_id: deviceId,
-    }),
-  });
+  // Atomic claim+grant in ONE statement: only an unclaimed, unexchanged,
+  // live session matches, so racing phones produce exactly one winner.
+  const claimed = await rest(
+    `pairing_sessions?code_hash=eq.${codeHash}&claimed_by=is.null&exchanged=eq.false&expires_at=gte.now()`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        claimed_by: user.id,
+        claimed_at: new Date().toISOString(),
+        grant_email: user.email,
+        grant_otp: link.email_otp,
+        granted_at: new Date().toISOString(),
+        device_id: deviceId,
+      }),
+    },
+  )
+    .then((r) => r.json())
+    .catch(() => []);
+
+  if (!Array.isArray(claimed) || claimed.length === 0) {
+    // Lost the race or dead code — remove the orphan device row best-effort.
+    await rest(`devices?id=eq.${deviceId}`, { method: "DELETE" });
+    return json({ error: "invalid_or_expired_code" }, 410);
+  }
 
   return json({ ok: true });
 });
