@@ -31,6 +31,10 @@ export default function PairClient() {
       setPhase({ kind: "success" });
     } else if (result.kind === "expired") {
       setPhase({ kind: "expired" });
+    } else if (result.kind === "stale-session") {
+      // Cached credentials were rejected (deleted account / revoked
+      // session) and have been cleared — ask for a fresh sign-in.
+      setPhase({ kind: "signed-out", code: claimCode });
     } else {
       setPhase({ kind: "unavailable", detail: result.detail });
     }

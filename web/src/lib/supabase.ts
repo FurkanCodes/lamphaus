@@ -16,7 +16,9 @@ export function getSupabase(): SupabaseClient {
 
 export class PairingUnavailableError extends Error {}
 
-export type ClaimResult = { ok: true } | { ok: false; kind: "expired" | "unavailable"; detail?: string };
+export type ClaimResult =
+  | { ok: true }
+  | { ok: false; kind: "expired" | "unavailable" | "stale-session"; detail?: string };
 
 /**
  * Claims the QR code shown on the TV with the caller's session
@@ -33,6 +35,14 @@ export async function claimPairingSession(code: string): Promise<ClaimResult> {
   const status = (error as { status?: number }).status ?? 0;
   if (status === 400 || status === 404 || status === 410) {
     return { ok: false, kind: "expired", detail: error.message };
+  }
+  if (status === 401) {
+    // The bearer was rejected: the locally cached session points at an
+    // auth user that no longer exists (deleted account, revoked session).
+    // Clear it so the visitor goes through Google sign-in again instead
+    // of looping on dead credentials forever.
+    await supabase.auth.signOut().catch(() => {});
+    return { ok: false, kind: "stale-session" };
   }
   return { ok: false, kind: "unavailable", detail: error.message };
 }
