@@ -29,6 +29,11 @@ export default function PairClient() {
     setPhase({ kind: "claiming", code: claimCode });
     const result = await claimPairingSession(claimCode);
     if (result.ok) {
+      // The browser's job ENDS here: the TV owns its own GoTrue session,
+      // and this page is a one-shot kiosk, not a logged-in surface. Wipe
+      // our tokens immediately instead of letting them linger until some
+      // future deletion turns them into zombies.
+      await purgeLocalAuth().catch(() => {});
       setPhase({ kind: "success" });
     } else if (result.kind === "expired") {
       setPhase({ kind: "expired" });
