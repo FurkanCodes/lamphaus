@@ -14,10 +14,19 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const PAIRING_SITE_URL =
   Deno.env.get("PAIRING_SITE_URL") ?? "https://furkancodes.github.io/lamphaus";
 
+// Browsers preflight every call from the /pair page; without these headers
+// the request dies before POST ever runs and pairing looks "not live".
+const CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CORS },
   });
 }
 
@@ -61,6 +70,7 @@ function randomShortCode(length = 6): string {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   const ipHash = await sha256Hex(clientIp(req));
