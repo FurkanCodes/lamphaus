@@ -1,5 +1,6 @@
 package com.lamphaus.core.data.cloud
 
+import android.util.Log
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.Profile
@@ -12,7 +13,9 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.filter.FilterOperation
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.selectAsFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -42,6 +45,7 @@ class SupabaseCloudSyncGateway(
         supabase.from(TABLE_PROFILES)
             .selectAsFlow(ProfileRow::id, filter = FilterOperation("user_id", FilterOperator.EQ, userId))
             .map { rows -> rows.map { it.toModel() } }
+            .recoverWithEmpty()
 
     override fun library(userId: String, profileId: String): Flow<List<LibraryEntry>> =
         supabase.from(TABLE_LIBRARY)
@@ -50,6 +54,7 @@ class SupabaseCloudSyncGateway(
                 filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
             )
             .map { rows -> rows.map { it.toModel(json) } }
+            .recoverWithEmpty()
 
     override fun progress(userId: String, profileId: String): Flow<List<WatchProgress>> =
         supabase.from(TABLE_PROGRESS)
@@ -58,6 +63,7 @@ class SupabaseCloudSyncGateway(
                 filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
             )
             .map { rows -> rows.map { it.toModel() } }
+            .recoverWithEmpty()
 
     override suspend fun saveProfile(userId: String, profile: Profile): Result<Unit> = runCatching {
         supabase.from(TABLE_PROFILES)
@@ -186,9 +192,21 @@ class SupabaseCloudSyncGateway(
     }
 
     companion object {
+        private const val TAG = "SupabaseSync"
         private const val TABLE_PROFILES = "profiles"
         private const val TABLE_LIBRARY = "library_entries"
         private const val TABLE_PROGRESS = "watch_progress"
         private const val PROVIDERS_DEFERRED = "Provider configuration moves to Edge Functions in M5."
+
+        /**
+         * Sync failures (network drops, clock skew rejections, schema drift) must
+         * degrade to "no cloud rows this round" instead of crashing the app.
+         * Consumers only upsert received rows, so an empty emission wipes nothing.
+         */
+        private fun <T> Flow<List<T>>.recoverWithEmpty(): Flow<List<T>> = catch { error ->
+            if (error is CancellationException) throw error
+            Log.w(TAG, "Sync refresh failed; keeping local data", error)
+            emit(emptyList())
+        }
     }
 }

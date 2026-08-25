@@ -743,7 +743,7 @@ class AppViewModel(
 
     private suspend fun createInitialProfile() {
         val now = System.currentTimeMillis()
-        val profile = Profile("primary", "Home", "moon", ProfileKind.ADULT, updatedAtEpochMillis = now)
+        val profile = Profile(UUID.randomUUID().toString(), "Home", "moon", ProfileKind.ADULT, updatedAtEpochMillis = now)
         container.libraryRepository.saveProfile(profile, null)
         (state.value.account as? AccountState.SignedIn)?.userId?.let { container.cloudSyncGateway.saveProfile(it, profile) }
         container.preferences.setActiveProfile(profile.id)
@@ -764,7 +764,12 @@ class AppViewModel(
                     providers.forEach { container.libraryRepository.saveProvider(it) }
                 }
             }
-            profiles.forEach { profile ->
+            // Legacy local installs may hold placeholder ids (e.g. "primary")
+            // that cannot exist in Postgres; keep them out of cloud sync.
+            val cloudBackedProfiles = profiles.filter { profile ->
+                runCatching { UUID.fromString(profile.id) }.isSuccess
+            }
+            cloudBackedProfiles.forEach { profile ->
                 launch {
                     container.cloudSyncGateway.library(userId, profile.id).collect { entries ->
                         entries.forEach { container.libraryRepository.saveLibrary(it) }
