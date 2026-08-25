@@ -153,6 +153,7 @@ All 8 tables RLS-enabled before exposure. Columns snake_case; clients map via `@
 Indexes: user/profile lookups, `(profile_id, updated_at_epoch_millis desc)`, partial `pairing_sessions(code_hash) where exchanged=false`, `claimed_by` FK index.
 Realtime publication: profiles, library_entries, watch_progress, user_settings.
 RLS smoke tests PASSED: owner read ✓ cross-user denial ✓ forged user_id rejection ✓ deny-all leak-proof ✓ anonymous denial ✓.
+Instant removal hardening (`20260825190045`): all five owner policies additionally require a live `auth.users` row via `caller_user_exists()` (security definer) — tokens surviving an account deletion lose read AND write access immediately, not at next refresh. DB-proven 2026-08-25.
 
 ---
 
