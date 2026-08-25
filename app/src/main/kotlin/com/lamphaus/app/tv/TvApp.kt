@@ -113,6 +113,7 @@ import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.StreamCandidate
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @Composable
 fun TvApp(
@@ -255,6 +256,7 @@ private fun TvPairingScreen(state: AppUiState, viewModel: AppViewModel) {
     TvPairingContent(
         shortCode = state.pairingSession?.shortCode,
         qrPayload = state.pairingSession?.qrPayload,
+        expiresAtEpochMillis = state.pairingSession?.expiresAtEpochMillis,
         showDevelopmentAction = BuildConfig.DEBUG && !BuildConfig.CLOUD_CONFIGURED,
         onRefresh = viewModel::createPairingSession,
         onDevelopmentSession = viewModel::openDevelopmentSession,
@@ -265,12 +267,34 @@ private fun TvPairingScreen(state: AppUiState, viewModel: AppViewModel) {
 internal fun TvPairingContent(
     shortCode: String?,
     qrPayload: String?,
+    expiresAtEpochMillis: Long? = null,
     showDevelopmentAction: Boolean,
     onRefresh: () -> Unit,
     onDevelopmentSession: () -> Unit,
 ) {
     val initialFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { initialFocus.requestFocus() }
+
+    // Live "time left" for the link code, driven by the server-provided
+    // expiry. Reaching zero regenerates immediately instead of waiting for
+    // the next poll tick to notice.
+    var secondsLeft by remember(expiresAtEpochMillis) {
+        mutableStateOf(
+            expiresAtEpochMillis
+                ?.let { ((it - System.currentTimeMillis()) / 1000L).toInt().coerceIn(0, 599) }
+                ?: -1,
+        )
+    }
+    LaunchedEffect(expiresAtEpochMillis) {
+        if (expiresAtEpochMillis == null) return@LaunchedEffect
+        while (isActive && secondsLeft > 0) {
+            delay(1000)
+            secondsLeft =
+                ((expiresAtEpochMillis - System.currentTimeMillis()) / 1000L).toInt().coerceAtLeast(0)
+        }
+        if (secondsLeft == 0) onRefresh()
+    }
+
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -287,11 +311,22 @@ internal fun TvPairingContent(
             )
             shortCode?.let { code ->
                 Text(code.chunked(3).joinToString("  "), style = MaterialTheme.typography.displayMedium)
-                Text(
-                    stringResource(R.string.pairing_expiry),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                if (secondsLeft >= 0) {
+                    val mm = (secondsLeft / 60).toString()
+                    val ss = (secondsLeft % 60).toString().padStart(2, '0')
+                    Text(
+                        stringResource(R.string.pairing_time_left, "$mm:$ss"),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (secondsLeft <= 30) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        stringResource(R.string.pairing_expiry),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
             TvAction(
                 label = stringResource(R.string.refresh_code),

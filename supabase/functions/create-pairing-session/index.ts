@@ -120,7 +120,11 @@ Deno.serve(async (req) => {
   return json({
     session_id: sessionId,
     short_code: shortCode,
-    qr_payload: `${PAIRING_SITE_URL}/pair?code=${shortCode}`,
+    // e=epochSeconds lets the /pair page render a live "time left" without
+    // an extra round trip; the server remains authoritative via 410.
+    qr_payload: `${PAIRING_SITE_URL}/pair?code=${shortCode}&e=${Math.floor(
+      Date.parse(expiresAt) / 1000,
+    )}`,
     expires_at: expiresAt,
   });
 });

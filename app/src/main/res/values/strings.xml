@@ -52,6 +52,7 @@
     <string name="pairing_title">Finish setup on your phone</string>
     <string name="pairing_body">Open Lamphaus on Android, sign in, then scan this code. No account details appear on this shared screen.</string>
     <string name="pairing_expiry">This one-time code expires in five minutes.</string>
+    <string name="pairing_time_left">Link code expires in %1$s</string>
     <string name="refresh_code">Refresh code</string>
     <string name="updating">Updating…</string>
     <string name="view_details">View details</string>

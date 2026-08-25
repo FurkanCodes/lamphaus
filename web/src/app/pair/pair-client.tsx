@@ -8,6 +8,27 @@ import { cloudConfigured, withBasePath } from "@/lib/config";
 
 const PENDING_CODE_KEY = "lamphaus.pairCode";
 
+/** Ticking seconds until the given epoch; -1 when no expiry is known. */
+function useSecondsLeft(epoch?: number): number {
+  const [left, setLeft] = useState(() =>
+    epoch ? Math.max(0, Math.floor(epoch - Date.now() / 1000)) : -1,
+  );
+  useEffect(() => {
+    if (!epoch) {
+      setLeft(-1);
+      return;
+    }
+    const tick = () => setLeft(Math.max(0, Math.floor(epoch - Date.now() / 1000)));
+    tick();
+    const id = setInterval(() => {
+      tick();
+      if (Math.floor(epoch - Date.now() / 1000) <= 0) clearInterval(id);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [epoch]);
+  return left;
+}
+
 type Phase =
   | { kind: "checking" }
   | { kind: "no-code" }
@@ -93,8 +114,32 @@ export default function PairClient() {
     });
   }
 
+  // Live "time left" for the link code, read from the e= param the TV
+  // baked into the QR payload — no server round trip needed. The server
+  // stays authoritative (an expired code simply returns 410).
+  const codeExpiryEpoch = Number(searchParams.get("e") ?? 0) || undefined;
+  const secondsLeft = useSecondsLeft(codeExpiryEpoch);
+  const showCountdown =
+    (phase.kind === "signed-out" || phase.kind === "claiming") &&
+    codeExpiryEpoch !== undefined;
+
   return (
     <div className="mx-auto flex min-h-[70vh] w-full max-w-md flex-col items-center justify-center px-6 text-center">
+      {showCountdown && (
+        <p className="mb-6 text-xs tracking-wide text-fg-subtle">
+          {secondsLeft > 0 ? (
+            <>
+              Link code expires in{" "}
+              <span className="font-semibold text-fg-muted">
+                {Math.floor(secondsLeft / 60)}:
+                {String(secondsLeft % 60).padStart(2, "0")}
+              </span>
+            </>
+          ) : (
+            "This code may have expired — rescan the TV's QR for a fresh one."
+          )}
+        </p>
+      )}
       {phase.kind === "checking" && (
         <>
           <LamphausMark size={56} />
