@@ -47,7 +47,9 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -111,6 +113,7 @@ import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.ProfileKind
@@ -880,6 +883,8 @@ private fun MobileSourcePickerScreen(
 @Composable
 private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onBack: () -> Unit) {
     var providerUrl by rememberSaveable { mutableStateOf("") }
+    var deviceToRevoke by remember { mutableStateOf<PairedDevice?>(null) }
+    var deleteAccountOpen by remember { mutableStateOf(false) }
     Scaffold(
         topBar = {
             LargeTopAppBar(
@@ -973,6 +978,34 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                 )
             }
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
+                item { SettingsHeading(stringResource(R.string.paired_devices)) }
+                item {
+                    LaunchedEffect(Unit) { viewModel.loadDevices() }
+                }
+                if (state.pairedDevices.isEmpty()) {
+                    item {
+                        Text(
+                            stringResource(R.string.no_paired_devices),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(state.pairedDevices, key = { it.id }) { device ->
+                    ListItem(
+                        headlineContent = { Text(device.label) },
+                        supportingContent = { Text(device.createdAt?.take(10) ?: device.platform) },
+                        leadingContent = { Icon(Icons.Outlined.Tv, null) },
+                        trailingContent = {
+                            TextButton(onClick = {
+                                deviceToRevoke = device
+                            }) { Text(stringResource(R.string.disconnect)) }
+                        },
+                    )
+                }
+            }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item { SettingsHeading(stringResource(R.string.appearance)) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1010,10 +1043,64 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                     stringResource(R.string.diagnostics_explanation),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 28.dp),
                 )
             }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { SettingsHeading(stringResource(R.string.account)) }
+            item {
+                Text(
+                    stringResource(R.string.delete_account_explanation),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            item {
+                TextButton(onClick = { deleteAccountOpen = true }) {
+                    Text(
+                        stringResource(R.string.delete_account),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
+    }
+
+    deviceToRevoke?.let { device ->
+        AlertDialog(
+            onDismissRequest = { deviceToRevoke = null },
+            title = { Text(stringResource(R.string.disconnect_title)) },
+            text = { Text(stringResource(R.string.disconnect_body_format, device.label)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.revokeDevice(device.id, device.label)
+                    deviceToRevoke = null
+                }) {
+                    Text(stringResource(R.string.disconnect), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deviceToRevoke = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
+    if (deleteAccountOpen) {
+        AlertDialog(
+            onDismissRequest = { deleteAccountOpen = false },
+            title = { Text(stringResource(R.string.delete_account)) },
+            text = { Text(stringResource(R.string.delete_account_confirm_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteAccountOpen = false
+                    viewModel.deleteAccount()
+                }) {
+                    Text(stringResource(R.string.delete_account), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteAccountOpen = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }
 

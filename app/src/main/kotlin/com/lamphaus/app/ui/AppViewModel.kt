@@ -593,6 +593,44 @@ class AppViewModel(
         }
     }
 
+    private var devicesLoadedOnce = false
+
+    fun loadDevices() {
+        if (devicesLoadedOnce && state.value.pairedDevices.isNotEmpty()) return
+        viewModelScope.launch {
+            container.pairingGateway.listDevices().onSuccess { devices ->
+                devicesLoadedOnce = true
+                mutableState.update { it.copy(pairedDevices = devices) }
+            }.onFailure {
+                CloudLog.w("settings.devices load failed — leaving section empty", it)
+            }
+        }
+    }
+
+    fun revokeDevice(deviceId: String, label: String) = viewModelScope.launch {
+        container.pairingGateway.revokeDevice(deviceId).onSuccess {
+            CloudLog.i("settings.devices revoke succeeded (device=$deviceId)")
+            mutableState.update { current ->
+                current.copy(pairedDevices = current.pairedDevices.filterNot { it.id == deviceId })
+            }
+            showMessage("$label disconnected. It will return to its pairing screen.")
+        }.onFailure {
+            CloudLog.e("settings.devices revoke failed (device=$deviceId)", it)
+            showMessage(it.message ?: "Disconnecting failed. Try again.")
+        }
+    }
+
+    fun deleteAccount() = viewModelScope.launch {
+        container.accountGateway.deleteAccount().onSuccess {
+            CloudLog.i("settings.account deleted — local session cleared")
+            mutableState.update(AppUiState::clearAccountData)
+            showMessage("Your account and all cloud data were deleted.")
+        }.onFailure {
+            CloudLog.e("settings.account delete failed", it)
+            showMessage(it.message ?: "Account deletion failed. Try again.")
+        }
+    }
+
     fun setTheme(theme: ThemePreference) = viewModelScope.launch { container.preferences.setTheme(theme) }
 
     fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { container.preferences.setDynamicColor(enabled) }

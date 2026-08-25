@@ -83,4 +83,16 @@
     <string name="source_type_archive">Archive</string>
     <string name="source_type_usenet">Usenet</string>
     <string name="open_with_external_player">Open with another player</string>
+
+    <!-- Device management (M6) -->
+    <string name="paired_devices">Paired devices</string>
+    <string name="no_paired_devices">No TVs are paired to this account yet.</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="disconnect_title">Disconnect this TV?</string>
+    <string name="disconnect_body_format">%1$s will return to its pairing screen the next time it checks in. You can pair it again anytime.</string>
+    <string name="account">Account</string>
+    <string name="delete_account">Delete account</string>
+    <string name="delete_account_explanation">Deleting your account removes your profiles, library, progress, settings and every paired TV from our servers. This cannot be undone.</string>
+    <string name="delete_account_confirm_body">This permanently deletes your account and all cloud data on all devices. This cannot be undone.</string>
+    <string name="cancel">Cancel</string>
 </resources>

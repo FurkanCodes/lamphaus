@@ -6,6 +6,7 @@ import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PairingSession
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.Profile
@@ -58,6 +59,7 @@ data class AppUiState(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
+    val pairedDevices: List<PairedDevice> = emptyList(),
     val initialContentLoading: Boolean = true,
     val refreshing: Boolean = false,
     val searching: Boolean = false,
@@ -66,4 +68,12 @@ data class AppUiState(
     val activeProfile: Profile? get() = profiles.firstOrNull { it.id == activeProfileId }
     val allMedia: List<MediaPreview>
         get() = sections.flatMap(CatalogSection::items).distinctBy(MediaPreview::stableKey)
+
+    /** Everything account-scoped resets; device-local preferences survive. */
+    fun clearAccountData() = AppUiState(
+        theme = theme,
+        dynamicColor = dynamicColor,
+        diagnostics = diagnostics,
+        initialContentLoading = false,
+    )
 }

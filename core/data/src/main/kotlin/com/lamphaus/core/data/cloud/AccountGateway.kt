@@ -1,6 +1,7 @@
 package com.lamphaus.core.data.cloud
 
 import com.lamphaus.core.model.DeviceGrant
+import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PairingSession
 import kotlinx.coroutines.flow.StateFlow
 
@@ -20,6 +21,7 @@ interface AccountGateway {
     suspend fun signInWithGoogleIdToken(idToken: String, nonce: String? = null): Result<Unit>
     suspend fun sendEmailLink(email: String): Result<Unit>
     suspend fun completeEmailLink(email: String, link: String): Result<Unit>
+    suspend fun deleteAccount(): Result<Unit>
     suspend fun signOut()
 }
 
@@ -27,6 +29,7 @@ interface PairingGateway {
     suspend fun createPairingSession(deviceLabel: String): Result<PairingSession>
     suspend fun claimPairingSession(shortCode: String): Result<Unit>
     suspend fun exchangeDeviceGrant(sessionId: String): Result<DeviceGrant>
+    suspend fun listDevices(): Result<List<PairedDevice>>
     suspend fun revokeDevice(deviceId: String): Result<Unit>
 }
 

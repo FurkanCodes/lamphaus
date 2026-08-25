@@ -1,12 +1,17 @@
 package com.lamphaus.core.data.cloud
 
 import com.lamphaus.core.model.DeviceGrant
+import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PairingSession
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.functions.functions
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
@@ -64,16 +69,29 @@ class SupabasePairingGateway(
                     email = body.string("email"),
                     otp = body.string("otp"),
                     deviceId = body.string("device_id"),
-                ).also { CloudLog.d("pairing.exchange ← GRANTED device=${it.deviceId} email=${it.email}") }
-                else -> error("grant_${body.string("status")}").also {
+                ).also { CloudLog.d("pairing.exchange ← GRANTED device=${it.deviceId}") }
+                else -> {
                     CloudLog.w("pairing.exchange ← unexpected status=${body.string("status")}")
+                    error("grant_${body.string("status")}")
                 }
             }
         }
 
-    // Revocation travels through its own endpoint in M6 (plan F6).
+    override suspend fun listDevices(): Result<List<PairedDevice>> =
+        CloudLog.tracedResult("devices.list") {
+            supabase.from("devices")
+                .select()
+                .decodeList<DeviceRow>()
+                .filter { !it.revoked }
+                .map { it.toModel() }
+                .also { CloudLog.d("devices.list ← ${it.size} paired") }
+        }
+
     override suspend fun revokeDevice(deviceId: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException("Revoke ships with device management in M6."))
+        CloudLog.tracedResult("devices.revoke", "device=$deviceId") {
+            invoke("revoke-device") { put("device_id", deviceId) }
+            Unit
+        }
 
     private suspend fun invoke(
         functionName: String,
@@ -93,13 +111,24 @@ class SupabasePairingGateway(
                 "(${android.os.SystemClock.elapsedRealtime() - startedAt}ms) " +
                 CloudLog.clamp(CloudLog.sanitize(text)),
         )
-        return JSON.parseToJsonElement(text).jsonObject
+        return json.parseToJsonElement(text).jsonObject
     }
 
     private fun JsonObject.string(name: String): String =
         requireNotNull(get(name)?.jsonPrimitive?.contentOrNull) { "Missing '$name' in pairing response" }
 
     private companion object {
-        val JSON = Json { ignoreUnknownKeys = true }
+        val json = Json { ignoreUnknownKeys = true }
     }
+}
+
+@Serializable
+internal data class DeviceRow(
+    @SerialName("id") val id: String,
+    @SerialName("label") val label: String,
+    @SerialName("platform") val platform: String = "android-tv",
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("revoked") val revoked: Boolean = false,
+) {
+    fun toModel() = PairedDevice(id = id, label = label, platform = platform, createdAt = createdAt)
 }

@@ -8,6 +8,9 @@ import io.github.jan.supabase.auth.status.RefreshFailureCause
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
+import io.github.jan.supabase.functions.functions
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,15 +51,20 @@ class SupabaseAccountGateway(
                         mutableState.value = AccountState.SignedOut
                     }
                     // A failed refresh keeps the last known state: transient network
-                    // issues must not sign the user out. Revoked sessions surface
-                    // as NotAuthenticated from the SDK once rejected server-side.
+                    // issues must not sign the user out. But a SERVER rejection
+                    // means the session is gone (revoked from another device,
+                    // plan F3) — drop to SignedOut so the TV shows its QR again.
                     is SessionStatus.RefreshFailure -> {
                         val detail = when (val reason = status.cause) {
                             is RefreshFailureCause.NetworkError ->
                                 "network ${reason.exception::class.simpleName}: ${reason.exception.message}"
                             else -> reason::class.simpleName
                         }
-                        CloudLog.w("auth.status ← RefreshFailure ($detail) — keeping last known state")
+                        CloudLog.w("auth.status ← RefreshFailure ($detail)")
+                        if (status.cause !is RefreshFailureCause.NetworkError) {
+                            mutableState.value = AccountState.SignedOut
+                            CloudLog.i("auth.state → SignedOut (session rejected server-side)")
+                        }
                     }
                 }
             }
@@ -79,6 +87,15 @@ class SupabaseAccountGateway(
 
     override suspend fun completeEmailLink(email: String, link: String): Result<Unit> =
         Result.failure(UnsupportedOperationException("Magic link sign-in lands in milestone M7."))
+
+    override suspend fun deleteAccount(): Result<Unit> =
+        CloudLog.tracedResult("account.delete") {
+            supabase.functions.buildEdgeFunction("delete-account").invoke("{}") {
+                contentType(ContentType.Application.Json)
+            }
+            supabase.auth.signOut()
+            Unit
+        }
 
     override suspend fun signOut() {
         runCatching { supabase.auth.signOut() }

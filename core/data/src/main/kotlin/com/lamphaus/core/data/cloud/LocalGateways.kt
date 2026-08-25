@@ -1,6 +1,7 @@
 package com.lamphaus.core.data.cloud
 
 import com.lamphaus.core.model.DeviceGrant
+import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,7 @@ class LocalAccountGateway : AccountGateway {
     override suspend fun signInWithGoogleIdToken(idToken: String, nonce: String?) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun sendEmailLink(email: String) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun completeEmailLink(email: String, link: String) = Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun deleteAccount() = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun signOut() { mutableState.value = AccountState.SignedOut }
 }
 
@@ -36,6 +38,7 @@ class LocalPairingGateway : PairingGateway {
 
     override suspend fun claimPairingSession(shortCode: String) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun exchangeDeviceGrant(sessionId: String) = Result.failure<DeviceGrant>(CloudNotConfiguredException())
+    override suspend fun listDevices() = Result.failure<List<PairedDevice>>(CloudNotConfiguredException())
     override suspend fun revokeDevice(deviceId: String) = Result.success(Unit)
 }
 

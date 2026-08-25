@@ -5,6 +5,18 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class ProfileKind { ADULT, CHILD }
 
+/**
+ * A TV paired to the account, as surfaced in mobile settings (plan D3).
+ * [createdAt] is the raw ISO timestamp from Postgres — display-only.
+ */
+@Serializable
+data class PairedDevice(
+    val id: String,
+    val label: String,
+    val platform: String = "android-tv",
+    val createdAt: String? = null,
+)
+
 @Serializable
 data class Profile(
     val id: String,
