@@ -1,5 +1,6 @@
 package com.lamphaus.core.data.cloud
 
+import com.lamphaus.core.model.DeviceGrant
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +35,7 @@ class LocalPairingGateway : PairingGateway {
     }
 
     override suspend fun claimPairingSession(shortCode: String) = Result.failure<Unit>(CloudNotConfiguredException())
-    override suspend fun exchangeDeviceGrant(sessionId: String) = Result.failure<String>(CloudNotConfiguredException())
+    override suspend fun exchangeDeviceGrant(sessionId: String) = Result.failure<DeviceGrant>(CloudNotConfiguredException())
     override suspend fun revokeDevice(deviceId: String) = Result.success(Unit)
 }
 

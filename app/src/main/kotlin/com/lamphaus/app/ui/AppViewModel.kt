@@ -9,6 +9,7 @@ import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.DiagnosticsConsent
+import com.lamphaus.core.model.DeviceGrant
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
@@ -24,10 +25,15 @@ import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.MediaType
+import com.lamphaus.core.model.PairingSession
 import java.util.UUID
 import java.net.URI
 import java.util.Calendar
 import java.security.MessageDigest
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.OtpType
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -44,8 +50,12 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModel(
@@ -505,10 +515,58 @@ class AppViewModel(
 
     fun configurationLaunchHandled() = mutableState.update { it.copy(configurationUrl = null) }
 
-    fun createPairingSession() = viewModelScope.launch {
-        container.pairingGateway.createPairingSession("Living room TV").onSuccess { session ->
-            mutableState.update { it.copy(pairingSession = session) }
-        }.onFailure { showMessage(it.message ?: "Pairing is temporarily unavailable.") }
+    private var pairingPollJob: Job? = null
+
+    fun createPairingSession() {
+        pairingPollJob?.cancel()
+        pairingPollJob = viewModelScope.launch {
+            container.pairingGateway.createPairingSession(PAIRING_DEVICE_LABEL).onSuccess { session ->
+                mutableState.update { it.copy(pairingSession = session) }
+                pollForDeviceGrant(session)
+            }.onFailure { showMessage(it.message ?: "Pairing is temporarily unavailable.") }
+        }
+    }
+
+    /**
+     * F3 "pairing sticks" guardrails: network errors never break the loop —
+     * we simply poll again. Only a granted grant completes sign-in, and an
+     * expired session regenerates a fresh QR automatically.
+     */
+    private suspend fun pollForDeviceGrant(session: PairingSession) {
+        val supabase = container.supabase ?: return
+        while (currentCoroutineContext().isActive) {
+            delay(PAIRING_POLL_MILLIS)
+            if (state.value.account is AccountState.SignedIn) return
+            if (System.currentTimeMillis() >= session.expiresAtEpochMillis) {
+                createPairingSession()
+                return
+            }
+            when (val grant = container.pairingGateway.exchangeDeviceGrant(session.id).getOrNull()) {
+                is DeviceGrant.Granted -> {
+                    completeDeviceSignIn(supabase, grant)
+                    return
+                }
+                DeviceGrant.Pending, null -> Unit // keep polling through hiccups
+            }
+        }
+    }
+
+    /**
+     * Consumes the single-use grant immediately: verifyEmailOtp mints the
+     * TV's own GoTrue session (persisted by the SDK; refresh tokens never
+     * expire by default), then register_device_session binds devices.
+     * auth_session_id so revocation can later kill exactly this TV (F6).
+     */
+    private suspend fun completeDeviceSignIn(supabase: SupabaseClient, grant: DeviceGrant.Granted) {
+        runCatching<Unit> {
+            supabase.auth.verifyEmailOtp(OtpType.Email.MAGIC_LINK, grant.email, grant.otp)
+            supabase.postgrest.rpc(
+                "register_device_session",
+                buildJsonObject { put("p_device_id", grant.deviceId) },
+            )
+        }.onFailure {
+            showMessage("The TV was claimed, but signing in failed. Refresh the QR and try again.")
+        }
     }
 
     fun claimPairingSession(code: String) = viewModelScope.launch {
@@ -824,6 +882,8 @@ class AppViewModel(
         private const val DEFAULT_CATALOG_DISPLAY_NAME = "Lamphaus Catalog"
         private const val DEFAULT_CATALOG_PROVIDER_ID = "com.linvo.cinemeta"
         private const val DEFAULT_CATALOG_MANIFEST = "https://v3-cinemeta.strem.io/manifest.json"
+        private const val PAIRING_POLL_MILLIS = 3_000L
+        private const val PAIRING_DEVICE_LABEL = "Living room TV"
         private const val DEVELOPMENT_SOURCE_ID = "lamphaus.dev.source"
 
         fun factory(container: AppContainer): ViewModelProvider.Factory = object : ViewModelProvider.Factory {

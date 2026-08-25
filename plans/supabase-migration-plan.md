@@ -169,7 +169,7 @@ RLS smoke tests PASSED: owner read ✓ cross-user denial ✓ forged user_id reje
 | `SupabaseGateways.kt` (new) | AccountGateway impl: sessionStatus→AccountState, IDToken+nonce sign-in | ✅ M2 |
 | `MobileActivity.kt` / `AppViewModel.kt` | nonce generation + pass-through | ✅ M2 |
 | `SupabaseCloudSyncGateway.kt` (new) | typed Postgrest DTOs + realtime Flows | ✅ M3 |
-| `TvApp.kt` / `AppViewModel.kt` | polling loop + exchange + auto-transition | ⬜ M4 |
+| `TvApp.kt` / `AppViewModel.kt` | polling loop + exchange + auto-transition | ✅ M4 code |
 | Mobile settings section (new) | paired-devices list + revoke | ⬜ M6 |
 | Magic-link methods | OTP implementation replacing stubs | ⬜ M7 |
 
@@ -233,7 +233,7 @@ Branch: `feature/supabase-migration` · base: main @ `5a34c51`
 | M2 | mobile Google sign-in (gateway+nonce+wiring) | ✅ `3badbe9` · live E2E verified 2026-08-25 |
 | M3 | sync swap (Postgrest+realtime gateway wired into container) | ✅ `8096f26`→`495e584` · live E2E verified 2026-08-25 · PGRST303 retry + empty-cloud seeding (supabase#48123 armor) |
 | Web | Next.js site: pages, design tokens, logo, `/pair` auth+claim, Pages deploy | ✅ static export green · Pages workflow ready · claim call live-pending M4 functions |
-| M4 | TV pairing E2E: functions(create/claim/exchange/register-session) + TV polling + QR live | ⬜ |
+| M4 | TV pairing E2E: functions(create/claim/exchange/register-session) + TV polling + QR live | 🟡 backend live-tested · Kotlin gateway + poll loop + OTP sign-in wired · device E2E pending owner run |
 | M5 | provider-config Edge Functions + encryption parity test | ⬜ |
 | M6 | device management UI + revoke E2E + delete-account | ⬜ |
 | M7 | magic-link migration + SMTP + pending-email fix | ⬜ |

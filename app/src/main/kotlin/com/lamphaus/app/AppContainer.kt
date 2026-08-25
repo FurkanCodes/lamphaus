@@ -6,6 +6,7 @@ import com.lamphaus.core.data.cloud.AccountGateway
 import com.lamphaus.core.data.cloud.LocalAccountGateway
 import com.lamphaus.core.data.cloud.LocalPairingGateway
 import com.lamphaus.core.data.cloud.SupabaseAccountGateway
+import com.lamphaus.core.data.cloud.SupabasePairingGateway
 import com.lamphaus.core.data.cloud.SupabaseCloudSyncGateway
 import com.lamphaus.core.data.cloud.LocalCloudSyncGateway
 import com.lamphaus.core.data.cloud.CloudSyncGateway
@@ -72,8 +73,11 @@ class AppContainer(context: Context) {
     } else {
         localAccount
     }
-    // TODO(M4): swap to SupabasePairingGateway(supabase)
-    val pairingGateway: PairingGateway = LocalPairingGateway()
+    val pairingGateway: PairingGateway = if (supabase != null) {
+        SupabasePairingGateway(supabase)
+    } else {
+        LocalPairingGateway()
+    }
     val cloudSyncGateway: CloudSyncGateway = if (supabase != null) {
         SupabaseCloudSyncGateway(supabase)
     } else {

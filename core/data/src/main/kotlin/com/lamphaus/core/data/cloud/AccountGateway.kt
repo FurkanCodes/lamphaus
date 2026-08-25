@@ -1,5 +1,6 @@
 package com.lamphaus.core.data.cloud
 
+import com.lamphaus.core.model.DeviceGrant
 import com.lamphaus.core.model.PairingSession
 import kotlinx.coroutines.flow.StateFlow
 
@@ -25,7 +26,7 @@ interface AccountGateway {
 interface PairingGateway {
     suspend fun createPairingSession(deviceLabel: String): Result<PairingSession>
     suspend fun claimPairingSession(shortCode: String): Result<Unit>
-    suspend fun exchangeDeviceGrant(sessionId: String): Result<String>
+    suspend fun exchangeDeviceGrant(sessionId: String): Result<DeviceGrant>
     suspend fun revokeDevice(deviceId: String): Result<Unit>
 }
 

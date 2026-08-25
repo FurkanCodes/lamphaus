@@ -67,6 +67,16 @@ data class PairingSession(
     val claimed: Boolean = false,
 )
 
+/**
+ * Result of polling [com.lamphaus.core.data.cloud.PairingGateway.exchangeDeviceGrant]
+ * during TV pairing. [Granted] carries single-use GoTrue login material that
+ * must be consumed immediately — the server burns it on handoff.
+ */
+sealed interface DeviceGrant {
+    data object Pending : DeviceGrant
+    data class Granted(val email: String, val otp: String, val deviceId: String) : DeviceGrant
+}
+
 @Serializable
 data class DiagnosticsConsent(
     val crashReports: Boolean = false,
