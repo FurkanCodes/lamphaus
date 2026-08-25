@@ -78,6 +78,15 @@ class SupabasePairingGateway(
             }
         }
 
+    override suspend fun registerDeviceSession(deviceId: String): Result<Unit> =
+        CloudLog.tracedResult("devices.register", "device=$deviceId") {
+            supabase.postgrest.rpc(
+                "register_device_session",
+                buildJsonObject { put("p_device_id", deviceId) },
+            )
+            Unit
+        }
+
     override suspend fun listDevices(): Result<List<PairedDevice>> =
         CloudLog.tracedResult("devices.list") {
             supabase.from("devices")

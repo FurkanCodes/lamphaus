@@ -40,6 +40,15 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /** Hardware identity of the TV this install lives on (ANDROID_ID). */
+    val pairingDeviceId: Flow<String?> = context.dataStore.data.map { it[PAIRING_DEVICE_ID] }
+
+    suspend fun setPairingDeviceId(id: String?) {
+        context.dataStore.edit { values ->
+            if (id == null) values.remove(PAIRING_DEVICE_ID) else values[PAIRING_DEVICE_ID] = id
+        }
+    }
+
     suspend fun setTheme(theme: ThemePreference) {
         context.dataStore.edit { it[THEME] = theme.name }
     }
@@ -57,6 +66,7 @@ class UserPreferences(private val context: Context) {
 
     private companion object {
         val ACTIVE_PROFILE = stringPreferencesKey("active_profile")
+        val PAIRING_DEVICE_ID = stringPreferencesKey("pairing_device_id")
         val THEME = stringPreferencesKey("theme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val CRASH_REPORTS = booleanPreferencesKey("crash_reports")

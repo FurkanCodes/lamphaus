@@ -29,6 +29,13 @@ interface PairingGateway {
     suspend fun createPairingSession(deviceLabel: String, deviceKey: String?): Result<PairingSession>
     suspend fun claimPairingSession(shortCode: String): Result<Unit>
     suspend fun exchangeDeviceGrant(sessionId: String): Result<DeviceGrant>
+
+    /**
+     * Binds the caller's CURRENT GoTrue session to a paired devices row.
+     * Idempotent — TVs re-run it on cold start so revocation always has a
+     * session to kill, even if the original binding failed mid-pairing.
+     */
+    suspend fun registerDeviceSession(deviceId: String): Result<Unit>
     suspend fun listDevices(): Result<List<PairedDevice>>
     suspend fun revokeDevice(deviceId: String): Result<Unit>
 }

@@ -57,6 +57,14 @@ function rest(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "unknown"
+  );
+}
+
 /** Resolves the caller's user via GoTrue, or null when the JWT is bad. */
 async function requireUser(
   req: Request,
@@ -77,6 +85,22 @@ Deno.serve(async (req) => {
 
   const user = await requireUser(req);
   if (!user?.email) return json({ error: "unauthorized" }, 401);
+
+  // Claims get their OWN rate bucket (ip hash salted with "|claim") so
+  // they never share counters with session creation. Without this an
+  // authenticated script could brute-force live codes indefinitely.
+  const ipHash = await sha256Hex(`${clientIp(req)}|claim`);
+  const slotAllowed = await rest("rpc/consume_pairing_slot", {
+    method: "POST",
+    body: JSON.stringify({
+      p_ip_hash: ipHash,
+      p_limit: 10,
+      p_window_minutes: 1,
+    }),
+  })
+    .then((r) => r.json())
+    .catch(() => null);
+  if (slotAllowed !== true) return json({ error: "rate_limited" }, 429);
 
   const body = await req.json().catch(() => ({}) as Record<string, unknown>);
   const code = typeof body.code === "string"

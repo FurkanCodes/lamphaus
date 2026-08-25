@@ -34,7 +34,6 @@ import java.security.MessageDigest
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -51,8 +50,6 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
@@ -71,6 +68,7 @@ class AppViewModel(
     private var searchJob: Job? = null
     private var detailJob: Job? = null
     private var sourceJob: Job? = null
+    private var deviceSessionRebound = false
 
     init {
         viewModelScope.launch {
@@ -127,6 +125,21 @@ class AppViewModel(
         viewModelScope.launch {
             state.mapActiveProfileId().filterNotNull().flatMapLatest(container.libraryRepository::progress).collectLatest { progress ->
                 mutableState.update { it.copy(progress = progress) }
+            }
+        }
+        // Cold-start session re-binding (plan F3/F6 armor): devices.auth_session_id
+        // is normally written right after pairing; if that write ever failed
+        // mid-pairing, the row survives unbound and revocation would find no
+        // session to kill. The RPC is idempotent and owner-guarded, so one
+        // re-run per process on the restored session is always safe. Phones
+        // never pair, so their empty preference makes this a no-op.
+        viewModelScope.launch {
+            container.accountGateway.state.collect { account ->
+                if (account !is AccountState.SignedIn || deviceSessionRebound) return@collect
+                deviceSessionRebound = true
+                container.preferences.pairingDeviceId.first()?.let { deviceId ->
+                    container.pairingGateway.registerDeviceSession(deviceId)
+                }
             }
         }
     }
@@ -579,10 +592,10 @@ class AppViewModel(
             CloudLog.i("tv.pairing exchanging OTP for a TV session (email=${CloudLog.sanitize("""{"email":"${grant.email}"}""")})")
             supabase.auth.verifyEmailOtp(OtpType.Email.MAGIC_LINK, grant.email, grant.otp)
             CloudLog.i("tv.pairing OTP verified — TV session minted, binding device…")
-            supabase.postgrest.rpc(
-                "register_device_session",
-                buildJsonObject { put("p_device_id", grant.deviceId) },
-            )
+            container.pairingGateway.registerDeviceSession(grant.deviceId).getOrThrow()
+            // Remember this install's devices row so cold starts can re-bind
+            // their restored session (see the collector in init).
+            container.preferences.setPairingDeviceId(grant.deviceId)
             CloudLog.i("tv.pairing device=${grant.deviceId} bound to session — pairing complete 🎬")
         }.onFailure {
             CloudLog.e("tv.pairing sign-in after grant failed (device=${grant.deviceId})", it)
@@ -635,6 +648,7 @@ class AppViewModel(
             // and leak the old account's content into it via seeding.
             container.libraryRepository.clearLocalAccountData()
             container.preferences.setActiveProfile(null)
+            container.preferences.setPairingDeviceId(null)
             devicesLoadedOnce = false
             mutableState.update(AppUiState::clearAccountData)
             showMessage("Your account and all cloud data were deleted.")

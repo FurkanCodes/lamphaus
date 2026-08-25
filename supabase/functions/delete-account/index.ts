@@ -54,7 +54,11 @@ Deno.serve(async (req) => {
       headers: { apikey: ANON_KEY, Authorization: `Bearer ${SERVICE_ROLE}` },
     },
   );
-  if (!deleted.ok) return json({ error: "delete_failed" }, 500);
+  // 404 means already gone (double-tap, retry after success): deletion is
+  // idempotent — report success so clients never show a false failure.
+  if (!deleted.ok && deleted.status !== 404) {
+    return json({ error: "delete_failed" }, 500);
+  }
 
   return json({ ok: true });
 });

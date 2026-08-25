@@ -38,6 +38,7 @@ class LocalPairingGateway : PairingGateway {
 
     override suspend fun claimPairingSession(shortCode: String) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun exchangeDeviceGrant(sessionId: String) = Result.failure<DeviceGrant>(CloudNotConfiguredException())
+    override suspend fun registerDeviceSession(deviceId: String) = Result.success(Unit)
     override suspend fun listDevices() = Result.failure<List<PairedDevice>>(CloudNotConfiguredException())
     override suspend fun revokeDevice(deviceId: String) = Result.success(Unit)
 }
