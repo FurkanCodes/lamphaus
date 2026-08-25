@@ -15,6 +15,7 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
+import com.lamphaus.app.isTelevision
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.isSafeExternalUri
 import com.lamphaus.app.player.PlayerActivity
@@ -35,6 +36,13 @@ class MobileActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (isTelevision()) {
+            // Running on a TV (emulator or real): the ten-foot experience lives
+            // in TvActivity, regardless of which entry point started us.
+            startActivity(Intent(this, com.lamphaus.app.tv.TvActivity::class.java))
+            finish()
+            return
+        }
         handleIncomingIntent(intent)
         setContent {
             MobileApp(

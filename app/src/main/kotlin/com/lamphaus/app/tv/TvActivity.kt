@@ -10,6 +10,8 @@ import androidx.activity.viewModels
 import com.google.android.gms.cast.tv.CastReceiverContext
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
+import com.lamphaus.app.isTelevision
+import com.lamphaus.app.mobile.MobileActivity
 import com.lamphaus.app.player.PlayerActivity
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.isSafeExternalUri
@@ -21,6 +23,14 @@ class TvActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!isTelevision()) {
+            // Started on a non-TV device (e.g. Android Studio picked the wrong
+            // target): hand off to the mobile experience instead of rendering
+            // the ten-foot pairing screen on a touchscreen.
+            startActivity(Intent(this, MobileActivity::class.java))
+            finish()
+            return
+        }
         setContent {
             TvApp(
                 viewModel = viewModel,
