@@ -8,7 +8,7 @@ Lamphaus is one native Android application with purpose-built phone/tablet and t
 2. Use JDK 17 or newer and run `./gradlew assembleDebug`.
 3. Install the standard debug APK on a phone or television emulator. Each launcher opens its form-factor activity.
 
-The debug build works without cloud credentials and exposes local account/provider state. To enable production authentication and synchronization, add the externally supplied `app/google-services.json` and backend configuration described in `docs/PRODUCTION_SETUP.md`.
+The debug build works without cloud credentials and exposes local account/provider state. To enable production authentication and synchronization, add the Supabase credentials described in `docs/PRODUCTION_SETUP.md`.
 
 ## Project map
 
