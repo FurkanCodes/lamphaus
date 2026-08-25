@@ -3,10 +3,8 @@ package com.lamphaus.app.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.crashlytics.FirebaseCrashlytics
-import com.google.firebase.perf.FirebasePerformance
-import com.lamphaus.app.AppContainer
 import com.lamphaus.app.BuildConfig
+import com.lamphaus.app.AppContainer
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.CatalogQuery
@@ -526,10 +524,8 @@ class AppViewModel(
 
     fun setDiagnostics(consent: DiagnosticsConsent) = viewModelScope.launch {
         container.preferences.setDiagnostics(consent.copy(updatedAtEpochMillis = System.currentTimeMillis()))
-        if (BuildConfig.CLOUD_CONFIGURED) {
-            FirebaseCrashlytics.getInstance().isCrashlyticsCollectionEnabled = consent.crashReports
-            FirebasePerformance.getInstance().isPerformanceCollectionEnabled = consent.performanceMetrics
-        }
+        // Diagnostics backends are being replaced alongside the Supabase migration;
+        // consent is persisted now and honored by whichever provider lands next.
     }
 
     fun dismissMessage() = mutableState.update { it.copy(message = null) }

@@ -101,7 +101,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (!isTelevision && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && controller?.isPlaying == true) {
+        if (!isTelevision && controller?.isPlaying == true) {
             enterPictureInPictureMode(
                 PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))

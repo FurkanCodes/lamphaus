@@ -5,12 +5,9 @@ plugins {
     alias(libs.plugins.android.baselineprofile)
 }
 
-val cloudConfigured = file("google-services.json").exists()
-if (cloudConfigured) {
-    apply(plugin = "com.google.gms.google-services")
-    apply(plugin = "com.google.firebase.crashlytics")
-    apply(plugin = "com.google.firebase.firebase-perf")
-}
+val supabaseUrl = providers.gradleProperty("lamphaus.supabaseUrl").orNull.orEmpty()
+val supabasePublishableKey = providers.gradleProperty("lamphaus.supabasePublishableKey").orNull.orEmpty()
+val cloudConfigured = supabaseUrl.isNotBlank() && supabasePublishableKey.isNotBlank()
 
 android {
     namespace = "com.lamphaus.app"
@@ -18,13 +15,15 @@ android {
 
     defaultConfig {
         applicationId = "com.lamphaus.app"
-        minSdk = 23
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         buildConfigField("boolean", "CLOUD_CONFIGURED", cloudConfigured.toString())
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
         buildConfigField("String", "CAST_APPLICATION_ID", "\"${providers.gradleProperty("lamphaus.castAppId").orNull.orEmpty()}\"")
         buildConfigField("String", "EMAIL_LINK_DOMAIN", "\"${providers.gradleProperty("lamphaus.emailLinkDomain").orNull ?: "links.lamphaus.app"}\"")
         buildConfigField("String", "WEB_CLIENT_ID", "\"${providers.gradleProperty("lamphaus.webClientId").orNull.orEmpty()}\"")
@@ -114,13 +113,12 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.ui)
 
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)
-    implementation(libs.firebase.firestore)
-    implementation(libs.firebase.functions)
-    implementation(libs.firebase.appcheck.playintegrity)
-    implementation(libs.firebase.crashlytics)
-    implementation(libs.firebase.performance)
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.postgrest)
+    implementation(libs.supabase.realtime)
+    implementation(libs.supabase.functions)
+    implementation(libs.ktor.client.okhttp)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)

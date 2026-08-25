@@ -2,18 +2,18 @@ package com.lamphaus.app
 
 import android.content.Context
 import androidx.room.Room
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.functions.FirebaseFunctions
-import com.google.firebase.firestore.FirebaseFirestore
 import com.lamphaus.core.data.cloud.AccountGateway
-import com.lamphaus.core.data.cloud.FirebaseAccountGateway
-import com.lamphaus.core.data.cloud.FirebasePairingGateway
 import com.lamphaus.core.data.cloud.LocalAccountGateway
 import com.lamphaus.core.data.cloud.LocalPairingGateway
-import com.lamphaus.core.data.cloud.CloudSyncGateway
-import com.lamphaus.core.data.cloud.FirebaseCloudSyncGateway
 import com.lamphaus.core.data.cloud.LocalCloudSyncGateway
+import com.lamphaus.core.data.cloud.CloudSyncGateway
 import com.lamphaus.core.data.cloud.PairingGateway
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.Auth
+import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.functions.Functions
+import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
 import com.lamphaus.core.data.local.LamphausDatabase
 import com.lamphaus.core.data.preferences.UserPreferences
 import com.lamphaus.core.data.repository.LibraryRepository
@@ -44,24 +44,33 @@ class AppContainer(context: Context) {
     val providerAggregator = ProviderAggregator(providerClient)
 
     private val localAccount = LocalAccountGateway()
-    val accountGateway: AccountGateway = if (BuildConfig.CLOUD_CONFIGURED) {
-        FirebaseAccountGateway(
-            FirebaseAuth.getInstance(),
-            BuildConfig.EMAIL_LINK_DOMAIN,
-        )
+
+    /**
+     * Shared Supabase client, present only when cloud credentials are provided via
+     * Gradle properties (lamphaus.supabaseUrl / lamphaus.supabasePublishableKey).
+     * Gateways migrate onto this client milestone by milestone (M2 auth, M3 sync,
+     * M5 functions); until then Local gateways keep every surface functional.
+     */
+    val supabase: SupabaseClient? = if (BuildConfig.CLOUD_CONFIGURED) {
+        createSupabaseClient(
+            supabaseUrl = BuildConfig.SUPABASE_URL,
+            supabaseKey = BuildConfig.SUPABASE_PUBLISHABLE_KEY,
+        ) {
+            install(Auth)
+            install(Postgrest)
+            install(Realtime)
+            install(Functions)
+        }
     } else {
-        localAccount
+        null
     }
-    val pairingGateway: PairingGateway = if (BuildConfig.CLOUD_CONFIGURED) {
-        FirebasePairingGateway(FirebaseFunctions.getInstance())
-    } else {
-        LocalPairingGateway()
-    }
-    val cloudSyncGateway: CloudSyncGateway = if (BuildConfig.CLOUD_CONFIGURED) {
-        FirebaseCloudSyncGateway(FirebaseFirestore.getInstance(), FirebaseFunctions.getInstance())
-    } else {
-        LocalCloudSyncGateway()
-    }
+
+    // TODO(M2): swap to SupabaseAccountGateway(supabase)
+    val accountGateway: AccountGateway = localAccount
+    // TODO(M4): swap to SupabasePairingGateway(supabase)
+    val pairingGateway: PairingGateway = LocalPairingGateway()
+    // TODO(M3): swap to SupabaseCloudSyncGateway(supabase)
+    val cloudSyncGateway: CloudSyncGateway = LocalCloudSyncGateway()
 
     fun openDevelopmentSession() {
         check(BuildConfig.DEBUG) { "Development sessions are disabled in this build." }
