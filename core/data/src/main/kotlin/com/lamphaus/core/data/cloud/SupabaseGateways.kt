@@ -8,6 +8,7 @@ import io.github.jan.supabase.auth.status.RefreshFailureCause
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
+import io.github.jan.supabase.exceptions.RestException
 import io.github.jan.supabase.functions.functions
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
@@ -41,6 +42,7 @@ class SupabaseAccountGateway(
                         CloudLog.i("auth.status ← Authenticated user=${status.session.user?.id}")
                         mutableState.value = status.session.toAccountState()
                             .also { CloudLog.i("auth.state → ${it::class.simpleName}") }
+                        validateRestoredSessionOnce(status.session.accessToken)
                     }
                     SessionStatus.Initializing -> {
                         CloudLog.d("auth.status ← Initializing")
@@ -99,6 +101,33 @@ class SupabaseAccountGateway(
 
     override suspend fun signOut() {
         runCatching { supabase.auth.signOut() }
+    }
+
+    /**
+     * Restored sessions are trusted only after GoTrue confirms the user
+     * still exists: a deleted account leaves behind tokens that look valid
+     * for up to an hour, and storage restore reports Authenticated without
+     * asking the server. One probe per process; a SERVER rejection clears
+     * the dead session immediately, while a NETWORK error keeps the state
+     * untouched (plan F3 — offline must never sign anyone out).
+     */
+    private var startupValidationStarted = false
+    private fun validateRestoredSessionOnce(accessToken: String) {
+        if (startupValidationStarted) return
+        startupValidationStarted = true
+        scope.launch {
+            try {
+                supabase.auth.retrieveUser(accessToken)
+                CloudLog.d("auth.restore validated with server")
+            } catch (e: RestException) {
+                CloudLog.w("auth.restore rejected by server (${e::class.simpleName}) → clearing dead session")
+                mutableState.value = AccountState.SignedOut
+                    .also { CloudLog.i("auth.state → SignedOut") }
+                runCatching { supabase.auth.signOut() }
+            } catch (e: Exception) {
+                CloudLog.d("auth.restore validation deferred (${e::class.simpleName})")
+            }
+        }
     }
 
     private fun UserSession.toAccountState(): AccountState {
