@@ -27,37 +27,47 @@ class SupabasePairingGateway(
     private val supabase: SupabaseClient,
 ) : PairingGateway {
 
-    override suspend fun createPairingSession(deviceLabel: String): Result<PairingSession> = runCatching {
-        val body = invoke("create-pairing-session") {
-            put("device_label", deviceLabel)
+    override suspend fun createPairingSession(deviceLabel: String): Result<PairingSession> =
+        CloudLog.tracedResult("pairing.create", "label=$deviceLabel") {
+            val body = invoke("create-pairing-session") {
+                put("device_label", deviceLabel)
+            }
+            PairingSession(
+                id = body.string("session_id"),
+                shortCode = body.string("short_code"),
+                qrPayload = body.string("qr_payload"),
+                expiresAtEpochMillis = Instant.parse(body.string("expires_at")).toEpochMilli(),
+            ).also {
+                CloudLog.d(
+                    "pairing.create ← session=${it.id} code=${it.shortCode} " +
+                        "expiresIn=${it.expiresAtEpochMillis - System.currentTimeMillis()}ms",
+                )
+            }
         }
-        PairingSession(
-            id = body.string("session_id"),
-            shortCode = body.string("short_code"),
-            qrPayload = body.string("qr_payload"),
-            expiresAtEpochMillis = Instant.parse(body.string("expires_at")).toEpochMilli(),
-        )
-    }
 
-    override suspend fun claimPairingSession(shortCode: String): Result<Unit> = runCatching {
-        invoke("claim-pairing-session") { put("code", shortCode) }
-        Unit
-    }
+    override suspend fun claimPairingSession(shortCode: String): Result<Unit> =
+        CloudLog.tracedResult("pairing.claim", "code=$shortCode") {
+            invoke("claim-pairing-session") { put("code", shortCode) }
+            Unit
+        }
 
-    override suspend fun exchangeDeviceGrant(sessionId: String): Result<DeviceGrant> = runCatching {
-        val body = invoke("exchange-device-grant") {
-            put("session_id", sessionId)
+    override suspend fun exchangeDeviceGrant(sessionId: String): Result<DeviceGrant> =
+        CloudLog.tracedResult("pairing.exchange", "session=$sessionId") {
+            val body = invoke("exchange-device-grant") {
+                put("session_id", sessionId)
+            }
+            when (body.string("status")) {
+                "pending" -> DeviceGrant.Pending
+                "granted" -> DeviceGrant.Granted(
+                    email = body.string("email"),
+                    otp = body.string("otp"),
+                    deviceId = body.string("device_id"),
+                ).also { CloudLog.d("pairing.exchange ← GRANTED device=${it.deviceId} email=${it.email}") }
+                else -> error("grant_${body.string("status")}").also {
+                    CloudLog.w("pairing.exchange ← unexpected status=${body.string("status")}")
+                }
+            }
         }
-        when (body.string("status")) {
-            "pending" -> DeviceGrant.Pending
-            "granted" -> DeviceGrant.Granted(
-                email = body.string("email"),
-                otp = body.string("otp"),
-                deviceId = body.string("device_id"),
-            )
-            else -> error("grant_${body.string("status")}")
-        }
-    }
 
     // Revocation travels through its own endpoint in M6 (plan F6).
     override suspend fun revokeDevice(deviceId: String): Result<Unit> =
@@ -67,9 +77,16 @@ class SupabasePairingGateway(
         functionName: String,
         block: JsonObjectBuilder.() -> Unit,
     ): JsonObject {
-        val response = supabase.functions.buildEdgeFunction(functionName)
-            .invoke(buildJsonObject(block))
-        return JSON.parseToJsonElement(response.bodyAsText()).jsonObject
+        val payload = buildJsonObject(block)
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        val response = supabase.functions.buildEdgeFunction(functionName).invoke(payload)
+        val text = response.bodyAsText()
+        CloudLog.d(
+            "functions.$functionName ← HTTP ${response.status.value} " +
+                "(${android.os.SystemClock.elapsedRealtime() - startedAt}ms) " +
+                CloudLog.clamp(CloudLog.sanitize(text)),
+        )
+        return JSON.parseToJsonElement(text).jsonObject
     }
 
     private fun JsonObject.string(name: String): String =

@@ -4,6 +4,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.auth.status.RefreshFailureCause
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
@@ -31,31 +32,47 @@ class SupabaseAccountGateway(
     init {
         scope.launch {
             supabase.auth.sessionStatus.collect { status ->
+                // Never log $status directly — UserSession.toString() carries tokens.
                 when (status) {
-                    is SessionStatus.Authenticated ->
+                    is SessionStatus.Authenticated -> {
+                        CloudLog.i("auth.status ← Authenticated user=${status.session.user?.id}")
                         mutableState.value = status.session.toAccountState()
-                    SessionStatus.Initializing ->
+                            .also { CloudLog.i("auth.state → ${it::class.simpleName}") }
+                    }
+                    SessionStatus.Initializing -> {
+                        CloudLog.d("auth.status ← Initializing")
                         mutableState.value = AccountState.Loading
-                    is SessionStatus.NotAuthenticated ->
+                    }
+                    is SessionStatus.NotAuthenticated -> {
+                        CloudLog.i("auth.status ← NotAuthenticated (${status::class.simpleName}) → SignedOut")
                         mutableState.value = AccountState.SignedOut
+                    }
                     // A failed refresh keeps the last known state: transient network
                     // issues must not sign the user out. Revoked sessions surface
                     // as NotAuthenticated from the SDK once rejected server-side.
-                    is SessionStatus.RefreshFailure -> Unit
+                    is SessionStatus.RefreshFailure -> {
+                        val detail = when (val reason = status.cause) {
+                            is RefreshFailureCause.NetworkError ->
+                                "network ${reason.exception::class.simpleName}: ${reason.exception.message}"
+                            else -> reason::class.simpleName
+                        }
+                        CloudLog.w("auth.status ← RefreshFailure ($detail) — keeping last known state")
+                    }
                 }
             }
         }
     }
 
-    override suspend fun signInWithGoogleIdToken(idToken: String, nonce: String?): Result<Unit> = runCatching {
-        require(idToken.isNotBlank())
-        supabase.auth.signInWith(IDToken) {
-            this.idToken = idToken
-            provider = Google
-            nonce?.let { this.nonce = it }
+    override suspend fun signInWithGoogleIdToken(idToken: String, nonce: String?): Result<Unit> =
+        CloudLog.tracedResult("auth.signInWithGoogle", "idToken=<${idToken.length} chars> hasNonce=${nonce != null}") {
+            require(idToken.isNotBlank())
+            supabase.auth.signInWith(IDToken) {
+                this.idToken = idToken
+                provider = Google
+                nonce?.let { this.nonce = it }
+            }
+            Unit
         }
-        Unit
-    }
 
     override suspend fun sendEmailLink(email: String): Result<Unit> =
         Result.failure(UnsupportedOperationException("Magic link sign-in lands in milestone M7."))

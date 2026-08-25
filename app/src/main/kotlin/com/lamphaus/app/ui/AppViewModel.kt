@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.AppContainer
 import com.lamphaus.core.data.cloud.AccountState
+import com.lamphaus.core.data.cloud.CloudLog
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.DiagnosticsConsent
@@ -520,10 +521,14 @@ class AppViewModel(
     fun createPairingSession() {
         pairingPollJob?.cancel()
         pairingPollJob = viewModelScope.launch {
+            CloudLog.i("tv.pairing creating session…")
             container.pairingGateway.createPairingSession(PAIRING_DEVICE_LABEL).onSuccess { session ->
                 mutableState.update { it.copy(pairingSession = session) }
                 pollForDeviceGrant(session)
-            }.onFailure { showMessage(it.message ?: "Pairing is temporarily unavailable.") }
+            }.onFailure {
+                CloudLog.e("tv.pairing createPairingSession failed — QR unavailable", it)
+                showMessage(it.message ?: "Pairing is temporarily unavailable.")
+            }
         }
     }
 
@@ -537,16 +542,21 @@ class AppViewModel(
         while (currentCoroutineContext().isActive) {
             delay(PAIRING_POLL_MILLIS)
             if (state.value.account is AccountState.SignedIn) return
-            if (System.currentTimeMillis() >= session.expiresAtEpochMillis) {
+            val remaining = session.expiresAtEpochMillis - System.currentTimeMillis()
+            if (remaining <= 0) {
+                CloudLog.i("tv.pairing session=${session.id} expired — regenerating QR")
                 createPairingSession()
                 return
             }
             when (val grant = container.pairingGateway.exchangeDeviceGrant(session.id).getOrNull()) {
                 is DeviceGrant.Granted -> {
+                    CloudLog.i("tv.pairing GRANT received for device=${grant.deviceId} — signing in")
                     completeDeviceSignIn(supabase, grant)
                     return
                 }
-                DeviceGrant.Pending, null -> Unit // keep polling through hiccups
+                DeviceGrant.Pending, null -> CloudLog.d(
+                    "tv.pairing pending (session expires in ${remaining / 1000}s)",
+                ) // keep polling through hiccups
             }
         }
     }
@@ -559,20 +569,26 @@ class AppViewModel(
      */
     private suspend fun completeDeviceSignIn(supabase: SupabaseClient, grant: DeviceGrant.Granted) {
         runCatching<Unit> {
+            CloudLog.i("tv.pairing exchanging OTP for a TV session (email=${CloudLog.sanitize("""{"email":"${grant.email}"}""")})")
             supabase.auth.verifyEmailOtp(OtpType.Email.MAGIC_LINK, grant.email, grant.otp)
+            CloudLog.i("tv.pairing OTP verified — TV session minted, binding device…")
             supabase.postgrest.rpc(
                 "register_device_session",
                 buildJsonObject { put("p_device_id", grant.deviceId) },
             )
+            CloudLog.i("tv.pairing device=${grant.deviceId} bound to session — pairing complete 🎬")
         }.onFailure {
+            CloudLog.e("tv.pairing sign-in after grant failed (device=${grant.deviceId})", it)
             showMessage("The TV was claimed, but signing in failed. Refresh the QR and try again.")
         }
     }
 
     fun claimPairingSession(code: String) = viewModelScope.launch {
         container.pairingGateway.claimPairingSession(code.trim()).onSuccess {
+            CloudLog.i("mobile.pairing claim succeeded (code=$code) — TV will sign in on its next poll")
             showMessage("TV paired successfully.")
         }.onFailure {
+            CloudLog.e("mobile.pairing claim failed (code=$code)", it)
             showMessage(it.message ?: "The pairing code is invalid or expired.")
         }
     }
