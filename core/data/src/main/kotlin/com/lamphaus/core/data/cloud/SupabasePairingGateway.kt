@@ -5,6 +5,8 @@ import com.lamphaus.core.model.PairingSession
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.functions.functions
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
@@ -77,9 +79,14 @@ class SupabasePairingGateway(
         functionName: String,
         block: JsonObjectBuilder.() -> Unit,
     ): JsonObject {
-        val payload = buildJsonObject(block)
+        // EdgeFunction.invoke hands raw bodies to Ktor without a serializer or
+        // Content-Type ("Fail to prepare request body"), so we pre-serialize
+        // ourselves and declare the type explicitly.
+        val payload = buildJsonObject(block).toString()
         val startedAt = android.os.SystemClock.elapsedRealtime()
-        val response = supabase.functions.buildEdgeFunction(functionName).invoke(payload)
+        val response = supabase.functions.buildEdgeFunction(functionName).invoke(payload) {
+            contentType(ContentType.Application.Json)
+        }
         val text = response.bodyAsText()
         CloudLog.d(
             "functions.$functionName ← HTTP ${response.status.value} " +
