@@ -69,8 +69,12 @@ data class AppUiState(
     val allMedia: List<MediaPreview>
         get() = sections.flatMap(CatalogSection::items).distinctBy(MediaPreview::stableKey)
 
-    /** Everything account-scoped resets; device-local preferences survive. */
+    /** Everything account-scoped resets; device-local preferences survive.
+     *  [account] must be carried over: rebuilding with the Loading default
+     *  would strand the UI on the loading screen, since no further auth
+     *  status events arrive once the post-delete sign-out has settled. */
     fun clearAccountData() = AppUiState(
+        account = account,
         theme = theme,
         dynamicColor = dynamicColor,
         diagnostics = diagnostics,
