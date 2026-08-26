@@ -211,9 +211,11 @@ class AppViewModel(
             showMessage("Paste an HTTPS add-on address first.")
             return@launch
         }
-        val explicitInstallLink = (runCatching { URI(address).scheme }
-            .getOrNull()
-            ?.let { !it.equals("http", ignoreCase = true) && !it.equals("https", ignoreCase = true) }) == true
+        // A custom-scheme install link (stremio://, addon://, …) is an explicit
+        // addon handoff; a plain http(s) address may still need configuration.
+        val explicitInstallLink = address.contains("://") &&
+            !address.startsWith("http://", ignoreCase = true) &&
+            !address.startsWith("https://", ignoreCase = true)
         mutableState.update { it.copy(refreshing = true, message = null) }
         val directResult = container.providerClient.manifest(address)
         when (directResult) {

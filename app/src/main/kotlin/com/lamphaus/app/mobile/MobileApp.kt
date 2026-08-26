@@ -939,7 +939,7 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
             item {
                 Button(
                     onClick = { viewModel.addProvider(providerUrl) },
-                    enabled = providerUrl.startsWith("https://") || (com.lamphaus.app.BuildConfig.DEBUG && providerUrl.startsWith("http://")),
+                    enabled = providerUrl.isNotBlank(),
                 ) { Text(stringResource(R.string.install_addon)) }
             }
             item {
