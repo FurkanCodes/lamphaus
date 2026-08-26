@@ -798,23 +798,26 @@ private fun TvCatalogRow(
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )
-        } ?: LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
-            contentPadding = PaddingValues(
-                start = TvLayoutTokens.screenHorizontalPadding,
-                end = TvLayoutTokens.screenHorizontalPadding,
-                bottom = TvLayoutTokens.screenBottomPadding,
-            ),
-        ) {
-            items(section.items, key = MediaPreview::stableKey) { media ->
-                TvMediaCard(
-                    media = media,
-                    onClick = { onMedia(media) },
-                    onFocused = { onFocused(media) },
-                    modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
-                    showLabel = true,
-                    revealLabelOnFocus = true,
-                )
+        }
+        if (section.items.isNotEmpty()) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
+                contentPadding = PaddingValues(
+                    start = TvLayoutTokens.screenHorizontalPadding,
+                    end = TvLayoutTokens.screenHorizontalPadding,
+                    bottom = TvLayoutTokens.screenBottomPadding,
+                ),
+            ) {
+                items(section.items, key = MediaPreview::stableKey) { media ->
+                    TvMediaCard(
+                        media = media,
+                        onClick = { onMedia(media) },
+                        onFocused = { onFocused(media) },
+                        modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
+                        showLabel = true,
+                        revealLabelOnFocus = true,
+                    )
+                }
             }
         }
     }

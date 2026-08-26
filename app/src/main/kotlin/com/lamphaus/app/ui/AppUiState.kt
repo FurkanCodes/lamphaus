@@ -17,6 +17,7 @@ import com.lamphaus.core.model.Episode
 
 data class CatalogSection(
     val id: String,
+    val providerId: String,
     val title: String,
     val providerName: String,
     val items: List<MediaPreview>,

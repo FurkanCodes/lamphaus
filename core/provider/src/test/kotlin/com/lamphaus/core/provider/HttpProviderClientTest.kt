@@ -11,13 +11,23 @@ import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.SubtitleTrack
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 
@@ -37,6 +47,33 @@ class HttpProviderClientTest {
         server.shutdown()
     }
 
+    @Test
+    fun `guarded provider call rethrows cancellation`() = runTest {
+        val cancellation = CancellationException("superseded")
+
+        try {
+            guardedProviderCall<Unit> { throw cancellation }
+            fail("Cancellation must escape guardedProviderCall")
+        } catch (error: CancellationException) {
+            assertSame(cancellation, error)
+        }
+    }
+
+    @Test
+    fun `cancelling an in-flight request cancels the okhttp call`() = runTest {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val request = launch {
+            client.manifest(server.url("/manifest.json").toString())
+        }
+        yield()
+
+        assertTrue(server.takeRequest(1, TimeUnit.SECONDS) != null)
+        withContext(Dispatchers.Default) {
+            withTimeout(1_000) {
+                request.cancelAndJoin()
+            }
+        }
+    }
     @Test
     fun `manifest parser preserves neutral capabilities`() = runTest {
         server.enqueue(jsonResponse(MANIFEST))
