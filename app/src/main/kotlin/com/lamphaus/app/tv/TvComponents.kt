@@ -1,6 +1,7 @@
 package com.lamphaus.app.tv
 
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -13,14 +14,20 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
@@ -33,21 +40,31 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -55,6 +72,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,9 +92,122 @@ internal enum class TvDestination(
 ) {
     HOME(R.string.home, Icons.Filled.Home),
     DISCOVER(R.string.discover, Icons.Filled.Explore),
-    SEARCH(R.string.search, Icons.Filled.Search, showLabel = false),
     LIBRARY(R.string.library, Icons.Filled.VideoLibrary),
+    SEARCH(R.string.search, Icons.Filled.Search, showLabel = false),
     SETTINGS(R.string.settings, Icons.Filled.Settings),
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+internal fun Modifier.tvContentFocusBoundary(topNavigationRequester: FocusRequester): Modifier =
+    focusProperties {
+        exit = { direction ->
+            if (direction == FocusDirection.Up) {
+                topNavigationRequester
+            } else {
+                FocusRequester.Default
+            }
+        }
+    }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun TvEditableTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    onImeAction: () -> Unit = {},
+    onNavigateDown: () -> Boolean = { false },
+) {
+    var editing by remember { mutableStateOf(false) }
+    var focused by remember { mutableStateOf(false) }
+    var imeWasVisible by remember { mutableStateOf(false) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val browseDescription = stringResource(R.string.press_select_to_edit)
+    val editingDescription = stringResource(R.string.editing)
+    val finishEditing: () -> Unit = {
+        editing = false
+        keyboardController?.hide()
+    }
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(editing) {
+        if (editing) {
+            withFrameNanos { }
+            keyboardController?.show()
+        }
+    }
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) {
+            imeWasVisible = true
+        } else if (imeWasVisible && editing) {
+            finishEditing()
+        }
+    }
+    BackHandler(enabled = editing, onBack = finishEditing)
+
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        readOnly = !editing,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.onSurface),
+        keyboardOptions = keyboardOptions,
+        keyboardActions = KeyboardActions(onAny = {
+            finishEditing()
+            onImeAction()
+        }),
+        modifier = modifier
+            .onFocusChanged {
+                focused = it.isFocused
+                if (!it.isFocused && editing) finishEditing()
+            }
+            .onPreviewKeyEvent { event ->
+                if (!editing) {
+                    when {
+                        event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown ->
+                            onNavigateDown()
+
+                        event.key == Key.DirectionCenter || event.key == Key.Enter -> {
+                            if (event.type == KeyEventType.KeyUp) {
+                                editing = true
+                            }
+                            true
+                        }
+
+                        else -> false
+                    }
+                } else if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
+                    finishEditing()
+                    true
+                } else {
+                    false
+                }
+            }
+            .background(MaterialTheme.colorScheme.background, TvShapeTokens.card)
+            .border(
+                width = if (focused) TvFocusTokens.outlineWidth else 1.dp,
+                color = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.border,
+                shape = TvShapeTokens.card,
+            )
+            .semantics {
+                contentDescription = label
+                stateDescription = if (editing) editingDescription else browseDescription
+            }
+            .padding(contentPadding),
+        decorationBox = { input ->
+            if (value.isBlank()) {
+                Text(
+                    placeholder,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
+            input()
+        },
+    )
 }
 
 @Composable

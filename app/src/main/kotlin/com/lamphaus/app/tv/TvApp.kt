@@ -41,8 +41,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
@@ -64,18 +64,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -452,7 +448,8 @@ private fun TvSignedIn(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = TvLayoutTokens.contentTopPadding),
+                .padding(top = TvLayoutTokens.contentTopPadding)
+                .tvContentFocusBoundary(navFocus.getValue(destination)),
         ) {
             // Per-destination saveable state (scroll positions, search query,
             // settings section) survives both detail round-trips and tab
@@ -894,7 +891,6 @@ private fun TvSearch(
     onFocusRestored: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf(initialSearch) }
-    var focused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(query) { onSearch(query) }
     val matches = if (query.isBlank()) state.allMedia else state.searchResults
@@ -903,40 +899,18 @@ private fun TvSearch(
             .fillMaxSize()
             .padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
     ) {
-        BasicTextField(
+        TvEditableTextField(
             value = query,
             onValueChange = { query = it },
-            singleLine = true,
-            textStyle = MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.onSurface),
+            label = stringResource(R.string.search_label),
+            placeholder = stringResource(R.string.search_tv_hint),
+            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 20.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            onNavigateDown = { focusManager.moveFocus(FocusDirection.Down) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp)
-                .focusRequester(initialFocusRequester)
-                .onFocusChanged { focused = it.isFocused }
-                .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                        focusManager.moveFocus(FocusDirection.Down)
-                    } else {
-                        false
-                    }
-                }
-                .background(MaterialTheme.colorScheme.background, TvShapeTokens.card)
-                .border(
-                    width = if (focused) TvFocusTokens.outlineWidth else 1.dp,
-                    color = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.border,
-                    shape = TvShapeTokens.card,
-                )
-                .padding(horizontal = 28.dp, vertical = 20.dp),
-            decorationBox = { input ->
-                if (query.isBlank()) {
-                    Text(
-                        stringResource(R.string.search_tv_hint),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f),
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                }
-                input()
-            },
+                .focusRequester(initialFocusRequester),
         )
         Spacer(Modifier.height(32.dp))
         if (matches.isEmpty()) {
@@ -1639,7 +1613,6 @@ private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
 @Composable
 private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
     var providerAddress by rememberSaveable { mutableStateOf("") }
-    var addressFocused by remember { mutableStateOf(false) }
     val installFocusRequester = remember { FocusRequester() }
     val refreshFocusRequester = remember { FocusRequester() }
     val installEnabled = providerAddress.startsWith("https://") || providerAddress.startsWith("http://")
@@ -1672,47 +1645,27 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
         }
         if (BuildConfig.DEBUG) {
             item {
-                BasicTextField(
+                TvEditableTextField(
                     value = providerAddress,
                     onValueChange = { providerAddress = it },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.onSurface),
+                    label = stringResource(R.string.addon_address),
+                    placeholder = stringResource(R.string.https_manifest_address),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Done,
+                    ),
+                    onNavigateDown = {
+                        val nextFocusRequester = if (installEnabled) {
+                            installFocusRequester
+                        } else {
+                            refreshFocusRequester
+                        }
+                        nextFocusRequester.requestFocus()
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(60.dp)
-                        .onFocusChanged { addressFocused = it.isFocused }
-                        .focusProperties {
-                            down = if (installEnabled) installFocusRequester else refreshFocusRequester
-                        }
-                        .onPreviewKeyEvent { event ->
-                            if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionDown) {
-                                false
-                            } else {
-                                val nextFocusRequester = if (installEnabled) {
-                                    installFocusRequester
-                                } else {
-                                    refreshFocusRequester
-                                }
-                                nextFocusRequester.requestFocus()
-                            }
-                        }
-                        .background(MaterialTheme.colorScheme.background, TvShapeTokens.card)
-                        .border(
-                            width = if (addressFocused) TvFocusTokens.outlineWidth else 1.dp,
-                            color = if (addressFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.border,
-                            shape = TvShapeTokens.card,
-                        )
-                        .padding(horizontal = 16.dp, vertical = 18.dp),
-                    decorationBox = { input ->
-                        if (providerAddress.isBlank()) {
-                            Text(
-                                stringResource(R.string.https_manifest_address),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                        }
-                        input()
-                    },
+                        .height(60.dp),
                 )
             }
             item {

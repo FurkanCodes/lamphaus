@@ -59,6 +59,8 @@
     <string name="continue_watching">Continue Watching</string>
     <string name="nothing_here">Nothing here yet.</string>
     <string name="search_tv_hint">Movies, series, or genres</string>
+    <string name="press_select_to_edit">Press Select to edit</string>
+    <string name="editing">Editing</string>
     <string name="about">About</string>
     <string name="about_lamphaus_body">Your library, compatible content sources, and playback in one calm television experience.</string>
     <string name="media_card_description_rating">%1$s, rated %2$s out of 10</string>
