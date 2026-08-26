@@ -84,12 +84,13 @@ internal fun TvTopNavigation(
     selectedDestination: TvDestination,
     activeProfile: Profile?,
     focusDestination: TvDestination?,
-    downFocusRequester: FocusRequester,
+    requesters: Map<TvDestination, FocusRequester>,
+    contentDownRequester: FocusRequester,
     onFocusHandled: () -> Unit,
+    onHasFocus: (Boolean) -> Unit,
     onDestination: (TvDestination) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val requesters = remember { TvDestination.entries.associateWith { FocusRequester() } }
     LaunchedEffect(focusDestination) {
         focusDestination?.let {
             requesters.getValue(it).requestFocus()
@@ -99,7 +100,8 @@ internal fun TvTopNavigation(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(TvLayoutTokens.topBarHeight),
+            .height(TvLayoutTokens.topBarHeight)
+            .onFocusChanged { onHasFocus(it.hasFocus) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TvProfileNavigationItem(
@@ -107,7 +109,7 @@ internal fun TvTopNavigation(
             profile = activeProfile,
             modifier = Modifier
                 .focusRequester(requesters.getValue(TvDestination.SETTINGS))
-                .focusProperties { down = downFocusRequester },
+                .focusProperties { down = contentDownRequester },
             onFocused = { onDestination(TvDestination.SETTINGS) },
             onClick = { onDestination(TvDestination.SETTINGS) },
         )
@@ -118,7 +120,7 @@ internal fun TvTopNavigation(
                 selected = selectedDestination == destination,
                 modifier = Modifier
                     .focusRequester(requesters.getValue(destination))
-                    .focusProperties { down = downFocusRequester },
+                    .focusProperties { down = contentDownRequester },
                 onFocused = { onDestination(destination) },
                 onClick = { onDestination(destination) },
             )

@@ -35,6 +35,11 @@ This is the implementation checklist for Lamphaus. It summarizes the supplied pr
 - **TV-FOC-04:** Focused scaling has room to render without cropping siblings or leaving the safe region.
 - **TV-NAV-01:** The overscan-safe top navigation exposes Home, Discover, Search, Library, and Settings/Profile; each destination has an explicit D-pad entry target.
 - **TV-NAV-02:** Returning from details or playback restores focus to the originating item.
+- **TV-NAV-03:** Back from page content scrolls that page to its top and activates the currently active top-navigation item; back restores the previous view instead of switching destinations implicitly.
+- **TV-NAV-04:** Back is never gated by confirmation screens and never loops; repeated Back reaches the start destination and then exits. No on-screen Back affordance is shown; a Cancel action accompanies screens whose only other actions are confirming, destructive, or purchase actions.
+- **TV-NAV-05:** Framework spatial navigation is preferred; explicit directional overrides are added only where default traversal demonstrably fails, and overridden orders form closed loops.
+- **TV-NAV-06:** Loading and splash states never enter the back stack; the signed-in Home screen is the fixed start destination, and deep links simulate manual navigation back to it.
+- **TV-NAV-07:** Rows and categories traverse on the vertical axis while items within a row traverse on the horizontal axis; layouts keep a straight D-pad path to every visible control and avoid nested or crossing focus hierarchies.
 
 ## Television content and type
 
@@ -46,12 +51,13 @@ This is the implementation checklist for Lamphaus. It summarizes the supplied pr
 
 ## Quality gates
 
-Each requirement ID must map to a Compose test, screenshot test, lint/static check, or named manual test before release. Validation covers 720p, 1080p, and 4K TV; compact, medium, and expanded mobile widths; 200% font scale; RTL; TalkBack; keyboard; Switch Access; and physical D-pad navigation.
+Each requirement ID must map to a Compose test, screenshot test, lint/static check, or named manual test before release. Validation covers 720p, 1080p, and 4K TV; compact, medium, and expanded mobile widths; 200% font scale; RTL; TalkBack; keyboard; Switch Access; and physical D-pad navigation. D-pad traversal (every visible control reachable) and Back-path behavior are exercised on the TV emulator with `adb shell input keyevent` before each release.
 
 ## Source baseline
 
 - Android TV design foundations: <https://developer.android.com/design/ui/tv/guides/foundations/design-for-tv>
 - TV layouts: <https://developer.android.com/design/ui/tv/guides/styles/layouts>
 - TV focus system: <https://developer.android.com/design/ui/tv/guides/styles/focus-system>
+- TV navigation training (D-pad, focus, Back): <https://developer.android.com/training/tv/get-started/navigation>
 - TV app quality: <https://developer.android.com/develop/adaptive-apps/quality-guidelines/tv-app-quality>
 - Mobile adaptive apps: <https://developer.android.com/develop/adaptive-apps/guides/get-started-with-adaptive-apps>

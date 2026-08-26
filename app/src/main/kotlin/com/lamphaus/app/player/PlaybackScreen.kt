@@ -246,6 +246,12 @@ internal fun PlaybackScreen(
                         revealControls()
                         true
                     } else false
+                    Key.DirectionUp, Key.DirectionDown -> if (!controlsVisible) {
+                        // Keep every D-pad direction live: hidden controls are
+                        // revealed instead of the key press landing nowhere.
+                        revealControls()
+                        true
+                    } else false
                     else -> false
                 }
             }

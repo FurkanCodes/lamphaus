@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -371,8 +372,11 @@ private fun TvSignedIn(
     val initialDestination = if (initialSearch.isNullOrBlank()) TvDestination.HOME else TvDestination.SEARCH
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
     var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination) }
-    var pendingMediaKey by remember { mutableStateOf<String?>(null) }
+    var pendingMediaKey by rememberSaveable { mutableStateOf<String?>(null) }
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
+    val navFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
+    val contentStates = rememberSaveableStateHolder()
+    var navHasFocus by remember { mutableStateOf(true) }
     val openMedia: (MediaPreview) -> Unit = { media ->
         pendingMediaKey = media.stableKey
         viewModel.loadDetail(media)
@@ -402,17 +406,34 @@ private fun TvSignedIn(
         return
     }
 
-    BackHandler(enabled = destination != TvDestination.HOME) {
-        destination = TvDestination.HOME
-        focusDestination = TvDestination.HOME
+    // Back from page content keeps the active destination and re-activates its
+    // top-navigation item, per TV-NAV-03. Back with the navigation focused
+    // (including the Home root) leaves the app, so repeated Back can never
+    // loop, per TV-NAV-04.
+    BackHandler(enabled = !navHasFocus) {
+        navHasFocus = true
+        focusDestination = destination
+    }
+    // Catalog data can change while a details screen is open. If the
+    // originating item never re-composes to consume its restore key, hand
+    // focus to the active navigation item so focus is never left unset.
+    LaunchedEffect(pendingMediaKey) {
+        if (pendingMediaKey == null) return@LaunchedEffect
+        delay(1_000)
+        if (pendingMediaKey != null) {
+            pendingMediaKey = null
+            focusDestination = destination
+        }
     }
     Box(Modifier.fillMaxSize()) {
         TvTopNavigation(
             selectedDestination = destination,
             activeProfile = state.activeProfile,
             focusDestination = focusDestination,
-            downFocusRequester = contentFocus.getValue(destination),
+            requesters = navFocus,
+            contentDownRequester = contentFocus.getValue(destination),
             onFocusHandled = { focusDestination = null },
+            onHasFocus = { navHasFocus = it },
             onDestination = { destination = it },
             modifier = Modifier.padding(
                 start = TvLayoutTokens.screenHorizontalPadding,
@@ -425,52 +446,58 @@ private fun TvSignedIn(
                 .fillMaxSize()
                 .padding(top = TvLayoutTokens.contentTopPadding),
         ) {
-            when (destination) {
-                TvDestination.HOME -> TvHome(
-                    state = state,
-                    onMedia = openMedia,
-                    initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
-                    onAddSource = {
-                        destination = TvDestination.SETTINGS
-                        focusDestination = TvDestination.SETTINGS
-                    },
-                    restoreMediaKey = pendingMediaKey,
-                    onFocusRestored = { pendingMediaKey = null },
-                )
+            // Per-destination saveable state (scroll positions, search query,
+            // settings section) survives both detail round-trips and tab
+            // switches, so returning re-composes the previously focused item
+            // and mediaFocusRestore can reach it, per TV-NAV-02/TV-FOC-03.
+            contentStates.SaveableStateProvider(destination.name) {
+                when (destination) {
+                    TvDestination.HOME -> TvHome(
+                        state = state,
+                        onMedia = openMedia,
+                        initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
+                        onAddSource = {
+                            destination = TvDestination.SETTINGS
+                            focusDestination = TvDestination.SETTINGS
+                        },
+                        restoreMediaKey = pendingMediaKey,
+                        onFocusRestored = { pendingMediaKey = null },
+                    )
 
-                TvDestination.DISCOVER -> TvMediaGrid(
-                    title = stringResource(R.string.discover),
-                    media = state.allMedia,
-                    onMedia = openMedia,
-                    initialFocusRequester = contentFocus.getValue(TvDestination.DISCOVER),
-                    restoreMediaKey = pendingMediaKey,
-                    onFocusRestored = { pendingMediaKey = null },
-                )
+                    TvDestination.DISCOVER -> TvMediaGrid(
+                        title = stringResource(R.string.discover),
+                        media = state.allMedia,
+                        onMedia = openMedia,
+                        initialFocusRequester = contentFocus.getValue(TvDestination.DISCOVER),
+                        restoreMediaKey = pendingMediaKey,
+                        onFocusRestored = { pendingMediaKey = null },
+                    )
 
-                TvDestination.SEARCH -> TvSearch(
-                    initialSearch = initialSearch.orEmpty(),
-                    state = state,
-                    onSearch = viewModel::searchContent,
-                    onMedia = openMedia,
-                    initialFocusRequester = contentFocus.getValue(TvDestination.SEARCH),
-                    restoreMediaKey = pendingMediaKey,
-                    onFocusRestored = { pendingMediaKey = null },
-                )
+                    TvDestination.SEARCH -> TvSearch(
+                        initialSearch = initialSearch.orEmpty(),
+                        state = state,
+                        onSearch = viewModel::searchContent,
+                        onMedia = openMedia,
+                        initialFocusRequester = contentFocus.getValue(TvDestination.SEARCH),
+                        restoreMediaKey = pendingMediaKey,
+                        onFocusRestored = { pendingMediaKey = null },
+                    )
 
-                TvDestination.LIBRARY -> TvMediaGrid(
-                    title = stringResource(R.string.library),
-                    media = state.library.map { it.preview },
-                    onMedia = openMedia,
-                    initialFocusRequester = contentFocus.getValue(TvDestination.LIBRARY),
-                    restoreMediaKey = pendingMediaKey,
-                    onFocusRestored = { pendingMediaKey = null },
-                )
+                    TvDestination.LIBRARY -> TvMediaGrid(
+                        title = stringResource(R.string.library),
+                        media = state.library.map { it.preview },
+                        onMedia = openMedia,
+                        initialFocusRequester = contentFocus.getValue(TvDestination.LIBRARY),
+                        restoreMediaKey = pendingMediaKey,
+                        onFocusRestored = { pendingMediaKey = null },
+                    )
 
-                TvDestination.SETTINGS -> TvSettings(
-                    state = state,
-                    viewModel = viewModel,
-                    initialFocusRequester = contentFocus.getValue(TvDestination.SETTINGS),
-                )
+                    TvDestination.SETTINGS -> TvSettings(
+                        state = state,
+                        viewModel = viewModel,
+                        initialFocusRequester = contentFocus.getValue(TvDestination.SETTINGS),
+                    )
+                }
             }
         }
         if (state.refreshing) {

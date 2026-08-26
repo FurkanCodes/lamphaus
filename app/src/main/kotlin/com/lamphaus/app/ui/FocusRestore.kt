@@ -21,5 +21,5 @@ internal fun Modifier.mediaFocusRestore(
         runCatching { requester.requestFocus() }
         onConsumed()
     }
-    return Modifier.focusRequester(requester)
+    return this.then(Modifier.focusRequester(requester))
 }
