@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -22,9 +23,11 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.isEditable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.text.input.ImeAction
@@ -274,5 +277,139 @@ class TvNavigationBehaviorTest {
             keyUp(Key.DirectionDown)
         }
         assertEquals(1, addonDownCount)
+    }
+
+    @Test
+    fun settingsContentUpExitFocusesAvatarNavigationItem() {
+        val navigationRequesters = TvDestination.entries.associateWith { FocusRequester() }
+        val contentRequester = FocusRequester()
+
+        compose.setContent {
+            LamphausTvTheme {
+                Surface {
+                    Column {
+                        TvTopNavigation(
+                            selectedDestination = TvDestination.SETTINGS,
+                            activeProfile = null,
+                            focusDestination = null,
+                            requesters = navigationRequesters,
+                            contentDownRequester = contentRequester,
+                            onFocusHandled = {},
+                            onHasFocus = {},
+                            onDestination = {},
+                        )
+                        Box(
+                            modifier = Modifier
+                                .tvContentFocusBoundary(navigationRequesters.getValue(TvDestination.SETTINGS)),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .focusProperties {
+                                        up = navigationRequesters.getValue(TvDestination.SETTINGS)
+                                    }
+                                    .width(180.dp)
+                                    .height(48.dp)
+                                    .focusRequester(contentRequester)
+                                    .focusable()
+                                    .testTag("settings-content"),
+                            )
+                        }
+                    }
+                }
+                LaunchedEffect(Unit) {
+                    contentRequester.requestFocus()
+                }
+            }
+        }
+
+        compose.waitForIdle()
+        compose.onNodeWithTag("settings-content").assertIsFocused().performKeyInput {
+            keyDown(Key.DirectionUp)
+            keyUp(Key.DirectionUp)
+        }
+        compose.onNodeWithContentDescription("Settings and profiles").assertIsFocused()
+    }
+
+    @Test
+    fun settingsContentLeftExitReturnsToSectionAfterWithinPaneTraversal() {
+        val navigationRequester = FocusRequester()
+        val sectionRequester = FocusRequester()
+        val rightmostControlRequester = FocusRequester()
+
+        compose.setContent {
+            LamphausTvTheme {
+                Surface {
+                    Column {
+                        Box(
+                            modifier = Modifier
+                                .width(180.dp)
+                                .height(48.dp)
+                                .focusRequester(navigationRequester)
+                                .focusable()
+                                .testTag("library-navigation"),
+                        )
+                        Row {
+                            Box(
+                                modifier = Modifier
+                                    .width(180.dp)
+                                    .height(48.dp)
+                                    .focusRequester(sectionRequester)
+                                    .focusable()
+                                    .testTag("addons-section"),
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .tvContentFocusBoundary(
+                                        topNavigationRequester = navigationRequester,
+                                        leftNavigationRequester = sectionRequester,
+                                    ),
+                            ) {
+                                Column {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(180.dp)
+                                            .height(48.dp)
+                                            .focusable()
+                                            .testTag("top-right-control"),
+                                    )
+                                    Row {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(180.dp)
+                                                .height(48.dp)
+                                                .focusable()
+                                                .testTag("bottom-left-control"),
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .width(180.dp)
+                                                .height(48.dp)
+                                                .focusRequester(rightmostControlRequester)
+                                                .focusable()
+                                                .testTag("bottom-right-control"),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                LaunchedEffect(Unit) {
+                    rightmostControlRequester.requestFocus()
+                }
+            }
+        }
+
+        compose.waitForIdle()
+        compose.onNodeWithTag("bottom-right-control").assertIsFocused().performKeyInput {
+            keyDown(Key.DirectionLeft)
+            keyUp(Key.DirectionLeft)
+        }
+        compose.onNodeWithTag("bottom-left-control").assertIsFocused().performKeyInput {
+            keyDown(Key.DirectionLeft)
+            keyUp(Key.DirectionLeft)
+        }
+        compose.onNodeWithTag("addons-section").assertIsFocused()
+        compose.onNodeWithTag("library-navigation").assertIsNotFocused()
     }
 }

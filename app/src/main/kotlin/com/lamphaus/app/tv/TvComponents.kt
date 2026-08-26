@@ -98,13 +98,16 @@ internal enum class TvDestination(
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
-internal fun Modifier.tvContentFocusBoundary(topNavigationRequester: FocusRequester): Modifier =
+internal fun Modifier.tvContentFocusBoundary(
+    topNavigationRequester: FocusRequester,
+    leftNavigationRequester: FocusRequester = FocusRequester.Default,
+): Modifier =
     focusProperties {
         exit = { direction ->
-            if (direction == FocusDirection.Up) {
-                topNavigationRequester
-            } else {
-                FocusRequester.Default
+            when (direction) {
+                FocusDirection.Up -> topNavigationRequester
+                FocusDirection.Left -> leftNavigationRequester
+                else -> FocusRequester.Default
             }
         }
     }

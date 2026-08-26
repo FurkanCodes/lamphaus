@@ -63,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -449,7 +450,14 @@ private fun TvSignedIn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = TvLayoutTokens.contentTopPadding)
-                .tvContentFocusBoundary(navFocus.getValue(destination)),
+                .tvContentFocusBoundary(
+                    topNavigationRequester = navFocus.getValue(destination),
+                    leftNavigationRequester = if (destination == TvDestination.SETTINGS) {
+                        contentFocus.getValue(TvDestination.SETTINGS)
+                    } else {
+                        FocusRequester.Default
+                    },
+                ),
         ) {
             // Per-destination saveable state (scroll positions, search query,
             // settings section) survives both detail round-trips and tab
@@ -500,7 +508,8 @@ private fun TvSignedIn(
                     TvDestination.SETTINGS -> TvSettings(
                         state = state,
                         viewModel = viewModel,
-                        initialFocusRequester = contentFocus.getValue(TvDestination.SETTINGS),
+                        sectionFocusRequester = contentFocus.getValue(TvDestination.SETTINGS),
+                        topNavigationRequester = navFocus.getValue(TvDestination.SETTINGS),
                     )
                 }
             }
@@ -1488,7 +1497,8 @@ private enum class TvSettingsSection(
 private fun TvSettings(
     state: AppUiState,
     viewModel: AppViewModel,
-    initialFocusRequester: FocusRequester,
+    sectionFocusRequester: FocusRequester,
+    topNavigationRequester: FocusRequester,
 ) {
     var section by rememberSaveable { mutableStateOf(TvSettingsSection.PROFILES) }
     Row(
@@ -1500,15 +1510,25 @@ private fun TvSettings(
             modifier = Modifier.width(TvLayoutTokens.settingsMenuWidth),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            TvSettingsSection.entries.forEachIndexed { index, item ->
+            TvSettingsSection.entries.forEach { item ->
                 TvSettingsMenuItem(
                     section = item,
                     selected = section == item,
-                    modifier = if (index == 0) {
-                        Modifier.focusRequester(initialFocusRequester)
-                    } else {
-                        Modifier
-                    },
+                    modifier = Modifier
+                        .then(
+                            if (section == item) {
+                                Modifier.focusRequester(sectionFocusRequester)
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .then(
+                            if (item == TvSettingsSection.PROFILES) {
+                                Modifier.focusProperties { up = topNavigationRequester }
+                            } else {
+                                Modifier
+                            },
+                        ),
                     onFocused = { section = item },
                     onClick = { section = item },
                 )
