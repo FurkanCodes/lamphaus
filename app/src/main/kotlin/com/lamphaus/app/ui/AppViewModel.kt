@@ -825,7 +825,9 @@ class AppViewModel(
         )
         container.libraryRepository.saveProvider(provider)
         (state.value.account as? AccountState.SignedIn)?.userId?.let {
-            container.cloudSyncGateway.saveProvider(it, provider)
+            container.cloudSyncGateway.saveProvider(it, provider).onFailure { error ->
+                CloudLog.w("provider.install not synced (${provider.id}) — converges next session", error)
+            }
         }
     }
 
@@ -862,7 +864,9 @@ class AppViewModel(
                 )
                 container.libraryRepository.saveProvider(catalog)
                 (state.value.account as? AccountState.SignedIn)?.userId?.let {
-                    container.cloudSyncGateway.saveProvider(it, catalog)
+                    container.cloudSyncGateway.saveProvider(it, catalog).onFailure { error ->
+                        CloudLog.w("provider.catalog not synced (${catalog.id})", error)
+                    }
                 }
                 return@launch
             }
@@ -891,6 +895,38 @@ class AppViewModel(
 
     private fun showMessage(message: String) = mutableState.update { it.copy(message = message) }
 
+    /**
+     * Add-ons ride Edge Functions (deny-all table → no realtime): one pull
+     * per session. An empty cloud gets seeded from local installs — mirroring
+     * the profiles seeding rule — while a non-empty cloud is authoritative:
+     * locally-unknown ids mean the add-on was removed on another device.
+     */
+    private suspend fun syncProviders(userId: String) {
+        val cloudProviders = container.cloudSyncGateway.providers(userId).getOrElse { error ->
+            CloudLog.w("providers.pull failed — keeping local add-ons", error)
+            return
+        }
+        if (cloudProviders.isEmpty()) {
+            localSyncableProviders().forEach { provider ->
+                container.cloudSyncGateway.saveProvider(userId, provider).onFailure {
+                    CloudLog.w("provider.seed failed (${provider.id})", it)
+                }
+            }
+            return
+        }
+        cloudProviders.forEach { container.libraryRepository.saveProvider(it) }
+        val cloudIds = cloudProviders.map(ProviderSubscription::id).toSet()
+        localSyncableProviders()
+            .filter { it.id !in cloudIds }
+            .forEach { container.libraryRepository.removeProvider(it.id) }
+    }
+
+    /** Real installed add-ons only: the built-in catalog and debug sources never sync. */
+    private suspend fun localSyncableProviders(): List<ProviderSubscription> =
+        container.libraryRepository.providers().first().filter { provider ->
+            provider.sortOrder >= 0 && provider.id != DEVELOPMENT_SOURCE_ID
+        }
+
     private fun startCloudSync(userId: String, profiles: List<Profile>) {
         if (!BuildConfig.CLOUD_CONFIGURED) return
         // A live job belongs to exactly one user. After sign-out → sign-in
@@ -908,9 +944,7 @@ class AppViewModel(
                 }
             }
             launch {
-                container.cloudSyncGateway.providers(userId).onSuccess { providers ->
-                    providers.forEach { container.libraryRepository.saveProvider(it) }
-                }
+                syncProviders(userId)
             }
             // Legacy local installs may hold placeholder ids (e.g. "primary")
             // that cannot exist in Postgres; keep them out of cloud sync.

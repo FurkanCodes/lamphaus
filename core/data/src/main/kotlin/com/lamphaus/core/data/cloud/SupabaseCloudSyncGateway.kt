@@ -9,10 +9,16 @@ import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.WatchProgress
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.annotations.SupabaseExperimental
+import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.filter.FilterOperation
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.selectAsFlow
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -23,8 +29,13 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Cloud sync over Supabase Postgrest + Realtime.
@@ -123,15 +134,46 @@ class SupabaseCloudSyncGateway(
         willRetry
     }
 
-    // ── Provider configs travel through Edge Functions from M5 (deny-all RLS).
-    override suspend fun saveProvider(userId: String, provider: ProviderSubscription): Result<Unit> =
-        Result.failure(UnsupportedOperationException(PROVIDERS_DEFERRED))
+    // ── Provider configs travel through Edge Functions (plan D4/F5): the
+    // table is deny-all RLS, so Postgrest/realtime never see it. Pull-based
+    // by necessity — deletions converge at the next session start.
+    override suspend fun saveProvider(userId: String, provider: ProviderSubscription): Result<Unit> = runCatching {
+        withFreshTokenRetry {
+            supabase.functions.buildEdgeFunction(FUNCTION_SAVE_PROVIDER_CONFIG)
+                .invoke(json.encodeToString(ProviderConfigUpsert.of(provider))) {
+                    contentType(ContentType.Application.Json)
+                }
+                .bodyOrThrow()
+            Unit
+        }
+    }
 
-    override suspend fun deleteProvider(userId: String, providerId: String): Result<Unit> =
-        Result.failure(UnsupportedOperationException(PROVIDERS_DEFERRED))
+    override suspend fun deleteProvider(userId: String, providerId: String): Result<Unit> = runCatching {
+        withFreshTokenRetry {
+            supabase.functions.buildEdgeFunction(FUNCTION_DELETE_PROVIDER_CONFIG)
+                .invoke(json.encodeToString(ProviderConfigDelete(providerId))) {
+                    contentType(ContentType.Application.Json)
+                }
+                .bodyOrThrow()
+            Unit
+        }
+    }
 
-    override suspend fun providers(userId: String): Result<List<ProviderSubscription>> =
-        Result.failure(UnsupportedOperationException(PROVIDERS_DEFERRED))
+    override suspend fun providers(userId: String): Result<List<ProviderSubscription>> = runCatching {
+        withFreshTokenRetry {
+            val body = supabase.functions.buildEdgeFunction(FUNCTION_LIST_PROVIDER_CONFIGS)
+                .invoke("{}") { contentType(ContentType.Application.Json) }
+                .bodyOrThrow()
+            json.decodeFromString<ProviderConfigsResponse>(body).configs.map { it.toModel() }
+        }
+    }
+
+    /** Edge Functions answer errors as non-2xx JSON; surface them loudly. */
+    private suspend fun HttpResponse.bodyOrThrow(): String {
+        val body = bodyAsText()
+        if (!status.isSuccess()) error("edge function returned ${status.value}: ${CloudLog.clamp(CloudLog.sanitize(body))}")
+        return body
+    }
 
     // ── row DTOs (snake_case columns ⇄ camelCase models) ─────────────────
 
@@ -241,7 +283,10 @@ class SupabaseCloudSyncGateway(
         private const val TABLE_PROFILES = "profiles"
         private const val TABLE_LIBRARY = "library_entries"
         private const val TABLE_PROGRESS = "watch_progress"
-        private const val PROVIDERS_DEFERRED = "Provider configuration moves to Edge Functions in M5."
+        private const val TABLE_USER_SETTINGS = "user_settings"
+        private const val FUNCTION_SAVE_PROVIDER_CONFIG = "save-provider-config"
+        private const val FUNCTION_DELETE_PROVIDER_CONFIG = "delete-provider-config"
+        private const val FUNCTION_LIST_PROVIDER_CONFIGS = "list-provider-configs"
 
         /**
          * Sync failures (network drops, clock skew rejections, schema drift) must
@@ -255,3 +300,58 @@ class SupabaseCloudSyncGateway(
         }
     }
 }
+
+// ── provider-config wire format (contract with supabase/functions/*) ────
+// Internal rather than private so unit tests can pin the contract.
+
+/** One decrypted row from `list-provider-configs`. */
+@Serializable
+internal data class ProviderConfigRow(
+    @SerialName("provider_id") val providerId: String,
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("enabled") val enabled: Boolean = true,
+    @SerialName("sort_order") val sortOrder: Int = 0,
+    @SerialName("updated_at_epoch_millis") val updatedAtEpochMillis: Long = 0,
+    @SerialName("config") val config: JsonObject = JsonObject(emptyMap()),
+) {
+    fun toModel() = ProviderSubscription(
+        id = providerId,
+        manifestUrl = config[KEY_MANIFEST_URL]?.jsonPrimitive?.contentOrNull.orEmpty(),
+        displayName = displayName.orEmpty(),
+        enabled = enabled,
+        sortOrder = sortOrder,
+        updatedAtEpochMillis = updatedAtEpochMillis,
+    )
+}
+
+@Serializable
+internal data class ProviderConfigsResponse(
+    @SerialName("configs") val configs: List<ProviderConfigRow> = emptyList(),
+)
+
+/** Body for `save-provider-config`; the function encrypts `config` server-side. */
+@Serializable
+internal data class ProviderConfigUpsert(
+    @SerialName("provider_id") val providerId: String,
+    @SerialName("config") val config: JsonObject,
+    @SerialName("display_name") val displayName: String,
+    @SerialName("enabled") val enabled: Boolean,
+    @SerialName("sort_order") val sortOrder: Int,
+) {
+    companion object {
+        fun of(provider: ProviderSubscription) = ProviderConfigUpsert(
+            providerId = provider.id,
+            config = buildJsonObject { put(KEY_MANIFEST_URL, provider.manifestUrl) },
+            displayName = provider.displayName,
+            enabled = provider.enabled,
+            sortOrder = provider.sortOrder,
+        )
+    }
+}
+
+@Serializable
+internal data class ProviderConfigDelete(
+    @SerialName("provider_id") val providerId: String,
+)
+
+private const val KEY_MANIFEST_URL = "manifest_url"
