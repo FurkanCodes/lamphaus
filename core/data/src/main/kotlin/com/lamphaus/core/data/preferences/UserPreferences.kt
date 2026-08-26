@@ -3,11 +3,14 @@ package com.lamphaus.core.data.preferences
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lamphaus.core.model.DiagnosticsConsent
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
 
 private val Context.dataStore by preferencesDataStore("lamphaus_preferences")
 
@@ -18,6 +21,21 @@ data class UserSettings(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
+    val updatedAtEpochMillis: Long = 0,
+)
+
+/**
+ * The account-following subset of [UserSettings], mirrored into the
+ * `user_settings` cloud row (jsonb payload; last-writer-wins via
+ * [updatedAtEpochMillis]). Deliberately excludes the active-profile choice:
+ * which profile is selected stays device-local.
+ */
+@Serializable
+data class SyncedSettings(
+    val theme: ThemePreference = ThemePreference.SYSTEM,
+    val dynamicColor: Boolean = true,
+    val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
+    val updatedAtEpochMillis: Long = 0,
 )
 
 class UserPreferences(private val context: Context) {
@@ -31,8 +49,11 @@ class UserPreferences(private val context: Context) {
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
             ),
+            updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
     }
+
+    suspend fun current(): UserSettings = settings.first()
 
     suspend fun setActiveProfile(id: String?) {
         context.dataStore.edit { values ->
@@ -50,17 +71,53 @@ class UserPreferences(private val context: Context) {
     }
 
     suspend fun setTheme(theme: ThemePreference) {
-        context.dataStore.edit { it[THEME] = theme.name }
+        context.dataStore.edit {
+            it[THEME] = theme.name
+            it[SETTINGS_UPDATED] = System.currentTimeMillis()
+        }
     }
 
     suspend fun setDynamicColor(enabled: Boolean) {
-        context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
+        context.dataStore.edit {
+            it[DYNAMIC_COLOR] = enabled
+            it[SETTINGS_UPDATED] = System.currentTimeMillis()
+        }
     }
 
     suspend fun setDiagnostics(consent: DiagnosticsConsent) {
         context.dataStore.edit {
             it[CRASH_REPORTS] = consent.crashReports
             it[PERFORMANCE] = consent.performanceMetrics
+            it[SETTINGS_UPDATED] = System.currentTimeMillis()
+        }
+    }
+
+    /**
+     * Adopts an inbound cloud row that won last-writer-wins locally. The row's
+     * timestamp becomes the local one so older echoes keep losing.
+     */
+    suspend fun applyRemoteSettings(remote: SyncedSettings) {
+        context.dataStore.edit {
+            it[THEME] = remote.theme.name
+            it[DYNAMIC_COLOR] = remote.dynamicColor
+            it[CRASH_REPORTS] = remote.diagnostics.crashReports
+            it[PERFORMANCE] = remote.diagnostics.performanceMetrics
+            it[SETTINGS_UPDATED] = remote.updatedAtEpochMillis
+        }
+    }
+
+    /**
+     * Clears the account-synced surface on leaving the account: theme and
+     * especially diagnostics consent must not leak into a successor account.
+     * The active-profile choice is device-local and survives.
+     */
+    suspend fun clearSyncedSettings() {
+        context.dataStore.edit {
+            it.remove(THEME)
+            it.remove(DYNAMIC_COLOR)
+            it.remove(CRASH_REPORTS)
+            it.remove(PERFORMANCE)
+            it.remove(SETTINGS_UPDATED)
         }
     }
 
@@ -71,6 +128,6 @@ class UserPreferences(private val context: Context) {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val CRASH_REPORTS = booleanPreferencesKey("crash_reports")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
+        val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }
-

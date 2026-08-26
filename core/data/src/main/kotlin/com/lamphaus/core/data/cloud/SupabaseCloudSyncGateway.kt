@@ -1,6 +1,7 @@
 package com.lamphaus.core.data.cloud
 
 import android.util.Log
+import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.Profile
@@ -99,6 +100,20 @@ class SupabaseCloudSyncGateway(
         withFreshTokenRetry {
             supabase.from(TABLE_PROGRESS)
                 .upsert(listOf(WatchProgressRow.of(userId, progress))) { onConflict = "profile_id,video_id" }
+        }
+    }
+
+    override fun settings(userId: String): Flow<SyncedSettings?> =
+        supabase.from(TABLE_USER_SETTINGS)
+            .selectAsFlow(UserSettingsRow::userId, filter = FilterOperation("user_id", FilterOperator.EQ, userId))
+            .retryOnFreshTokenRejection()
+            .map { rows -> rows.firstOrNull()?.toModel(json) }
+            .recoverWithNull()
+
+    override suspend fun saveSettings(userId: String, settings: SyncedSettings): Result<Unit> = runCatching {
+        withFreshTokenRetry {
+            supabase.from(TABLE_USER_SETTINGS)
+                .upsert(listOf(UserSettingsRow.of(userId, settings, json))) { onConflict = "user_id" }
         }
     }
 
@@ -276,6 +291,25 @@ class SupabaseCloudSyncGateway(
         }
     }
 
+    @Serializable
+    private data class UserSettingsRow(
+        @SerialName("user_id") val userId: String,
+        @SerialName("payload") val payload: JsonElement,
+        @SerialName("updated_at_epoch_millis") val updatedAtEpochMillis: Long,
+    ) {
+        fun toModel(json: Json) =
+            json.decodeFromJsonElement<SyncedSettings>(payload).copy(updatedAtEpochMillis = updatedAtEpochMillis)
+
+        companion object {
+            /** The column owns LWW ordering; the payload stays timestamp-free. */
+            fun of(userId: String, settings: SyncedSettings, json: Json) = UserSettingsRow(
+                userId = userId,
+                payload = json.encodeToJsonElement(settings.copy(updatedAtEpochMillis = 0)),
+                updatedAtEpochMillis = settings.updatedAtEpochMillis,
+            )
+        }
+    }
+
     companion object {
         private const val TAG = "SupabaseSync"
         private const val FRESH_TOKEN_RETRY_ATTEMPTS = 3
@@ -297,6 +331,12 @@ class SupabaseCloudSyncGateway(
             if (error is CancellationException) throw error
             Log.w(TAG, "Sync refresh failed; keeping local data", error)
             emit(emptyList())
+        }
+
+        private fun Flow<SyncedSettings?>.recoverWithNull(): Flow<SyncedSettings?> = catch { error ->
+            if (error is CancellationException) throw error
+            Log.w(TAG, "Settings refresh failed; keeping local data", error)
+            emit(null)
         }
     }
 }

@@ -7,6 +7,7 @@ import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.AppContainer
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
+import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.DiagnosticsConsent
@@ -84,10 +85,12 @@ class AppViewModel(
             }.collectLatest { snapshot ->
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
                     ?: snapshot.profiles.firstOrNull()?.id
+                var leftAnAccount = false
                 mutableState.update { current ->
                     val previousUserId = (current.account as? AccountState.SignedIn)?.userId
                     val nextUserId = (snapshot.account as? AccountState.SignedIn)?.userId
                     val accountChanged = nextUserId != null && nextUserId != previousUserId
+                    leftAnAccount = nextUserId == null && previousUserId != null
                     current.copy(
                         account = snapshot.account,
                         profiles = snapshot.profiles,
@@ -105,6 +108,12 @@ class AppViewModel(
                     )
                 }
                 if (activeId != snapshot.activeProfileId) container.preferences.setActiveProfile(activeId)
+                if (leftAnAccount) {
+                    // Leaving an account must not leave its synced surface behind:
+                    // theme and especially diagnostics consent would leak into a
+                    // successor account. The cloud row re-seeds on next sign-in.
+                    container.preferences.clearSyncedSettings()
+                }
                 if (snapshot.account is AccountState.SignedIn && snapshot.profiles.isEmpty()) createInitialProfile()
                 if (snapshot.account is AccountState.SignedIn) {
                     ensureDefaultCatalog(snapshot.providers)
@@ -660,14 +669,21 @@ class AppViewModel(
         }
     }
 
-    fun setTheme(theme: ThemePreference) = viewModelScope.launch { container.preferences.setTheme(theme) }
+    fun setTheme(theme: ThemePreference) = viewModelScope.launch {
+        container.preferences.setTheme(theme)
+        pushSyncedSettings()
+    }
 
-    fun setDynamicColor(enabled: Boolean) = viewModelScope.launch { container.preferences.setDynamicColor(enabled) }
+    fun setDynamicColor(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setDynamicColor(enabled)
+        pushSyncedSettings()
+    }
 
     fun setDiagnostics(consent: DiagnosticsConsent) = viewModelScope.launch {
         container.preferences.setDiagnostics(consent.copy(updatedAtEpochMillis = System.currentTimeMillis()))
         // Diagnostics backends are being replaced alongside the Supabase migration;
         // consent is persisted now and honored by whichever provider lands next.
+        pushSyncedSettings()
     }
 
     fun dismissMessage() = mutableState.update { it.copy(message = null) }
@@ -929,6 +945,36 @@ class AppViewModel(
             provider.sortOrder >= 0 && provider.id != DEVELOPMENT_SOURCE_ID
         }
 
+    /**
+     * Settings follow the account. Inbound rows win only when newer than the
+     * last local mutation (LWW); an absent row gets seeded from local values.
+     * Applies never re-push, so realtime echoes cannot loop.
+     */
+    private suspend fun syncSettings(userId: String) {
+        container.cloudSyncGateway.settings(userId).collect { remote ->
+            val local = container.preferences.current()
+            when {
+                remote == null -> container.cloudSyncGateway.saveSettings(
+                    userId,
+                    SyncedSettings(local.theme, local.dynamicColor, local.diagnostics, local.updatedAtEpochMillis),
+                ).onFailure { error -> CloudLog.w("settings.seed failed — staying local", error) }
+
+                remote.updatedAtEpochMillis > local.updatedAtEpochMillis ->
+                    container.preferences.applyRemoteSettings(remote)
+            }
+        }
+    }
+
+    /** Mirrors a local settings change into the account row. */
+    private fun pushSyncedSettings() = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        val local = container.preferences.current()
+        container.cloudSyncGateway.saveSettings(
+            userId,
+            SyncedSettings(local.theme, local.dynamicColor, local.diagnostics, local.updatedAtEpochMillis),
+        ).onFailure { error -> CloudLog.w("settings.push failed — converges next session", error) }
+    }
+
     private fun startCloudSync(userId: String, profiles: List<Profile>) {
         if (!BuildConfig.CLOUD_CONFIGURED) return
         // A live job belongs to exactly one user. After sign-out → sign-in
@@ -947,6 +993,9 @@ class AppViewModel(
             }
             launch {
                 syncProviders(userId)
+            }
+            launch {
+                syncSettings(userId)
             }
             // Legacy local installs may hold placeholder ids (e.g. "primary")
             // that cannot exist in Postgres; keep them out of cloud sync.
