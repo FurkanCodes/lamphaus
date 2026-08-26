@@ -1633,6 +1633,8 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
     var providerAddress by rememberSaveable { mutableStateOf("") }
     var addressFocused by remember { mutableStateOf(false) }
     val installFocusRequester = remember { FocusRequester() }
+    val refreshFocusRequester = remember { FocusRequester() }
+    val installEnabled = providerAddress.startsWith("https://") || providerAddress.startsWith("http://")
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1671,13 +1673,19 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
                         .fillMaxWidth()
                         .height(60.dp)
                         .onFocusChanged { addressFocused = it.isFocused }
-                        .focusProperties { down = installFocusRequester }
+                        .focusProperties {
+                            down = if (installEnabled) installFocusRequester else refreshFocusRequester
+                        }
                         .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                                installFocusRequester.requestFocus()
-                                true
-                            } else {
+                            if (event.type != KeyEventType.KeyDown || event.key != Key.DirectionDown) {
                                 false
+                            } else {
+                                val nextFocusRequester = if (installEnabled) {
+                                    installFocusRequester
+                                } else {
+                                    refreshFocusRequester
+                                }
+                                nextFocusRequester.requestFocus()
                             }
                         }
                         .background(MaterialTheme.colorScheme.background, TvShapeTokens.card)
@@ -1703,7 +1711,7 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
                 TvAction(
                     label = stringResource(R.string.install_developer_source),
                     icon = Icons.Outlined.Add,
-                    enabled = providerAddress.startsWith("https://") || providerAddress.startsWith("http://"),
+                    enabled = installEnabled,
                     modifier = Modifier.focusRequester(installFocusRequester),
                     onClick = { viewModel.addProvider(providerAddress) },
                 )
@@ -1714,6 +1722,7 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
                 label = stringResource(R.string.refresh_catalogs),
                 icon = Icons.Outlined.Refresh,
                 enabled = state.providers.isNotEmpty() && !state.refreshing,
+                modifier = Modifier.focusRequester(refreshFocusRequester),
                 onClick = viewModel::refreshContent,
             )
         }
