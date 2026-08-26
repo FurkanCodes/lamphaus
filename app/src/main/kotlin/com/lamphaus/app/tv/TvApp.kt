@@ -264,6 +264,16 @@ private fun TvPairingScreen(state: AppUiState, viewModel: AppViewModel) {
     )
 }
 
+private const val PAIRING_SESSION_TTL_MILLIS = 5 * 60_000L
+
+internal fun pairingCountdownExpiry(expiresAtEpochMillis: Long?, nowEpochMillis: Long): Long? =
+    expiresAtEpochMillis?.coerceAtMost(nowEpochMillis + PAIRING_SESSION_TTL_MILLIS)
+
+internal fun pairingSecondsLeft(expiresAtEpochMillis: Long?, nowEpochMillis: Long): Int =
+    expiresAtEpochMillis
+        ?.let { ((it - nowEpochMillis) / 1000L).toInt().coerceAtLeast(0) }
+        ?: -1
+
 @Composable
 internal fun TvPairingContent(
     shortCode: String?,
@@ -279,19 +289,17 @@ internal fun TvPairingContent(
     // Live "time left" for the link code, driven by the server-provided
     // expiry. Reaching zero regenerates immediately instead of waiting for
     // the next poll tick to notice.
-    var secondsLeft by remember(expiresAtEpochMillis) {
-        mutableStateOf(
-            expiresAtEpochMillis
-                ?.let { ((it - System.currentTimeMillis()) / 1000L).toInt().coerceIn(0, 599) }
-                ?: -1,
-        )
+    val countdownExpiry = remember(expiresAtEpochMillis) {
+        pairingCountdownExpiry(expiresAtEpochMillis, System.currentTimeMillis())
     }
-    LaunchedEffect(expiresAtEpochMillis) {
-        if (expiresAtEpochMillis == null) return@LaunchedEffect
+    var secondsLeft by remember(countdownExpiry) {
+        mutableStateOf(pairingSecondsLeft(countdownExpiry, System.currentTimeMillis()))
+    }
+    LaunchedEffect(countdownExpiry) {
+        if (countdownExpiry == null) return@LaunchedEffect
         while (isActive && secondsLeft > 0) {
             delay(1000)
-            secondsLeft =
-                ((expiresAtEpochMillis - System.currentTimeMillis()) / 1000L).toInt().coerceAtLeast(0)
+            secondsLeft = pairingSecondsLeft(countdownExpiry, System.currentTimeMillis())
         }
         if (secondsLeft == 0) onRefresh()
     }
