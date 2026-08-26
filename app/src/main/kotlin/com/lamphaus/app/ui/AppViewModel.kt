@@ -35,6 +35,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -45,6 +46,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
@@ -948,9 +950,7 @@ class AppViewModel(
             }
             // Legacy local installs may hold placeholder ids (e.g. "primary")
             // that cannot exist in Postgres; keep them out of cloud sync.
-            val cloudBackedProfiles = profiles.filter { profile ->
-                runCatching { UUID.fromString(profile.id) }.isSuccess
-            }
+            val cloudBackedProfiles = profiles.filter { isCloudBackedId(it.id) }
             // Freshly linked accounts start empty in Postgres: profiles created
             // before sign-in (or whose first push landed in an auth outage)
             // would otherwise stay device-local forever, because only
@@ -970,20 +970,45 @@ class AppViewModel(
                     }
                 }
             }
-            cloudBackedProfiles.forEach { profile ->
-                launch {
-                    container.cloudSyncGateway.library(userId, profile.id).collect { entries ->
-                        entries.forEach { container.libraryRepository.saveLibrary(it) }
-                    }
-                }
-                launch {
-                    container.cloudSyncGateway.progress(userId, profile.id).collect { entries ->
-                        entries.forEach { container.libraryRepository.saveProgress(it) }
-                    }
-                }
+            launch {
+                watchProfileChannels(userId)
             }
         }
     }
+
+    /**
+     * Live library+progress channels for every cloud-backed profile. Follows
+     * profile creation/removal mid-session — capturing the list once at
+     * sign-in left late-created profiles deaf to other devices until relaunch.
+     */
+    private fun CoroutineScope.watchProfileChannels(userId: String): Job = launch {
+        val channels = mutableMapOf<String, Job>()
+        container.libraryRepository.profiles()
+            .map { profiles -> profiles.map(Profile::id).filter(::isCloudBackedId).sorted() }
+            .distinctUntilChanged()
+            .collect { profileIds ->
+                profileIds.forEach { id -> channels.getOrPut(id) { launchProfileChannels(userId, id) } }
+                channels.keys.toList().forEach { id ->
+                    if (id !in profileIds) channels.remove(id)?.cancel()
+                }
+            }
+    }
+
+    private fun CoroutineScope.launchProfileChannels(userId: String, profileId: String): Job = launch {
+        launch {
+            container.cloudSyncGateway.library(userId, profileId).collect { entries ->
+                entries.forEach { container.libraryRepository.saveLibrary(it) }
+            }
+        }
+        launch {
+            container.cloudSyncGateway.progress(userId, profileId).collect { progress ->
+                progress.forEach { container.libraryRepository.saveProgress(it) }
+            }
+        }
+    }
+
+    /** Placeholder ids from legacy local installs cannot exist in Postgres. */
+    private fun isCloudBackedId(id: String) = runCatching { UUID.fromString(id) }.isSuccess
     private fun Throwable.safeAuthMessage(): String = when {
         message?.contains("network", ignoreCase = true) == true -> "Check your connection and try again."
         else -> "Sign-in could not be completed. Try again."
