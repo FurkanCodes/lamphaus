@@ -108,22 +108,32 @@ class AppViewModel(
                     )
                 }
                 if (activeId != snapshot.activeProfileId) container.preferences.setActiveProfile(activeId)
-                if (leftAnAccount) {
-                    // Leaving an account must not leave its synced surface behind:
-                    // theme and especially diagnostics consent would leak into a
-                    // successor account. The cloud row re-seeds on next sign-in.
-                    container.preferences.clearSyncedSettings()
-                }
-                if (snapshot.account is AccountState.SignedIn && snapshot.profiles.isEmpty()) createInitialProfile()
                 if (snapshot.account is AccountState.SignedIn) {
+                    // Cloud mode defers first-profile creation to the sync job's
+                    // cloud probe (adopt-before-mint); local mode has no cloud
+                    // truth to consult, so create eagerly.
+                    if (snapshot.profiles.isEmpty() && !BuildConfig.CLOUD_CONFIGURED) createInitialProfile()
                     ensureDefaultCatalog(snapshot.providers)
-                    startCloudSync(snapshot.account.userId, snapshot.profiles)
-                } else if (cloudSyncUserId != null) {
-                    // Sign-out / deletion must retire the collectors bound to
-                    // the previous user's realtime channels.
-                    cloudSyncJob?.cancel()
-                    cloudSyncJob = null
-                    cloudSyncUserId = null
+                    startCloudSync(snapshot.account.userId)
+                } else {
+                    if (cloudSyncUserId != null) {
+                        // Sign-out / deletion must retire the collectors bound to
+                        // the previous user's realtime channels — before any
+                        // local wipe, or surviving collectors would resurrect rows.
+                        cloudSyncJob?.cancel()
+                        cloudSyncJob = null
+                        cloudSyncUserId = null
+                    }
+                    if (leftAnAccount) {
+                        // Leaving an account must leave nothing behind. Room rows
+                        // used to survive sign-out/unpair, so the next sign-in
+                        // showed stale local profiles UNION the account's real
+                        // cloud ones ("why do I see more than 2 profiles?") — and
+                        // synced settings would leak into a successor account too.
+                        // Everything re-arrives from the cloud on next sign-in.
+                        container.libraryRepository.clearLocalAccountData()
+                        container.preferences.clearSyncedSettings()
+                    }
                 }
                 refreshCatalogs()
             }
@@ -975,7 +985,7 @@ class AppViewModel(
         ).onFailure { error -> CloudLog.w("settings.push failed — converges next session", error) }
     }
 
-    private fun startCloudSync(userId: String, profiles: List<Profile>) {
+    private fun startCloudSync(userId: String) {
         if (!BuildConfig.CLOUD_CONFIGURED) return
         // A live job belongs to exactly one user. After sign-out → sign-in
         // (or a deleted account's successor) a surviving job would still be
@@ -997,26 +1007,32 @@ class AppViewModel(
             launch {
                 syncSettings(userId)
             }
-            // Legacy local installs may hold placeholder ids (e.g. "primary")
-            // that cannot exist in Postgres; keep them out of cloud sync.
-            val cloudBackedProfiles = profiles.filter { isCloudBackedId(it.id) }
-            // Freshly linked accounts start empty in Postgres: profiles created
-            // before sign-in (or whose first push landed in an auth outage)
-            // would otherwise stay device-local forever, because only
-            // post-sign-in mutations are pushed. Seed once while the cloud holds
-            // no profiles; afterwards the inbound collectors own convergence.
+            // One cloud probe decides how the account boots on this device:
+            // non-empty → the collector above adopts those rows and nothing is
+            // minted locally; empty → seed from local data, or — when this
+            // device has nothing either — create the account's first profile.
+            // (Creation used to run before this probe on every clean sign-in,
+            // so a freshly paired TV minted a duplicate "Home" alongside the
+            // account's real profiles.)
             launch {
-                val cloudIsEmpty = container.cloudSyncGateway.profiles(userId).first().isEmpty()
-                if (cloudIsEmpty) {
-                    cloudBackedProfiles.forEach { profile ->
-                        container.cloudSyncGateway.saveProfile(userId, profile)
-                    }
-                    cloudBackedProfiles.forEach { profile ->
-                        container.libraryRepository.library(profile.id).first()
-                            .forEach { container.cloudSyncGateway.saveLibrary(userId, it) }
-                        container.libraryRepository.progress(profile.id).first()
-                            .forEach { container.cloudSyncGateway.saveProgress(userId, it) }
-                    }
+                val cloudProfiles = container.cloudSyncGateway.profiles(userId).first()
+                if (cloudProfiles.isNotEmpty()) return@launch
+                // Legacy local installs may hold placeholder ids (e.g. "primary")
+                // that cannot exist in Postgres; keep them out of cloud sync.
+                val localProfiles = container.libraryRepository.profiles().first()
+                    .filter { isCloudBackedId(it.id) }
+                if (localProfiles.isEmpty()) {
+                    createInitialProfile()
+                    return@launch
+                }
+                localProfiles.forEach { profile ->
+                    container.cloudSyncGateway.saveProfile(userId, profile)
+                }
+                localProfiles.forEach { profile ->
+                    container.libraryRepository.library(profile.id).first()
+                        .forEach { container.cloudSyncGateway.saveLibrary(userId, it) }
+                    container.libraryRepository.progress(profile.id).first()
+                        .forEach { container.cloudSyncGateway.saveProgress(userId, it) }
                 }
             }
             launch {
