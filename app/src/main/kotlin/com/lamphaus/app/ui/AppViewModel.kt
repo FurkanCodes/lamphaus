@@ -41,6 +41,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +65,7 @@ class AppViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AppUiState())
     val state: StateFlow<AppUiState> = mutableState.asStateFlow()
+    private val catalogRefreshGate = CatalogRefreshGate()
     private var refreshJob: Job? = null
     private var cloudSyncJob: Job? = null
     private var cloudSyncUserId: String? = null
@@ -116,6 +118,9 @@ class AppViewModel(
                     ensureDefaultCatalog(snapshot.providers)
                     startCloudSync(snapshot.account.userId)
                 } else {
+                    refreshJob?.cancel()
+                    refreshJob = null
+                    catalogRefreshGate.reset()
                     if (cloudSyncUserId != null) {
                         // Sign-out / deletion must retire the collectors bound to
                         // the previous user's realtime channels — before any
@@ -262,7 +267,7 @@ class AppViewModel(
 
     fun refreshContent() {
         ensureDefaultCatalog(state.value.providers)
-        refreshCatalogs()
+        refreshCatalogs(force = true)
     }
 
     fun searchContent(input: String) {
@@ -748,22 +753,59 @@ class AppViewModel(
         }
     }
 
-    private fun refreshCatalogs() {
+    private fun refreshCatalogs(force: Boolean = false) {
+        val current = state.value
+        val account = current.account as? AccountState.SignedIn
+        if (account == null) {
+            refreshJob?.cancel()
+            refreshJob = null
+            catalogRefreshGate.reset()
+            return
+        }
+        val fingerprint = CatalogRefreshFingerprint(
+            userId = account.userId,
+            childFilterEnabled = current.activeProfile?.let { profile ->
+                profile.kind == ProfileKind.CHILD && profile.hideUnrated
+            } == true,
+            providers = current.providers
+                .map { provider ->
+                    CatalogProviderFingerprint(
+                        id = provider.id,
+                        manifestUrl = provider.manifestUrl,
+                        displayName = provider.displayName,
+                        enabled = provider.enabled,
+                        sortOrder = provider.sortOrder,
+                    )
+                }
+                .sortedWith(compareBy<CatalogProviderFingerprint> { it.sortOrder }.thenBy { it.id }),
+        )
+        if (!catalogRefreshGate.shouldStart(fingerprint, force)) return
+
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
-            val current = state.value
-            if (current.account !is AccountState.SignedIn) return@launch
             if (current.providers.isEmpty()) {
                 if (defaultCatalogJob?.isActive == true) {
+                    currentCoroutineContext().ensureActive()
                     mutableState.update { it.copy(refreshing = true) }
                     return@launch
                 }
-                val preview = if (BuildConfig.DEBUG && current.account.userId == "local-development") {
-                    listOf(CatalogSection("preview", "Preview library", "Local fixture", PreviewMedia.items))
-                } else emptyList()
+                val preview = if (BuildConfig.DEBUG && account.userId == "local-development") {
+                    listOf(
+                        CatalogSection(
+                            id = "preview",
+                            providerId = "local-fixture",
+                            title = "Preview library",
+                            providerName = "Local fixture",
+                            items = PreviewMedia.items,
+                        ),
+                    )
+                } else {
+                    emptyList()
+                }
+                currentCoroutineContext().ensureActive()
                 mutableState.update {
                     it.copy(
-                        sections = preview,
+                        sections = mergeCatalogRefresh(current.sections, preview),
                         initialContentLoading = false,
                         refreshing = false,
                     )
@@ -771,54 +813,71 @@ class AppViewModel(
                 return@launch
             }
             mutableState.update { it.copy(refreshing = true) }
-            val sections = mutableListOf<CatalogSection>()
-            current.providers.filter(ProviderSubscription::enabled).sortedBy(ProviderSubscription::sortOrder).forEach { subscription ->
-                when (val manifestResult = container.providerClient.manifest(subscription.manifestUrl)) {
-                    is ProviderResult.Failure -> sections += CatalogSection(
-                        "${subscription.id}:error",
-                        subscription.displayName,
-                        subscription.displayName,
-                        emptyList(),
-                        manifestResult.safeMessage,
-                    )
-                    is ProviderResult.Success -> sections += coroutineScope {
-                        val includeCuratedGenres = subscription.id == DEFAULT_CATALOG_PROVIDER_ID ||
-                            subscription.manifestUrl == DEFAULT_CATALOG_MANIFEST
-                        manifestResult.value.catalogs.flatMap { catalog ->
-                            catalog.homeRequests(
-                                includeCuratedGenres = includeCuratedGenres,
-                                currentYear = Calendar.getInstance().get(Calendar.YEAR),
-                            )
-                        }.map { request ->
-                            val query = request.query
-                            async {
-                                when (val result = container.providerClient.catalog(
-                                    subscription.manifestUrl,
-                                    subscription.id,
-                                    query,
-                                )) {
-                                    is ProviderResult.Success -> CatalogSection(
-                                        "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}",
-                                        request.title,
-                                        subscription.displayName,
-                                        filterForProfile(result.value),
-                                    )
-                                    is ProviderResult.Failure -> CatalogSection(
-                                        "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}",
-                                        request.title,
-                                        subscription.displayName,
-                                        emptyList(),
-                                        result.safeMessage,
+            val sections = current.providers
+                .filter(ProviderSubscription::enabled)
+                .sortedWith(compareBy<ProviderSubscription> { it.sortOrder }.thenBy { it.id })
+                .flatMap { subscription ->
+                    when (val manifestResult = container.providerClient.manifest(subscription.manifestUrl)) {
+                        is ProviderResult.Failure -> listOf(
+                            CatalogSection(
+                                id = "${subscription.id}:error",
+                                providerId = subscription.id,
+                                title = subscription.displayName,
+                                providerName = subscription.displayName,
+                                items = emptyList(),
+                                errorMessage = manifestResult.safeMessage,
+                            ),
+                        )
+                        is ProviderResult.Success -> coroutineScope {
+                            val includeCuratedGenres = subscription.id == DEFAULT_CATALOG_PROVIDER_ID ||
+                                subscription.manifestUrl == DEFAULT_CATALOG_MANIFEST
+                            manifestResult.value.catalogs
+                                .flatMap { catalog ->
+                                    catalog.homeRequests(
+                                        includeCuratedGenres = includeCuratedGenres,
+                                        currentYear = Calendar.getInstance().get(Calendar.YEAR),
                                     )
                                 }
-                            }
-                        }.awaitAll()
+                                .map { request ->
+                                    val query = request.query
+                                    async {
+                                        val id = "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}"
+                                        when (val result = container.providerClient.catalog(
+                                            subscription.manifestUrl,
+                                            subscription.id,
+                                            query,
+                                        )) {
+                                            is ProviderResult.Success -> CatalogSection(
+                                                id = id,
+                                                providerId = subscription.id,
+                                                title = request.title,
+                                                providerName = subscription.displayName,
+                                                items = filterForProfile(
+                                                    result.value,
+                                                    current.activeProfile?.let { profile ->
+                                                        profile.kind == ProfileKind.CHILD && profile.hideUnrated
+                                                    } == true,
+                                                ),
+                                            )
+                                            is ProviderResult.Failure -> CatalogSection(
+                                                id = id,
+                                                providerId = subscription.id,
+                                                title = request.title,
+                                                providerName = subscription.displayName,
+                                                items = emptyList(),
+                                                errorMessage = result.safeMessage,
+                                            )
+                                        }
+                                    }
+                                }
+                                .awaitAll()
+                        }
                     }
                 }
-            }
+            currentCoroutineContext().ensureActive()
             mutableState.update {
                 it.copy(
-                    sections = sections,
+                    sections = mergeCatalogRefresh(current.sections, sections),
                     initialContentLoading = false,
                     refreshing = false,
                 )
@@ -826,12 +885,13 @@ class AppViewModel(
         }
     }
 
-    private fun filterForProfile(items: List<MediaPreview>): List<MediaPreview> {
-        val profile = state.value.activeProfile ?: return items
-        return if (profile.kind == ProfileKind.CHILD && profile.hideUnrated) {
-            items.filter { !it.contentRating.isNullOrBlank() }
-        } else items
-    }
+    private fun filterForProfile(
+        items: List<MediaPreview>,
+        childFilterEnabled: Boolean = state.value.activeProfile?.let { profile ->
+            profile.kind == ProfileKind.CHILD && profile.hideUnrated
+        } == true,
+    ): List<MediaPreview> = if (childFilterEnabled) items.filter { !it.contentRating.isNullOrBlank() } else items
+
 
     private suspend fun saveProvider(
         address: String,
@@ -908,7 +968,8 @@ class AppViewModel(
                     displayName = DEFAULT_CATALOG_DISPLAY_NAME,
                 )
                 is ProviderResult.Failure -> {
-                    mutableState.update { it.copy(initialContentLoading = false, refreshing = false) }
+                    defaultCatalogJob = null
+                    refreshCatalogs(force = true)
                     showMessage("The Lamphaus catalog is temporarily unavailable.")
                 }
             }

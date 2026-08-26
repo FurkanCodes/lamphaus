@@ -20,7 +20,10 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -35,11 +38,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.doubleOrNull
+import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-
+import okhttp3.Response
 class HttpProviderClient(
     private val urlPolicy: ProviderUrlPolicy,
     private val json: Json = Json { ignoreUnknownKeys = true; isLenient = true },
@@ -62,16 +66,16 @@ class HttpProviderClient(
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
 
-    override suspend fun manifest(manifestUrl: String): ProviderResult<ProviderManifest> = guarded {
+    override suspend fun manifest(manifestUrl: String): ProviderResult<ProviderManifest> = guardedProviderCall {
         val normalized = urlPolicy.normalizeManifestUrl(manifestUrl)
-            ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Use a valid HTTPS provider address.")
+            ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Use a valid HTTPS provider address.")
         val payload = fetch(normalized)
         ProviderResult.Success(parseManifest(payload.element.jsonObject), payload.stale)
     }
 
-    override suspend fun discoverProviderUrls(catalogUrl: String): ProviderResult<List<String>> = guarded {
+    override suspend fun discoverProviderUrls(catalogUrl: String): ProviderResult<List<String>> = guardedProviderCall {
         val normalized = urlPolicy.normalizeCatalogUrl(catalogUrl)
-            ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Use a valid HTTPS provider catalog address.")
+            ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Use a valid HTTPS provider catalog address.")
         val payload = fetch(normalized)
         val root = payload.element
         val candidates = when (root) {
@@ -93,9 +97,9 @@ class HttpProviderClient(
         manifestUrl: String,
         providerId: String,
         query: CatalogQuery,
-    ): ProviderResult<List<MediaPreview>> = guarded {
+    ): ProviderResult<List<MediaPreview>> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "catalog", query.type, query.catalogId, query.extras())
-            ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
+            ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
         val payload = fetch(url.toString())
         val items = payload.element.jsonObject.array("metas") ?: JsonArray(emptyList())
         ProviderResult.Success(
@@ -109,9 +113,9 @@ class HttpProviderClient(
         providerId: String,
         type: String,
         id: String,
-    ): ProviderResult<MediaDetail> = guarded {
+    ): ProviderResult<MediaDetail> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "meta", type, id)
-            ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
+            ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
         val payload = fetch(url.toString())
         val meta = payload.element.jsonObject.obj("meta") ?: payload.element.jsonObject
         ProviderResult.Success(meta.toDetail(providerId, type), payload.stale)
@@ -122,9 +126,9 @@ class HttpProviderClient(
         providerId: String,
         type: String,
         id: String,
-    ): ProviderResult<List<StreamCandidate>> = guarded {
+    ): ProviderResult<List<StreamCandidate>> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "stream", type, id)
-            ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
+            ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
         val payload = fetch(url.toString())
         val streams = payload.element.jsonObject.array("streams") ?: JsonArray(emptyList())
         ProviderResult.Success(streams.mapNotNull { (it as? JsonObject)?.toStream(providerId) }, payload.stale)
@@ -135,9 +139,9 @@ class HttpProviderClient(
         type: String,
         id: String,
         extras: Map<String, String>,
-    ): ProviderResult<List<SubtitleTrack>> = guarded {
+    ): ProviderResult<List<SubtitleTrack>> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "subtitles", type, id, extras)
-            ?: return@guarded ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
+            ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
         val payload = fetch(url.toString())
         val subtitles = payload.element.jsonObject.array("subtitles") ?: JsonArray(emptyList())
         ProviderResult.Success(subtitles.mapNotNull { (it as? JsonObject)?.toSubtitle() }, payload.stale)
@@ -152,7 +156,7 @@ class HttpProviderClient(
                     cached?.etag?.let { header("If-None-Match", it) }
                     cached?.lastModified?.let { header("If-Modified-Since", it) }
                 }.build()
-                client.newCall(request).execute().use { response ->
+                client.newCall(request).awaitResponse().use { response ->
                     if (response.isRedirect) {
                         if (redirectCount == MAX_REDIRECTS) throw ProviderProtocolException("Too many redirects")
                         val resolved = response.header("Location")?.let(request.url::resolve)
@@ -177,6 +181,8 @@ class HttpProviderClient(
                 }
             }
             throw ProviderProtocolException("Too many redirects")
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             val freshEnough = cached != null && System.currentTimeMillis() - cached.fetchedAtMillis < STALE_LIMIT_MILLIS
             if (freshEnough) Payload(json.parseToJsonElement(cached.body), true) else throw error
@@ -210,17 +216,6 @@ class HttpProviderClient(
         }.build()
     }
 
-    private suspend fun <T> guarded(block: suspend () -> ProviderResult<T>): ProviderResult<T> = try {
-        block()
-    } catch (_: SocketTimeoutException) {
-        ProviderResult.Failure(ProviderFailureKind.TIMEOUT, "This provider took too long to respond.")
-    } catch (_: IOException) {
-        ProviderResult.Failure(ProviderFailureKind.NETWORK, "This provider is temporarily unreachable.")
-    } catch (error: ProviderHttpException) {
-        ProviderResult.Failure(ProviderFailureKind.HTTP, "This provider returned HTTP ${error.code}.")
-    } catch (_: Exception) {
-        ProviderResult.Failure(ProviderFailureKind.MALFORMED_RESPONSE, "This provider returned data Lamphaus could not read.")
-    }
 
     private fun parseManifest(root: JsonObject): ProviderManifest {
         val id = root.string("id") ?: throw ProviderProtocolException("Missing id")
@@ -492,11 +487,47 @@ class HttpProviderClient(
     private fun String.encode(): String = URLEncoder.encode(this, StandardCharsets.UTF_8).replace("+", "%20")
 
     private class ProviderProtocolException(message: String) : IllegalArgumentException(message)
-    private class ProviderHttpException(val code: Int) : IOException()
 
     private companion object {
         const val STALE_LIMIT_MILLIS = 7L * 24 * 60 * 60 * 1000
         const val MAX_REDIRECTS = 3
         val QUALITY = Regex("(?:2160p|4k|1080p|720p|480p)", RegexOption.IGNORE_CASE)
     }
+}
+
+private class ProviderHttpException(val code: Int) : IOException()
+
+@OptIn(InternalCoroutinesApi::class)
+internal suspend fun <T> guardedProviderCall(block: suspend () -> ProviderResult<T>): ProviderResult<T> = try {
+    block()
+} catch (error: CancellationException) {
+    throw error
+} catch (_: SocketTimeoutException) {
+    ProviderResult.Failure(ProviderFailureKind.TIMEOUT, "This provider took too long to respond.")
+} catch (_: IOException) {
+    ProviderResult.Failure(ProviderFailureKind.NETWORK, "This provider is temporarily unreachable.")
+} catch (error: ProviderHttpException) {
+    ProviderResult.Failure(ProviderFailureKind.HTTP, "This provider returned HTTP ${error.code}.")
+} catch (_: Exception) {
+    ProviderResult.Failure(ProviderFailureKind.MALFORMED_RESPONSE, "This provider returned data Lamphaus could not read.")
+}
+
+@OptIn(InternalCoroutinesApi::class)
+private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(object : okhttp3.Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            val token = continuation.tryResumeWithException(e)
+            if (token != null) continuation.completeResume(token)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            val token = continuation.tryResume(response)
+            if (token != null) {
+                continuation.completeResume(token)
+            } else {
+                response.close()
+            }
+        }
+    })
 }

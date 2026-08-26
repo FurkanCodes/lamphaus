@@ -40,6 +40,7 @@ This is the implementation checklist for Lamphaus. It summarizes the supplied pr
 - **TV-NAV-05:** Framework spatial navigation is preferred; explicit directional overrides are added only where default traversal demonstrably fails, and overridden orders form closed loops.
 - **TV-NAV-06:** Loading and splash states never enter the back stack; the signed-in Home screen is the fixed start destination, and deep links simulate manual navigation back to it.
 - **TV-NAV-07:** Rows and categories traverse on the vertical axis while items within a row traverse on the horizontal axis; layouts keep a straight D-pad path to every visible control and avoid nested or crossing focus hierarchies.
+- **TV-INP-01:** TV text fields accept browse focus without opening the IME, Select enters edit mode, and Back/IME action returns to browse mode while retaining field focus.
 
 ## Television content and type
 
@@ -52,6 +53,8 @@ This is the implementation checklist for Lamphaus. It summarizes the supplied pr
 ## Quality gates
 
 Each requirement ID must map to a Compose test, screenshot test, lint/static check, or named manual test before release. Validation covers 720p, 1080p, and 4K TV; compact, medium, and expanded mobile widths; 200% font scale; RTL; TalkBack; keyboard; Switch Access; and physical D-pad navigation. D-pad traversal (every visible control reachable) and Back-path behavior are exercised on the TV emulator with `adb shell input keyevent` before each release.
+
+**Validation mapping:** TV-INP-01 is covered by `TvNavigationBehaviorTest` and the named emulator check `TV-INP-01 — TV text-field browse/edit flow` in the release verification checklist.
 
 ## Source baseline
 

@@ -479,14 +479,15 @@ private fun CatalogRow(
             Text(section.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Text(section.providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (section.errorMessage != null) {
+        section.errorMessage?.let { error ->
             Text(
-                section.errorMessage,
+                error,
                 modifier = Modifier.padding(horizontal = 20.dp),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )
-        } else {
+        }
+        if (section.items.isNotEmpty()) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
