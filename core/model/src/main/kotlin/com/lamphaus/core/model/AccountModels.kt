@@ -83,9 +83,13 @@ data class PairingSession(
  * Result of polling [com.lamphaus.core.data.cloud.PairingGateway.exchangeDeviceGrant]
  * during TV pairing. [Granted] carries single-use GoTrue login material that
  * must be consumed immediately — the server burns it on handoff.
+ * [Expired]/[Consumed] are terminal: the poll loop regenerates (Expired) or
+ * demands a fresh QR (Consumed) instead of polling until the local timer dies.
  */
 sealed interface DeviceGrant {
     data object Pending : DeviceGrant
+    data object Expired : DeviceGrant
+    data object Consumed : DeviceGrant
     data class Granted(val email: String, val otp: String, val deviceId: String) : DeviceGrant
 }
 

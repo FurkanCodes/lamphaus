@@ -10,6 +10,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -32,6 +33,7 @@ import java.time.Instant
  */
 class SupabasePairingGateway(
     private val supabase: SupabaseClient,
+    private val sessionRecovery: SupabaseSessionRecovery,
 ) : PairingGateway {
 
     override suspend fun createPairingSession(deviceLabel: String, deviceKey: String?): Result<PairingSession> =
@@ -55,7 +57,9 @@ class SupabasePairingGateway(
 
     override suspend fun claimPairingSession(shortCode: String): Result<Unit> =
         CloudLog.tracedResult("pairing.claim", "code=$shortCode") {
-            invoke("claim-pairing-session") { put("code", shortCode) }
+            sessionRecovery.withAuthRetry {
+                invoke("claim-pairing-session") { put("code", shortCode) }
+            }
             Unit
         }
 
@@ -76,30 +80,51 @@ class SupabasePairingGateway(
                     error("grant_${body.string("status")}")
                 }
             }
+        }.mapTerminalPairingFailures()
+
+    /**
+     * The server answers terminal pairing states as 409/410; surface them as
+     * values so the poll loop can react immediately instead of polling a dead
+     * session until the local timer expires. Everything else stays a failure
+     * (network hiccups keep polling, as before).
+     */
+    private fun Result<DeviceGrant>.mapTerminalPairingFailures(): Result<DeviceGrant> =
+        recoverCatching { error ->
+            when ((error as? SupabaseFunctionException)?.statusCode) {
+                HTTP_GONE -> DeviceGrant.Expired
+                HTTP_CONFLICT -> DeviceGrant.Consumed
+                else -> throw error
+            }
         }
 
     override suspend fun registerDeviceSession(deviceId: String): Result<Unit> =
         CloudLog.tracedResult("devices.register", "device=$deviceId") {
-            supabase.postgrest.rpc(
-                "register_device_session",
-                buildJsonObject { put("p_device_id", deviceId) },
-            )
+            sessionRecovery.withAuthRetry {
+                supabase.postgrest.rpc(
+                    "register_device_session",
+                    buildJsonObject { put("p_device_id", deviceId) },
+                )
+            }
             Unit
         }
 
     override suspend fun listDevices(): Result<List<PairedDevice>> =
         CloudLog.tracedResult("devices.list") {
-            supabase.from("devices")
-                .select()
-                .decodeList<DeviceRow>()
-                .filter { !it.revoked }
-                .map { it.toModel() }
-                .also { CloudLog.d("devices.list ← ${it.size} paired") }
+            sessionRecovery.withAuthRetry {
+                supabase.from("devices")
+                    .select()
+                    .decodeList<DeviceRow>()
+                    .filter { !it.revoked }
+                    .map { it.toModel() }
+                    .also { CloudLog.d("devices.list ← ${it.size} paired") }
+            }
         }
 
     override suspend fun revokeDevice(deviceId: String): Result<Unit> =
         CloudLog.tracedResult("devices.revoke", "device=$deviceId") {
-            invoke("revoke-device") { put("device_id", deviceId) }
+            sessionRecovery.withAuthRetry {
+                invoke("revoke-device") { put("device_id", deviceId) }
+            }
             Unit
         }
 
@@ -121,6 +146,14 @@ class SupabasePairingGateway(
                 "(${android.os.SystemClock.elapsedRealtime() - startedAt}ms) " +
                 CloudLog.clamp(CloudLog.sanitize(text)),
         )
+        if (!response.status.isSuccess()) {
+            val responseCode = extractFunctionErrorCode(json, text)
+            throw SupabaseFunctionException(
+                statusCode = response.status.value,
+                responseCode = responseCode,
+                message = "edge function returned ${response.status.value}: ${CloudLog.clamp(CloudLog.sanitize(text))}",
+            )
+        }
         return json.parseToJsonElement(text).jsonObject
     }
 
@@ -129,6 +162,8 @@ class SupabasePairingGateway(
 
     private companion object {
         val json = Json { ignoreUnknownKeys = true }
+        const val HTTP_CONFLICT = 409
+        const val HTTP_GONE = 410
     }
 }
 

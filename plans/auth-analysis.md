@@ -150,3 +150,44 @@ Security checklist that must carry over: RLS enabled on every public table befor
 2. Either way, **close P0**: implement TV-side polling + `exchangeDeviceGrant` + custom-token (or Supabase-equivalent) sign-in, with expiry countdown UX already present.
 3. Add device management (list/revoke) to mobile settings.
 4. Then layer remaining P2 polish (error states, pending-email storage, QR payload pinning).
+## 9. Durable TV session audit — 2026-08-27
+
+- Repository is linked to hosted project `uhxfalgfcutwrvlgjgen` (`lamphaus`); CLI read-only inspection succeeded.
+- Hosted table statistics show the expected `public.devices`, `public.pairing_sessions`, profile, library, progress, settings, provider, and rate-limit tables. No row contents, credentials, tokens, OTPs, or emails were selected.
+- Deployed `exchange-device-grant`, `claim-pairing-session`, `revoke-device`, and `list-provider-configs` sources match the repository. Deployed `create-pairing-session` differs only by the additional `x-supabase-api-version` CORS header and a missing final newline.
+- Supabase MCP tools were unavailable. The authenticated Management API GET fallback returned HTTP 403 (`error code: 1010`), and remote schema dump was unavailable because the installed CLI requires Docker for `pg_dump`. Hosted Auth session-limit fields, SQL definitions/policies/grants, logs, and advisors therefore remain unverified; local `config.toml` specifies the required one-hour JWT, unlimited session limits by omission, rotation enabled, and 10-second reuse interval.
+- Pinned `supabase-kt` 3.7.0 sources confirm `SessionStatus.Authenticated(source)`, storage restore, `RefreshFailure` network/internal-server causes, `AuthRestException.errorCode`, and `Auth.clearSession()` semantics used by the client recovery boundary.
+- Post-review cleanup: dropped the orphaned `FRESH_TOKEN_RETRY_*` constants + unused `delay` import from `SupabaseCloudSyncGateway` (superseded by `SupabaseSessionRecovery.withAuthRetry`) and consolidated `extractFunctionErrorCode` beside `SupabaseFunctionException` in `SupabaseSessionRecovery.kt`, since both pairing and sync gateways feed it.
+
+## 10. Pairing/session hardening — 2026-08-27 (audit fixes shipped)
+
+Deployed to `uhxfalgfcutwrvlgjgen` + client: XFF last-hop rate buckets in
+create/claim/exchange (P0-1) · re-pair session swap — `register_device_session`
+purges the previous bound GoTrue session, claim no longer nulls
+`auth_session_id` (P0-2) · single register writer via the lifecycle collector
+(P1-5) · stale device binding cleared on sign-out and
+`DEVICE_NOT_FOUND_OR_FORBIDDEN` treated as terminal (P1-6) ·
+exchange-device-grant own rate bucket (60/min/IP) + pg_cron daily purge of
+`pairing_sessions` past TTL+1d, 24 stale rows removed (P1-8) · atomic guarded
+upsert for `consume_pairing_slot` + 410/409 handled immediately in
+`pollForDeviceGrant` via new `DeviceGrant.Expired`/`Consumed` (P2).
+
+Accepted / deferred, with reasons:
+
+- **P1-4 → option (a), accepted**: revocation deletes the GoTrue session
+  instantly (refresh dies → TV drops to QR), but the cached access JWT keeps
+  passing RLS until `jwt_expiry` (1h). Fine for a media-sync app at this
+  scale; the session-checked `caller_session_valid()` policy rewrite remains
+  the documented escalation if that window ever matters.
+- **P0-3 — validation methodology, not app code**: emulator airplane-mode
+  does not cut the virtual NIC (ping still succeeds, refresh "succeeds" —
+  impossible offline). Re-validate on a real device in airplane mode or with
+  egress to `*.supabase.co` blocked, asserting
+  `UnknownHostException → RETRYABLE_FAILURE → stored SignedIn state`.
+- **device_key sha256 at rest — skipped**: ANDROID_ID is a lookup key, not a
+  credential; `devices` is already behind owner RLS / service role only. The
+  hash would add a migration + deploy-order coupling for negligible gain.
+- **P1-7 encrypted session at rest — deferred**: needs a custom
+  `SessionManager` (`AuthConfig.sessionManager` in supabase-kt 3.7) and
+  forces a one-time sign-out of every paired device when it lands. Cheapest
+  pre-launch; revisit before public release.

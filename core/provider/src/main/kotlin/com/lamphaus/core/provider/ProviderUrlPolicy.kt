@@ -23,7 +23,7 @@ class ProviderUrlPolicy(
     private fun normalize(raw: String): HttpUrl? {
         val cleaned = raw.sanitize()
         if (cleaned.isEmpty()) return null
-        // Bare domains and custom app schemes (stremio://, addon://, …) all ride
+        // Bare domains and custom app schemes (addon://, …) all ride
         // HTTPS on the wire; only explicit http(s) is taken as written so the
         // cleartext rule below stays in charge.
         val candidate = if (cleaned.startsWith("http://", true) || cleaned.startsWith("https://", true)) {
@@ -40,7 +40,7 @@ class ProviderUrlPolicy(
         return url
     }
 
-    /** Stremio convention: a base address addresses its own /manifest.json. */
+    /** Add-on convention: a base address addresses its own /manifest.json. */
     private fun HttpUrl.withManifestPath(): String {
         val builder = newBuilder().fragment(null)
         val path = encodedPath

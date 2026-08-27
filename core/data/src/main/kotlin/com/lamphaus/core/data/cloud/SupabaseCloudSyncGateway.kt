@@ -21,11 +21,10 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.retryWhen
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -37,6 +36,12 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+
+internal fun <T> Flow<T>.withSessionRecovery(recovery: SupabaseSessionRecovery): Flow<T> = flow {
+    recovery.withAuthRetry {
+        collect { emit(it) }
+    }
+}
 
 /**
  * Cloud sync over Supabase Postgrest + Realtime.
@@ -52,108 +57,72 @@ import kotlinx.serialization.json.put
 @OptIn(SupabaseExperimental::class)
 class SupabaseCloudSyncGateway(
     private val supabase: SupabaseClient,
+    private val sessionRecovery: SupabaseSessionRecovery,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : CloudSyncGateway {
 
     override fun profiles(userId: String): Flow<List<Profile>> =
         supabase.from(TABLE_PROFILES)
             .selectAsFlow(ProfileRow::id, filter = FilterOperation("user_id", FilterOperator.EQ, userId))
-            .retryOnFreshTokenRejection()
+            .withSessionRecovery(sessionRecovery)
             .map { rows -> rows.map { it.toModel() } }
             .recoverWithEmpty()
-
     override fun library(userId: String, profileId: String): Flow<List<LibraryEntry>> =
         supabase.from(TABLE_LIBRARY)
             .selectAsFlow(
                 listOf(LibraryEntryRow::profileId, LibraryEntryRow::mediaKey),
                 filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
             )
-            .retryOnFreshTokenRejection()
+            .withSessionRecovery(sessionRecovery)
             .map { rows -> rows.map { it.toModel(json) } }
             .recoverWithEmpty()
-
     override fun progress(userId: String, profileId: String): Flow<List<WatchProgress>> =
         supabase.from(TABLE_PROGRESS)
             .selectAsFlow(
                 listOf(WatchProgressRow::profileId, WatchProgressRow::videoId),
                 filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
             )
-            .retryOnFreshTokenRejection()
+            .withSessionRecovery(sessionRecovery)
             .map { rows -> rows.map { it.toModel() } }
             .recoverWithEmpty()
-
     override suspend fun saveProfile(userId: String, profile: Profile): Result<Unit> = runCatching {
-        withFreshTokenRetry {
+        sessionRecovery.withAuthRetry {
             supabase.from(TABLE_PROFILES)
                 .upsert(listOf(ProfileRow.of(userId, profile))) { onConflict = "id" }
         }
     }
-
     override suspend fun saveLibrary(userId: String, entry: LibraryEntry): Result<Unit> = runCatching {
-        withFreshTokenRetry {
+        sessionRecovery.withAuthRetry {
             supabase.from(TABLE_LIBRARY)
                 .upsert(listOf(LibraryEntryRow.of(userId, entry, json))) { onConflict = "profile_id,media_key" }
         }
     }
-
     override suspend fun saveProgress(userId: String, progress: WatchProgress): Result<Unit> = runCatching {
-        withFreshTokenRetry {
+        sessionRecovery.withAuthRetry {
             supabase.from(TABLE_PROGRESS)
                 .upsert(listOf(WatchProgressRow.of(userId, progress))) { onConflict = "profile_id,video_id" }
         }
     }
-
     override fun settings(userId: String): Flow<SyncedSettings?> =
         supabase.from(TABLE_USER_SETTINGS)
             .selectAsFlow(UserSettingsRow::userId, filter = FilterOperation("user_id", FilterOperator.EQ, userId))
-            .retryOnFreshTokenRejection()
+            .withSessionRecovery(sessionRecovery)
             .map { rows -> rows.firstOrNull()?.toModel(json) }
             .recoverWithNull()
 
     override suspend fun saveSettings(userId: String, settings: SyncedSettings): Result<Unit> = runCatching {
-        withFreshTokenRetry {
+        sessionRecovery.withAuthRetry {
             supabase.from(TABLE_USER_SETTINGS)
                 .upsert(listOf(UserSettingsRow.of(userId, settings, json))) { onConflict = "user_id" }
         }
     }
 
-    // ── fresh-token rejection retry ──────────────────────────────────────
-    // During platform incidents (supabase#48123) the Data API's JWT validator
-    // clock trails Auth by more than its 30s skew allowance, so tokens minted
-    // seconds earlier are rejected with PGRST303 ("JWT issued at future").
-    // Only young tokens fail; brief spaced retries heal every affected call
-    // while unrelated errors still surface immediately.
-
-    private fun Throwable.isFreshTokenRejection(): Boolean =
-        message?.contains("PGRST303", ignoreCase = true) == true
-
-    private suspend fun <T> withFreshTokenRetry(block: suspend () -> T): T {
-        var backoffMillis = FRESH_TOKEN_RETRY_BACKOFF_MILLIS
-        repeat(FRESH_TOKEN_RETRY_ATTEMPTS - 1) {
-            try {
-                return block()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                if (!error.isFreshTokenRejection()) throw error
-                delay(backoffMillis)
-                backoffMillis *= 2
-            }
-        }
-        return block()
-    }
-
-    private fun <T> Flow<T>.retryOnFreshTokenRejection(): Flow<T> = retryWhen { cause, attempt ->
-        val willRetry = cause.isFreshTokenRejection() && attempt < FRESH_TOKEN_RETRY_ATTEMPTS - 1L
-        if (willRetry) delay(FRESH_TOKEN_RETRY_BACKOFF_MILLIS * (attempt + 1))
-        willRetry
-    }
 
     // ── Provider configs travel through Edge Functions (plan D4/F5): the
     // table is deny-all RLS, so Postgrest/realtime never see it. Pull-based
     // by necessity — deletions converge at the next session start.
     override suspend fun saveProvider(userId: String, provider: ProviderSubscription): Result<Unit> = runCatching {
-        withFreshTokenRetry {
+        sessionRecovery.withAuthRetry {
             supabase.functions.buildEdgeFunction(FUNCTION_SAVE_PROVIDER_CONFIG)
                 .invoke(json.encodeToString(ProviderConfigUpsert.of(provider))) {
                     contentType(ContentType.Application.Json)
@@ -164,7 +133,7 @@ class SupabaseCloudSyncGateway(
     }
 
     override suspend fun deleteProvider(userId: String, providerId: String): Result<Unit> = runCatching {
-        withFreshTokenRetry {
+        sessionRecovery.withAuthRetry {
             supabase.functions.buildEdgeFunction(FUNCTION_DELETE_PROVIDER_CONFIG)
                 .invoke(json.encodeToString(ProviderConfigDelete(providerId))) {
                     contentType(ContentType.Application.Json)
@@ -175,7 +144,7 @@ class SupabaseCloudSyncGateway(
     }
 
     override suspend fun providers(userId: String): Result<List<ProviderSubscription>> = runCatching {
-        withFreshTokenRetry {
+        sessionRecovery.withAuthRetry {
             val body = supabase.functions.buildEdgeFunction(FUNCTION_LIST_PROVIDER_CONFIGS)
                 .invoke("{}") { contentType(ContentType.Application.Json) }
                 .bodyOrThrow()
@@ -183,10 +152,17 @@ class SupabaseCloudSyncGateway(
         }
     }
 
-    /** Edge Functions answer errors as non-2xx JSON; surface them loudly. */
+    /** Edge Functions answer errors as non-2xx JSON; surface status and code. */
     private suspend fun HttpResponse.bodyOrThrow(): String {
         val body = bodyAsText()
-        if (!status.isSuccess()) error("edge function returned ${status.value}: ${CloudLog.clamp(CloudLog.sanitize(body))}")
+        if (!status.isSuccess()) {
+            val responseCode = extractFunctionErrorCode(json, body)
+            throw SupabaseFunctionException(
+                statusCode = status.value,
+                responseCode = responseCode,
+                message = "edge function returned ${status.value}: ${CloudLog.clamp(CloudLog.sanitize(body))}",
+            )
+        }
         return body
     }
 
@@ -312,8 +288,6 @@ class SupabaseCloudSyncGateway(
 
     companion object {
         private const val TAG = "SupabaseSync"
-        private const val FRESH_TOKEN_RETRY_ATTEMPTS = 3
-        private const val FRESH_TOKEN_RETRY_BACKOFF_MILLIS = 2_000L
         private const val TABLE_PROFILES = "profiles"
         private const val TABLE_LIBRARY = "library_entries"
         private const val TABLE_PROGRESS = "watch_progress"

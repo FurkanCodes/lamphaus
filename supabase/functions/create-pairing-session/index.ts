@@ -52,8 +52,11 @@ function rest(path: string, init?: RequestInit): Promise<Response> {
 }
 
 function clientIp(req: Request): string {
+  // The edge proxy APPENDS the real client IP to X-Forwarded-For; the first
+  // hop is client-controlled. The LAST element is the platform-added hop —
+  // taking it keeps the rate-limit bucket immune to spoofed chains (P0-1).
   return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-forwarded-for")?.split(",").pop()?.trim() ??
     req.headers.get("x-real-ip") ??
     "unknown"
   );

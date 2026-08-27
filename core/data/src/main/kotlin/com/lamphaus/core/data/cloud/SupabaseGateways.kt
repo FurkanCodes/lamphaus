@@ -4,12 +4,10 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.IDToken
-import io.github.jan.supabase.auth.status.RefreshFailureCause
+import io.github.jan.supabase.auth.status.SessionSource
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
-import io.github.jan.supabase.exceptions.RestException
-import io.github.jan.supabase.exceptions.UnauthorizedRestException
 import io.github.jan.supabase.functions.functions
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
@@ -29,6 +27,7 @@ import kotlinx.serialization.json.jsonPrimitive
  */
 class SupabaseAccountGateway(
     private val supabase: SupabaseClient,
+    private val sessionRecovery: SupabaseSessionRecovery,
 ) : AccountGateway {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow<AccountState>(AccountState.Loading)
@@ -41,9 +40,21 @@ class SupabaseAccountGateway(
                 when (status) {
                     is SessionStatus.Authenticated -> {
                         CloudLog.i("auth.status ← Authenticated user=${status.session.user?.id}")
-                        mutableState.value = status.session.toAccountState()
-                            .also { CloudLog.i("auth.state → ${it::class.simpleName}") }
-                        validateRestoredSessionOnce(status.session.accessToken)
+                        if (status.source is SessionSource.Storage) {
+                            when (sessionRecovery.refreshRestoredSession(status.session.accessToken)) {
+                                SessionRefreshResult.REFRESHED ->
+                                    CloudLog.d("auth.restore refresh accepted; waiting for SDK refresh state")
+                                SessionRefreshResult.RETRYABLE_FAILURE -> {
+                                    mutableState.value = status.session.toAccountState()
+                                    CloudLog.w("auth.restore refresh deferred; keeping stored account state")
+                                }
+                                SessionRefreshResult.TERMINAL_FAILURE ->
+                                    CloudLog.i("auth.restore refresh terminal; waiting for NotAuthenticated")
+                            }
+                        } else {
+                            mutableState.value = status.session.toAccountState()
+                                .also { CloudLog.i("auth.state → ${it::class.simpleName}") }
+                        }
                     }
                     SessionStatus.Initializing -> {
                         CloudLog.d("auth.status ← Initializing")
@@ -53,21 +64,8 @@ class SupabaseAccountGateway(
                         CloudLog.i("auth.status ← NotAuthenticated (${status::class.simpleName}) → SignedOut")
                         mutableState.value = AccountState.SignedOut
                     }
-                    // A failed refresh keeps the last known state: transient network
-                    // issues must not sign the user out. But a SERVER rejection
-                    // means the session is gone (revoked from another device,
-                    // plan F3) — drop to SignedOut so the TV shows its QR again.
                     is SessionStatus.RefreshFailure -> {
-                        val detail = when (val reason = status.cause) {
-                            is RefreshFailureCause.NetworkError ->
-                                "network ${reason.exception::class.simpleName}: ${reason.exception.message}"
-                            else -> reason::class.simpleName
-                        }
-                        CloudLog.w("auth.status ← RefreshFailure ($detail)")
-                        if (status.cause !is RefreshFailureCause.NetworkError) {
-                            mutableState.value = AccountState.SignedOut
-                            CloudLog.i("auth.state → SignedOut (session rejected server-side)")
-                        }
+                        CloudLog.w("auth.status ← RefreshFailure (${status.cause::class.simpleName}); keeping last account state")
                     }
                 }
             }
@@ -91,72 +89,21 @@ class SupabaseAccountGateway(
     override suspend fun completeEmailLink(email: String, link: String): Result<Unit> =
         Result.failure(UnsupportedOperationException("Magic link sign-in lands in milestone M7."))
 
-    override suspend fun deleteAccount(): Result<Unit> {
-        val attempt = invokeDeleteAccount()
-        if (attempt.isSuccess || attempt.exceptionOrNull() !is UnauthorizedRestException) {
-            return attempt
-        }
-        // A session revoked elsewhere (revoke-device, global logout from the
-        // pairing page) leaves a JWT that still looks valid but points at a
-        // deleted GoTrue session — every call answers 401 until the tokens
-        // are replaced. Refresh once and retry; if even the refresh is
-        // rejected, drop to SignedOut with an actionable message instead of
-        // a raw RestException.
-        CloudLog.w("account.delete rejected (401) → refreshing session once")
-        val refreshed = runCatching { supabase.auth.refreshCurrentSession() }
-        val refreshError = refreshed.exceptionOrNull()
-        if (refreshError != null) {
-            CloudLog.w("account.delete refresh failed (${refreshError::class.simpleName}) → SignedOut")
-            mutableState.value = AccountState.SignedOut
-            runCatching { supabase.auth.signOut() }
-            return Result.failure(
-                IllegalStateException(
-                    "Session expired — sign in again to delete your account",
-                    refreshError,
-                ),
-            )
-        }
-        return invokeDeleteAccount()
-    }
-
-    private suspend fun invokeDeleteAccount(): Result<Unit> =
+    override suspend fun deleteAccount(): Result<Unit> =
         CloudLog.tracedResult("account.delete") {
-            supabase.functions.buildEdgeFunction("delete-account").invoke("{}") {
-                contentType(ContentType.Application.Json)
-            }
-            supabase.auth.signOut()
-            Unit
+            sessionRecovery.withAuthRetry { invokeDeleteAccount() }
         }
 
+    private suspend fun invokeDeleteAccount() {
+        supabase.functions.buildEdgeFunction("delete-account").invoke("{}") {
+            contentType(ContentType.Application.Json)
+        }
+        // Account deletion is an explicit destructive action; remote sign-out
+        // remains intentional here rather than part of automatic recovery.
+        supabase.auth.signOut()
+    }
     override suspend fun signOut() {
         runCatching { supabase.auth.signOut() }
-    }
-
-    /**
-     * Restored sessions are trusted only after GoTrue confirms the user
-     * still exists: a deleted account leaves behind tokens that look valid
-     * for up to an hour, and storage restore reports Authenticated without
-     * asking the server. One probe per process; a SERVER rejection clears
-     * the dead session immediately, while a NETWORK error keeps the state
-     * untouched (plan F3 — offline must never sign anyone out).
-     */
-    private var startupValidationStarted = false
-    private fun validateRestoredSessionOnce(accessToken: String) {
-        if (startupValidationStarted) return
-        startupValidationStarted = true
-        scope.launch {
-            try {
-                supabase.auth.retrieveUser(accessToken)
-                CloudLog.d("auth.restore validated with server")
-            } catch (e: RestException) {
-                CloudLog.w("auth.restore rejected by server (${e::class.simpleName}) → clearing dead session")
-                mutableState.value = AccountState.SignedOut
-                    .also { CloudLog.i("auth.state → SignedOut") }
-                runCatching { supabase.auth.signOut() }
-            } catch (e: Exception) {
-                CloudLog.d("auth.restore validation deferred (${e::class.simpleName})")
-            }
-        }
     }
 
     private fun UserSession.toAccountState(): AccountState {

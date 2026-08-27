@@ -58,8 +58,10 @@ function rest(path: string, init?: RequestInit): Promise<Response> {
 }
 
 function clientIp(req: Request): string {
+  // Same P0-1 fix as create-pairing-session: last XFF hop is the
+  // platform-added one; earlier hops are client-controlled.
   return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-forwarded-for")?.split(",").pop()?.trim() ??
     req.headers.get("x-real-ip") ??
     "unknown"
   );
@@ -165,13 +167,14 @@ Deno.serve(async (req) => {
       .then((r) => r.json())
       .catch(() => []);
     if (Array.isArray(existing) && existing.length > 0) {
-      // Re-activate: the old bound session is long dead (that's why the
-      // TV shows a QR); register_device_session binds the fresh one.
+      // Re-activate: deliberately NOT nulling auth_session_id here. The old
+      // session is still the TV's own and gets swapped — and purged — by
+      // register_device_session the moment the fresh one binds. Nulling here
+      // would orphan the old session forever (audit P0-2).
       const reused = await rest(`devices?id=eq.${existing[0].id}`, {
         method: "PATCH",
         body: JSON.stringify({
           revoked: false,
-          auth_session_id: null,
           label:
             typeof session.device_label === "string" && session.device_label
               ? session.device_label

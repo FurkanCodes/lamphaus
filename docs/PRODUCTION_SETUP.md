@@ -75,6 +75,8 @@ Use Play App Signing and inject upload credentials through CI secrets. Supply a 
 | Revocation kills TV session | ✅ DB-verified · on-device observation pending |
 | Account deletion leaves zero rows | ✅ FK-cascade audit + live test |
 | Advisors clean | ✅ no open blockers |
+| Leaked Password Protection enabled (Dashboard → Authentication → Security) | ⬜ one click; advisors-flagged, zero passwords today |
+| Production Auth site_url / redirect URLs set | ⬜ config still carries local `127.0.0.1` values |
 | OAuth consent screen published | ⬜ owner action before public launch |
 | Privacy policy live | ⬜ owner action |
 | Pro tier upgrade near cutover | ⬜ owner decision (free tier pauses ~7d idle, no backups) |

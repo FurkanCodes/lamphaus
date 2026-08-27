@@ -59,6 +59,30 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 
+private val DEVICE_BINDING_BACKOFF_MILLIS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
+
+internal fun deviceBindingBackoffMillis(attempt: Int): Long =
+    DEVICE_BINDING_BACKOFF_MILLIS[attempt.coerceIn(0, DEVICE_BINDING_BACKOFF_MILLIS.lastIndex)]
+
+internal fun shouldRetryDeviceBinding(account: AccountState, result: Result<Unit>): Boolean =
+    account is AccountState.SignedIn && result.isFailure
+
+internal const val DEVICE_UNBINDABLE_ERROR = "DEVICE_NOT_FOUND_OR_FORBIDDEN"
+
+/**
+ * The register RPC answers a device row that is gone, revoked, or owned by
+ * someone else with this marker. Retrying cannot succeed — the stored device
+ * binding is stale and must be dropped (re-pairing mints a fresh one).
+ */
+internal fun isTerminalDeviceBindingError(error: Throwable?): Boolean {
+    var current: Throwable? = error
+    while (current != null) {
+        if (current.message?.contains(DEVICE_UNBINDABLE_ERROR) == true) return true
+        current = current.cause
+    }
+    return false
+}
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModel(
     private val container: AppContainer,
@@ -73,7 +97,6 @@ class AppViewModel(
     private var searchJob: Job? = null
     private var detailJob: Job? = null
     private var sourceJob: Job? = null
-    private var deviceSessionRebound = false
 
     init {
         viewModelScope.launch {
@@ -138,6 +161,10 @@ class AppViewModel(
                         // Everything re-arrives from the cloud on next sign-in.
                         container.libraryRepository.clearLocalAccountData()
                         container.preferences.clearSyncedSettings()
+                        // The device binding belongs to the previous account.
+                        // Keeping it would re-bind this TV's row to the next
+                        // account's session and fail permanently (P1-6).
+                        container.preferences.setPairingDeviceId(null)
                     }
                 }
                 refreshCatalogs()
@@ -153,20 +180,46 @@ class AppViewModel(
                 mutableState.update { it.copy(progress = progress) }
             }
         }
-        // Cold-start session re-binding (plan F3/F6 armor): devices.auth_session_id
-        // is normally written right after pairing; if that write ever failed
-        // mid-pairing, the row survives unbound and revocation would find no
-        // session to kill. The RPC is idempotent and owner-guarded, so one
-        // re-run per process on the restored session is always safe. Phones
-        // never pair, so their empty preference makes this a no-op.
+        // Re-bind the persisted device whenever a signed-in account/session
+        // becomes available. The outer loop handles offline/server recovery;
+        // the gateway handles one access-token refresh per failed request.
         viewModelScope.launch {
-            container.accountGateway.state.collect { account ->
-                if (account !is AccountState.SignedIn || deviceSessionRebound) return@collect
-                deviceSessionRebound = true
-                container.preferences.pairingDeviceId.first()?.let { deviceId ->
-                    container.pairingGateway.registerDeviceSession(deviceId)
+            combine(
+                container.accountGateway.state,
+                container.preferences.pairingDeviceId,
+            ) { account, deviceId ->
+                (account as? AccountState.SignedIn)?.userId?.let { userId ->
+                    deviceId?.let { userId to it }
                 }
             }
+                .distinctUntilChanged()
+                .collectLatest { binding ->
+                    if (binding == null) return@collectLatest
+                    var attempt = 0
+                    while (currentCoroutineContext().isActive) {
+                        val result = container.pairingGateway.registerDeviceSession(binding.second)
+                        if (result.isSuccess) {
+                            CloudLog.i("tv.pairing device=${binding.second} rebound to current session")
+                            return@collectLatest
+                        }
+                        val error = result.exceptionOrNull()
+                        if (isTerminalDeviceBindingError(error)) {
+                            // Stale or foreign device row (e.g. the account
+                            // switched on this TV): retrying would loop forever.
+                            // Drop the stored ID; re-pairing mints a fresh one.
+                            CloudLog.w("tv.pairing device=${binding.second} unbindable — clearing stale binding", error)
+                            container.preferences.setPairingDeviceId(null)
+                            return@collectLatest
+                        }
+                        if (!shouldRetryDeviceBinding(container.accountGateway.state.value, result)) {
+                            CloudLog.w("tv.pairing device=${binding.second} bind stopped", result.exceptionOrNull())
+                            return@collectLatest
+                        }
+                        val backoff = deviceBindingBackoffMillis(attempt++)
+                        CloudLog.w("tv.pairing device=${binding.second} bind deferred; retrying in ${backoff}ms")
+                        delay(backoff)
+                    }
+                }
         }
     }
 
@@ -216,7 +269,7 @@ class AppViewModel(
             showMessage("Paste an HTTPS add-on address first.")
             return@launch
         }
-        // A custom-scheme install link (stremio://, addon://, …) is an explicit
+        // A custom-scheme install link (addon://, …) is an explicit
         // addon handoff; a plain http(s) address may still need configuration.
         val explicitInstallLink = address.contains("://") &&
             !address.startsWith("http://", ignoreCase = true) &&
@@ -582,8 +635,9 @@ class AppViewModel(
 
     /**
      * F3 "pairing sticks" guardrails: network errors never break the loop —
-     * we simply poll again. Only a granted grant completes sign-in, and an
-     * expired session regenerates a fresh QR automatically.
+     * we simply poll again. Only a granted grant completes sign-in; a
+     * terminal Expired/Consumed answer regenerates a fresh QR immediately
+     * instead of polling a dead session until the local timer expires.
      */
     private suspend fun pollForDeviceGrant(session: PairingSession) {
         val supabase = container.supabase ?: return
@@ -602,6 +656,17 @@ class AppViewModel(
                     completeDeviceSignIn(supabase, grant)
                     return
                 }
+                DeviceGrant.Expired -> {
+                    CloudLog.i("tv.pairing session=${session.id} expired server-side — regenerating QR")
+                    createPairingSession()
+                    return
+                }
+                DeviceGrant.Consumed -> {
+                    CloudLog.i("tv.pairing session=${session.id} consumed — regenerating QR")
+                    showMessage("That pairing code was already used. Scan the fresh code to try again.")
+                    createPairingSession()
+                    return
+                }
                 DeviceGrant.Pending, null -> CloudLog.d(
                     "tv.pairing pending (session expires in ${remaining / 1000}s)",
                 ) // keep polling through hiccups
@@ -612,19 +677,18 @@ class AppViewModel(
     /**
      * Consumes the single-use grant immediately: verifyEmailOtp mints the
      * TV's own GoTrue session (persisted by the SDK; refresh tokens never
-     * expire by default), then register_device_session binds devices.
-     * auth_session_id so revocation can later kill exactly this TV (F6).
+     * expire by default). Persisting the device ID is enough — the lifecycle
+     * collector is the SINGLE writer for register_device_session (it retries
+     * with backoff), binding devices.auth_session_id so revocation can later
+     * kill exactly this TV (F6).
      */
     private suspend fun completeDeviceSignIn(supabase: SupabaseClient, grant: DeviceGrant.Granted) {
         runCatching<Unit> {
             CloudLog.i("tv.pairing exchanging OTP for a TV session (email=${CloudLog.sanitize("""{"email":"${grant.email}"}""")})")
             supabase.auth.verifyEmailOtp(OtpType.Email.MAGIC_LINK, grant.email, grant.otp)
             CloudLog.i("tv.pairing OTP verified — TV session minted, binding device…")
-            container.pairingGateway.registerDeviceSession(grant.deviceId).getOrThrow()
-            // Remember this install's devices row so cold starts can re-bind
-            // their restored session (see the collector in init).
             container.preferences.setPairingDeviceId(grant.deviceId)
-            CloudLog.i("tv.pairing device=${grant.deviceId} bound to session — pairing complete 🎬")
+            CloudLog.i("tv.pairing device=${grant.deviceId} pairing session persisted")
         }.onFailure {
             CloudLog.e("tv.pairing sign-in after grant failed (device=${grant.deviceId})", it)
             showMessage("The TV was claimed, but signing in failed. Refresh the QR and try again.")

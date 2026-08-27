@@ -7,7 +7,8 @@
 // Unauthenticated like create; the session id itself is the capability, and
 // the grant is handed out EXACTLY once: the atomic update flips exchanged=
 // true and nulls the OTP columns in the same statement, so a replayed poll
-// finds nothing.
+// finds nothing. Rate-limited per IP (60/min) as cost/abuse armor — the
+// only unauthenticated endpoint that dispenses credentials.
 //
 // Statuses:
 //   pending  → not claimed yet, keep polling (200)
@@ -47,9 +48,45 @@ function rest(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(input),
+  );
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function clientIp(req: Request): string {
+  // Last XFF hop = platform-added hop (P0-1); earlier hops are
+  // client-controlled.
+  return (
+    req.headers.get("x-forwarded-for")?.split(",").pop()?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "unknown"
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  // Own rate bucket (salted "|exchange") so polls never share counters with
+  // create/claim. 60/min/IP: one TV polls at 20/min, so a 3-TV household
+  // stays clear, while abuse still hits a hard ceiling (audit P1-8).
+  const ipHash = await sha256Hex(`${clientIp(req)}|exchange`);
+  const slotAllowed = await rest("rpc/consume_pairing_slot", {
+    method: "POST",
+    body: JSON.stringify({
+      p_ip_hash: ipHash,
+      p_limit: 60,
+      p_window_minutes: 1,
+    }),
+  })
+    .then((r) => r.json())
+    .catch(() => null);
+  if (slotAllowed !== true) return json({ error: "rate_limited" }, 429);
 
   const body = await req.json().catch(() => ({}) as Record<string, unknown>);
   const sessionId = typeof body.session_id === "string" ? body.session_id : "";

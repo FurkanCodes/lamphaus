@@ -61,7 +61,7 @@ class ProviderUrlPolicyTest {
 
     @Test
     fun `underscore hostnames are accepted`() {
-        // java.net.URI refuses underscores in hosts; real Stremio add-ons are
+        // java.net.URI refuses underscores in hosts; real-world add-ons are
         // routinely hosted at them (e.g. *.workers.dev deployments).
         val policy = ProviderUrlPolicy(allowDebugLocalhost = false)
 
@@ -102,8 +102,8 @@ class ProviderUrlPolicyTest {
         val policy = ProviderUrlPolicy(allowDebugLocalhost = false)
 
         assertEquals(
-            "https://provider.example/stremio/v2-provider.json",
-            policy.normalizeManifestUrl("https://provider.example/stremio/v2-provider.json"),
+            "https://provider.example/addons/v2-provider.json",
+            policy.normalizeManifestUrl("https://provider.example/addons/v2-provider.json"),
         )
     }
 

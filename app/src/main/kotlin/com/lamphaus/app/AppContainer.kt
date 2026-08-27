@@ -1,5 +1,6 @@
 package com.lamphaus.app
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.provider.Settings
 import androidx.room.Room
@@ -9,6 +10,7 @@ import com.lamphaus.core.data.cloud.LocalPairingGateway
 import com.lamphaus.core.data.cloud.SupabaseAccountGateway
 import com.lamphaus.core.data.cloud.SupabasePairingGateway
 import com.lamphaus.core.data.cloud.SupabaseCloudSyncGateway
+import com.lamphaus.core.data.cloud.SupabaseSessionRecovery
 import com.lamphaus.core.data.cloud.LocalCloudSyncGateway
 import com.lamphaus.core.data.cloud.CloudSyncGateway
 import com.lamphaus.core.data.cloud.PairingGateway
@@ -43,6 +45,11 @@ class AppContainer(context: Context) {
      * claim endpoint reuse ONE devices row per physical TV instead of
      * cloning a new row on every re-pair.
      */
+    // ANDROID_ID is the deliberate choice here: it is stable per app-signing
+    // key without permissions or Play services and is never used for ads or
+    // analytics — exactly the non-identifier use case Google's data-ids
+    // guidance permits for device binding.
+    @SuppressLint("HardwareIds")
     val pairingDeviceKey: String? =
         Settings.Secure.getString(
             context.contentResolver,
@@ -78,21 +85,21 @@ class AppContainer(context: Context) {
     } else {
         null
     }
+    private val sessionRecovery = supabase?.let(::SupabaseSessionRecovery)
 
     private val localAccount = LocalAccountGateway()
-
     val accountGateway: AccountGateway = if (supabase != null) {
-        SupabaseAccountGateway(supabase)
+        SupabaseAccountGateway(supabase, checkNotNull(sessionRecovery))
     } else {
         localAccount
     }
     val pairingGateway: PairingGateway = if (supabase != null) {
-        SupabasePairingGateway(supabase)
+        SupabasePairingGateway(supabase, checkNotNull(sessionRecovery))
     } else {
         LocalPairingGateway()
     }
     val cloudSyncGateway: CloudSyncGateway = if (supabase != null) {
-        SupabaseCloudSyncGateway(supabase)
+        SupabaseCloudSyncGateway(supabase, checkNotNull(sessionRecovery))
     } else {
         LocalCloudSyncGateway()
     }
