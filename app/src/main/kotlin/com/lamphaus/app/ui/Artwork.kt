@@ -13,6 +13,13 @@ import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.core.model.MediaPreview
 
+internal fun fixtureArtworkResource(media: MediaPreview): Int? =
+    when (media.id) {
+        "fixture:aurora" -> R.drawable.poster_aurora
+        "fixture:glass" -> R.drawable.poster_glass
+        else -> null
+    }
+
 @Composable
 fun MediaArtwork(
     media: MediaPreview,
@@ -20,11 +27,7 @@ fun MediaArtwork(
     contentScale: ContentScale = ContentScale.Crop,
     preferBackdrop: Boolean = false,
 ) {
-    val local = when (media.id) {
-        "fixture:aurora" -> R.drawable.poster_aurora
-        "fixture:glass" -> R.drawable.poster_glass
-        else -> null
-    }
+    val local = fixtureArtworkResource(media)
     val remote = if (preferBackdrop) media.backgroundUrl ?: media.posterUrl else media.posterUrl ?: media.backgroundUrl
     when {
         local != null -> Image(

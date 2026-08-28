@@ -51,6 +51,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -378,6 +379,7 @@ private fun TvSignedIn(
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
     var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination) }
     var pendingMediaKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var lastFocusedMedia by remember { mutableStateOf(state.allMedia.firstOrNull()) }
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val navFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val contentStates = rememberSaveableStateHolder()
@@ -386,6 +388,15 @@ private fun TvSignedIn(
         pendingMediaKey = media.stableKey
         viewModel.loadDetail(media)
     }
+    val ambientMedia = when (destination) {
+        TvDestination.HOME,
+        TvDestination.DISCOVER,
+        TvDestination.LIBRARY,
+        TvDestination.SEARCH,
+        -> lastFocusedMedia
+        TvDestination.SETTINGS -> null
+    }
+    val ambientState = rememberTvContentAmbient(ambientMedia)
 
     if (state.sourcePicker != null) {
         BackHandler { viewModel.closeSourcePicker() }
@@ -430,22 +441,26 @@ private fun TvSignedIn(
             focusDestination = destination
         }
     }
-    Box(Modifier.fillMaxSize()) {
-        TvTopNavigation(
-            selectedDestination = destination,
-            activeProfile = state.activeProfile,
-            focusDestination = focusDestination,
-            requesters = navFocus,
-            contentDownRequester = contentFocus.getValue(destination),
-            onFocusHandled = { focusDestination = null },
-            onHasFocus = { navHasFocus = it },
-            onDestination = { destination = it },
-            modifier = Modifier.padding(
-                start = TvLayoutTokens.screenHorizontalPadding,
-                top = TvLayoutTokens.screenTopPadding,
-                end = TvLayoutTokens.screenHorizontalPadding,
-            ),
-        )
+    CompositionLocalProvider(LocalTvContentAccent provides ambientState.accent) {
+        Box(Modifier.fillMaxSize()) {
+            if (destination != TvDestination.SETTINGS) {
+                TvContentAmbientBackground(state = ambientState)
+            }
+            TvTopNavigation(
+                selectedDestination = destination,
+                activeProfile = state.activeProfile,
+                focusDestination = focusDestination,
+                requesters = navFocus,
+                contentDownRequester = contentFocus.getValue(destination),
+                onFocusHandled = { focusDestination = null },
+                onHasFocus = { navHasFocus = it },
+                onDestination = { destination = it },
+                modifier = Modifier.padding(
+                    start = TvLayoutTokens.screenHorizontalPadding,
+                    top = TvLayoutTokens.screenTopPadding,
+                    end = TvLayoutTokens.screenHorizontalPadding,
+                ),
+            )
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -468,6 +483,7 @@ private fun TvSignedIn(
                     TvDestination.HOME -> TvHome(
                         state = state,
                         onMedia = openMedia,
+                        onFocused = { lastFocusedMedia = it },
                         initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
                         onAddSource = {
                             destination = TvDestination.SETTINGS
@@ -482,6 +498,7 @@ private fun TvSignedIn(
                         media = state.allMedia,
                         onMedia = openMedia,
                         initialFocusRequester = contentFocus.getValue(TvDestination.DISCOVER),
+                        onFocused = { lastFocusedMedia = it },
                         restoreMediaKey = pendingMediaKey,
                         onFocusRestored = { pendingMediaKey = null },
                     )
@@ -491,6 +508,7 @@ private fun TvSignedIn(
                         state = state,
                         onSearch = viewModel::searchContent,
                         onMedia = openMedia,
+                        onFocused = { lastFocusedMedia = it },
                         initialFocusRequester = contentFocus.getValue(TvDestination.SEARCH),
                         restoreMediaKey = pendingMediaKey,
                         onFocusRestored = { pendingMediaKey = null },
@@ -500,6 +518,7 @@ private fun TvSignedIn(
                         title = stringResource(R.string.library),
                         media = state.library.map { it.preview },
                         onMedia = openMedia,
+                        onFocused = { lastFocusedMedia = it },
                         initialFocusRequester = contentFocus.getValue(TvDestination.LIBRARY),
                         restoreMediaKey = pendingMediaKey,
                         onFocusRestored = { pendingMediaKey = null },
@@ -524,6 +543,7 @@ private fun TvSignedIn(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        }
     }
 }
 
@@ -531,6 +551,7 @@ private fun TvSignedIn(
 private fun TvHome(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
     initialFocusRequester: FocusRequester,
     restoreMediaKey: String?,
@@ -566,6 +587,7 @@ private fun TvHome(
                 TvHero(
                     media = media,
                     onMedia = onMedia,
+                    onFocused = { focusedCandidate = media; onFocused(media) },
                     modifier = Modifier
                         .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
                         .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
@@ -578,7 +600,7 @@ private fun TvHome(
                 TvContinueWatchingRow(
                     items = continueWatching,
                     onMedia = onMedia,
-                    onFocused = { focusedCandidate = it },
+                    onFocused = { focusedCandidate = it; onFocused(it) },
                     restoreMediaKey = restoreMediaKey,
                     onFocusRestored = onFocusRestored,
                 )
@@ -613,7 +635,7 @@ private fun TvHome(
             TvCatalogRow(
                 section = section,
                 onMedia = onMedia,
-                onFocused = { focusedCandidate = it },
+                onFocused = { focusedCandidate = it; onFocused(it) },
                 restoreMediaKey = restoreMediaKey,
                 onFocusRestored = onFocusRestored,
             )
@@ -665,18 +687,23 @@ private fun TvContinueWatchingRow(
 private fun TvHero(
     media: MediaPreview,
     onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
     val reducedMotion = rememberReducedMotion()
+    val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(TvLayoutTokens.heroHeight)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused(media)
+            }
             .border(
                 width = if (focused) TvFocusTokens.outlineWidth else 0.dp,
-                color = if (focused) MaterialTheme.colorScheme.onBackground else Color.Transparent,
+                color = if (focused) ambientAccent else Color.Transparent,
                 shape = TvShapeTokens.hero,
             )
             .clip(TvShapeTokens.hero)
@@ -837,6 +864,7 @@ private fun TvMediaGrid(
     title: String,
     media: List<MediaPreview>,
     onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
     initialFocusRequester: FocusRequester,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
@@ -881,6 +909,7 @@ private fun TvMediaGrid(
                     TvMediaCard(
                         media = item,
                         onClick = { onMedia(item) },
+                        onFocused = { onFocused(item) },
                         modifier = (if (index == 0) Modifier.focusRequester(initialFocusRequester) else Modifier)
                             .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
                         showLabel = true,
@@ -898,6 +927,7 @@ private fun TvSearch(
     state: AppUiState,
     onSearch: (String) -> Unit,
     onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
     initialFocusRequester: FocusRequester,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
@@ -943,6 +973,7 @@ private fun TvSearch(
                     TvMediaCard(
                         media = media,
                         onClick = { onMedia(media) },
+                        onFocused = { onFocused(media) },
                         modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
                         showLabel = true,
                         revealLabelOnFocus = true,

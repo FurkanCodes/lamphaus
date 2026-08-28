@@ -402,6 +402,8 @@ internal fun TvMediaCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     val reducedMotion = rememberReducedMotion()
+    val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
+    val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
     val rating = media.rating?.takeIf { it in 0.0..10.0 }
     val ratingText = rating?.let { String.format(Locale.ROOT, "%.1f", it) }
     val cardDescription = ratingText?.let {
@@ -452,12 +454,12 @@ internal fun TvMediaCard(
                     scaleY = scale
                     shadowElevation = 7.dp.toPx() * focusProgress
                     shape = TvShapeTokens.card
-                    ambientShadowColor = TvFocusTokens.halo
-                    spotShadowColor = TvFocusTokens.halo
+                    ambientShadowColor = ambientHalo
+                    spotShadowColor = ambientHalo
                 }
                 .border(
                     width = TvFocusTokens.outlineWidth,
-                    color = if (focused) TvFocusTokens.focusedCardOutline else TvSurfaceTokens.subtleBorder,
+                    color = if (focused) ambientAccent else TvSurfaceTokens.subtleBorder,
                     shape = TvShapeTokens.card,
                 )
                 .padding(if (focused) TvFocusTokens.outlineWidth else 0.5.dp)

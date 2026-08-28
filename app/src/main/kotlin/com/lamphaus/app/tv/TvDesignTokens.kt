@@ -68,3 +68,13 @@ internal object TvMotionTokens {
     const val startupSweepDurationMillis = 480
     const val focusedArtworkScale = 1.02f
 }
+
+internal object TvAmbientTokens {
+    val imageAlpha = 0.30f
+    val horizontalScrimLeftAlpha = 0.97f
+    val horizontalScrimMiddleAlpha = 0.72f
+    val horizontalScrimRightAlpha = 0.42f
+    val verticalScrimTopAlpha = 0.35f
+    val verticalScrimMiddleAlpha = 0f
+    val verticalScrimBottomAlpha = 0.94f
+}
