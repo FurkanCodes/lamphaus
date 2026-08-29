@@ -81,9 +81,9 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.Profile
-import java.util.Locale
 
 internal enum class TvDestination(
     @StringRes val labelRes: Int,
@@ -404,8 +404,7 @@ internal fun TvMediaCard(
     val reducedMotion = rememberReducedMotion()
     val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
     val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
-    val rating = media.rating?.takeIf { it in 0.0..10.0 }
-    val ratingText = rating?.let { String.format(Locale.ROOT, "%.1f", it) }
+    val ratingText = media.metadataPresentation().ratingText
     val cardDescription = ratingText?.let {
         stringResource(R.string.media_card_description_rating, media.name, it)
     } ?: media.name

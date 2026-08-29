@@ -68,6 +68,11 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -101,8 +106,11 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.MediaMetadataPresentation
 import com.lamphaus.app.ui.SourcePickerState
 import com.lamphaus.app.ui.mediaFocusRestore
+import com.lamphaus.app.ui.metadataPresentation
+import com.lamphaus.app.ui.numberParts
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
@@ -558,8 +566,9 @@ private fun TvHome(
     onFocusRestored: () -> Unit,
 ) {
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
-    var featured by remember(state.allMedia) { mutableStateOf(state.allMedia.firstOrNull()) }
     val allMedia = state.allMedia
+    var featured by remember(allMedia) { mutableStateOf(allMedia.firstOrNull()) }
+    val heroItems = remember(allMedia) { allMedia.distinctBy(MediaPreview::stableKey).take(5) }
     val continueWatching = remember(state.progress, allMedia) {
         val mediaByKey = allMedia.associateBy(MediaPreview::stableKey)
         state.progress
@@ -577,6 +586,15 @@ private fun TvHome(
             featured = it
         }
     }
+    val moveCarousel: (Int) -> Unit = { delta ->
+        if (heroItems.size > 1) {
+            val currentIndex = heroItems.indexOfFirst { it.stableKey == featured?.stableKey }.coerceAtLeast(0)
+            val next = heroItems[(currentIndex + delta + heroItems.size) % heroItems.size]
+            featured = next
+            focusedCandidate = next
+            onFocused(next)
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
@@ -588,6 +606,9 @@ private fun TvHome(
                     media = media,
                     onMedia = onMedia,
                     onFocused = { focusedCandidate = media; onFocused(media) },
+                    carouselItems = heroItems,
+                    onPrevious = { moveCarousel(-1) },
+                    onNext = { moveCarousel(1) },
                     modifier = Modifier
                         .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
                         .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
@@ -688,11 +709,22 @@ private fun TvHero(
     media: MediaPreview,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
+    carouselItems: List<MediaPreview>,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
     val reducedMotion = rememberReducedMotion()
     val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
+    val currentIndex = carouselItems.indexOfFirst { it.stableKey == media.stableKey }
+    val hasCarousel = carouselItems.size > 1 && currentIndex >= 0
+    val carouselPosition = currentIndex + 1
+    val heroDescription = if (hasCarousel) {
+        stringResource(R.string.hero_carousel_description, media.name, carouselPosition, carouselItems.size)
+    } else {
+        media.name
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -708,8 +740,25 @@ private fun TvHero(
             )
             .clip(TvShapeTokens.hero)
             .clickable(role = Role.Button) { onMedia(media) }
+            .onPreviewKeyEvent { event ->
+                if (!hasCarousel || event.type != KeyEventType.KeyDown) {
+                    false
+                } else {
+                    when (event.key) {
+                        Key.DirectionLeft -> {
+                            onPrevious()
+                            true
+                        }
+                        Key.DirectionRight -> {
+                            onNext()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
             .focusable()
-            .semantics { contentDescription = media.name },
+            .semantics { contentDescription = heroDescription },
     ) {
         AnimatedContent(
             targetState = media,
@@ -762,6 +811,36 @@ private fun TvHero(
                     ),
                 ),
         )
+        if (hasCarousel) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 28.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.hero_carousel_position, carouselPosition, carouselItems.size),
+                    color = Color.White.copy(alpha = 0.80f),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                carouselItems.forEachIndexed { index, _ ->
+                    Box(
+                        modifier = Modifier
+                            .width(if (index == currentIndex) 22.dp else 6.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                if (index == currentIndex) {
+                                    Color.White
+                                } else {
+                                    Color.White.copy(alpha = 0.48f)
+                                },
+                            ),
+                    )
+                }
+            }
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -769,12 +848,22 @@ private fun TvHero(
                 .padding(32.dp),
             verticalArrangement = Arrangement.Bottom,
         ) {
-            Text(
-                text = media.name,
-                style = MaterialTheme.typography.displayMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (!media.logoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = media.logoUrl,
+                    contentDescription = media.name,
+                    modifier = Modifier.width(330.dp).height(78.dp),
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.CenterStart,
+                )
+            } else {
+                Text(
+                    text = media.name,
+                    style = MaterialTheme.typography.displayMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             media.description?.let {
                 Text(
                     text = it,
@@ -785,6 +874,11 @@ private fun TvHero(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            TvMetadataLine(
+                presentation = media.metadataPresentation(maxGenres = 2),
+                includeGenres = true,
+                modifier = Modifier.padding(top = 8.dp),
+            )
             AnimatedVisibility(visible = focused) {
                 Row(
                     modifier = Modifier
@@ -807,6 +901,30 @@ private fun TvHero(
                 }
             }
         }
+    }
+}
+@Composable
+private fun TvMetadataLine(
+    presentation: MediaMetadataPresentation,
+    includeGenres: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val values = buildList {
+        presentation.year?.let { add(it.toString()) }
+        presentation.contentRating?.let(::add)
+        presentation.runtimeMinutes?.let { add(stringResource(R.string.minutes_format, it)) }
+        presentation.ratingText?.let { add(stringResource(R.string.rating_format, it)) }
+        if (includeGenres && presentation.genres.isNotEmpty()) add(presentation.genres.joinToString(", "))
+    }
+    if (values.isNotEmpty()) {
+        Text(
+            text = values.joinToString("  •  "),
+            modifier = modifier,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.76f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1199,18 +1317,21 @@ private fun TvSourceMediaSummary(
     picker: SourcePickerState,
     modifier: Modifier = Modifier,
 ) {
-    val episodeNumber = picker.episode?.let { episode ->
-        listOfNotNull(
-            episode.season?.let { "S$it" },
-            episode.episode?.let { "E$it" },
-        ).joinToString(" • ").ifBlank { null }
-    }
+    val presentation = picker.media.metadataPresentation()
+    val number = picker.episode?.numberParts()
     val metadata = buildList {
-        episodeNumber?.let(::add)
-        picker.media.contentRating?.takeIf(String::isNotBlank)?.let(::add)
-        picker.media.releaseYear?.let { add(it.toString()) }
-        picker.media.genres.take(2).joinToString(", ").takeIf(String::isNotBlank)?.let(::add)
-        picker.media.rating?.let { add("★ $it") }
+        number?.let {
+            when {
+                it.season != null && it.episode != null ->
+                    add(stringResource(R.string.episode_format, it.season, it.episode))
+                it.season != null -> add(stringResource(R.string.season_format, it.season))
+                it.episode != null -> add(stringResource(R.string.episode_number_format, it.episode))
+            }
+        }
+        presentation.contentRating?.let(::add)
+        presentation.year?.let { add(it.toString()) }
+        presentation.genres.joinToString(", ").takeIf(String::isNotBlank)?.let(::add)
+        presentation.ratingText?.let { add(stringResource(R.string.rating_format, it)) }
     }.joinToString("  •  ")
     val description = picker.episode?.overview ?: picker.media.description
 
@@ -1350,26 +1471,20 @@ private fun TvDetailScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    detail.preview.description?.let {
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text(
-                        text = listOfNotNull(
-                            detail.preview.contentRating,
-                            detail.preview.releaseYear?.toString(),
-                            detail.preview.genres.take(2).joinToString(", ").ifBlank { null },
-                            detail.runtimeMinutes?.let { stringResource(R.string.minutes_format, it) },
-                            detail.preview.rating?.let { "★ $it" },
-                        ).joinToString("  •  "),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
+                    detail.preview.description
+                        ?.takeIf(String::isNotBlank)
+                        ?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    TvMetadataLine(
+                        presentation = detail.metadataPresentation(maxGenres = 2),
+                        includeGenres = true,
                     )
                     Row(
                         modifier = Modifier.padding(top = 12.dp),
@@ -1392,27 +1507,8 @@ private fun TvDetailScreen(
                             onClick = onLibrary,
                         )
                     }
-                    if (detail.cast.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier.padding(top = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = stringResource(R.string.cast),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                            Text(
-                                text = detail.cast.take(6).joinToString("  •  ") { name ->
-                                    HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString()
-                                },
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+                    TvPeopleSection(R.string.cast, detail.cast)
+                    TvPeopleSection(R.string.directors, detail.directors)
                 }
             }
             if (detail.episodes.isNotEmpty()) {
@@ -1448,6 +1544,29 @@ private fun TvDetailScreen(
         }
     }
 }
+@Composable
+private fun TvPeopleSection(@StringRes labelRes: Int, people: List<String>) {
+    if (people.isEmpty()) return
+    Column(
+        modifier = Modifier.padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(labelRes),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Text(
+            text = people.take(6).joinToString("  •  ") { name ->
+                HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
+            },
+            color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
 
 @Composable
 private fun TvEpisodeCard(
@@ -1456,6 +1575,7 @@ private fun TvEpisodeCard(
     onClick: () -> Unit,
 ) {
     val artworkUrl = episode.thumbnailUrl ?: fallbackArtworkUrl
+    val number = episode.numberParts()
     TvFocusableSurface(
         onClick = onClick,
         modifier = Modifier
@@ -1494,15 +1614,28 @@ private fun TvEpisodeCard(
                     .padding(start = 16.dp, top = 28.dp, end = 16.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    stringResource(
-                        R.string.episode_format,
-                        episode.season ?: 0,
-                        episode.episode ?: 0,
-                    ),
-                    color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
-                )
+                if (number.isPresent) {
+                    when {
+                        number.season != null && number.episode != null ->
+                            Text(
+                                stringResource(R.string.episode_format, number.season, number.episode),
+                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        number.season != null ->
+                            Text(
+                                stringResource(R.string.season_format, number.season),
+                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        number.episode != null ->
+                            Text(
+                                stringResource(R.string.episode_number_format, number.episode),
+                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                    }
+                }
                 Text(
                     episode.title,
                     color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
@@ -1510,6 +1643,19 @@ private fun TvEpisodeCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                episode.overview
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { overview ->
+                        AnimatedVisibility(visible = focused) {
+                            Text(
+                                text = overview,
+                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
             }
         }
     }

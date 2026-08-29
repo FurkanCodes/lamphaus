@@ -99,6 +99,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.text.HtmlCompat
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.AppUiState
@@ -106,6 +107,8 @@ import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.mediaFocusRestore
+import com.lamphaus.app.ui.metadataPresentation
+import com.lamphaus.app.ui.numberParts
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
@@ -453,13 +456,9 @@ private fun MobileHero(
             )
             Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
                 Text(media.name, style = MaterialTheme.typography.headlineMedium, color = androidx.compose.ui.graphics.Color.White)
-                Text(
-                    listOfNotNull(
-                        media.releaseYear?.toString(),
-                        media.genres.firstOrNull(),
-                        media.rating?.let { "★ $it" },
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
+                MobileMetadataLine(
+                    presentation = media.metadataPresentation(maxGenres = 1),
+                    includeGenres = true,
                     color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.88f),
                 )
             }
@@ -517,11 +516,37 @@ private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, mod
         MediaArtwork(media, Modifier.fillMaxWidth().aspectRatio(if (landscape) 16f / 9f else 2f / 3f))
         Column(Modifier.padding(10.dp)) {
             Text(media.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val metadata = listOfNotNull(media.releaseYear?.toString(), media.rating?.let { "★ $it" }).joinToString(" · ")
-            if (metadata.isNotBlank()) {
-                Text(metadata, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            MobileMetadataLine(
+                presentation = media.metadataPresentation(),
+                includeGenres = false,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
+    }
+}
+@Composable
+private fun MobileMetadataLine(
+    presentation: com.lamphaus.app.ui.MediaMetadataPresentation,
+    includeGenres: Boolean,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    val values = buildList {
+        presentation.year?.let { add(it.toString()) }
+        presentation.contentRating?.let(::add)
+        presentation.runtimeMinutes?.let { add(stringResource(R.string.minutes_format, it)) }
+        presentation.ratingText?.let { add(stringResource(R.string.rating_format, it)) }
+        if (includeGenres && presentation.genres.isNotEmpty()) add(presentation.genres.joinToString(", "))
+    }
+    if (values.isNotEmpty()) {
+        Text(
+            text = values.joinToString(" · "),
+            modifier = modifier,
+            style = MaterialTheme.typography.bodySmall,
+            color = color,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -664,17 +689,14 @@ private fun MobileDetailScreen(
                     )
                 }
                 Text(detail.preview.name, style = MaterialTheme.typography.headlineLarge)
-                Text(
-                    listOfNotNull(
-                        detail.preview.releaseYear?.toString(),
-                        detail.runtimeMinutes?.let { stringResource(R.string.minutes_format, it) },
-                        detail.preview.rating?.let { "★ $it" },
-                        detail.preview.contentRating,
-                    )
-                        .joinToString(" · "),
+                MobileMetadataLine(
+                    presentation = detail.metadataPresentation(),
+                    includeGenres = true,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                detail.preview.description?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                detail.preview.description
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(onClick = { onPlay(null) }) {
                         Icon(Icons.Outlined.PlayArrow, null)
@@ -684,6 +706,22 @@ private fun MobileDetailScreen(
                     OutlinedButton(onClick = onLibrary, enabled = !inLibrary) {
                         Text(stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library))
                     }
+                }
+                val fullGenres = detail.preview.metadataPresentation(maxGenres = Int.MAX_VALUE).genres
+                if (fullGenres.isNotEmpty()) {
+                    MobileDetailMetadataSection(R.string.genres, fullGenres.joinToString(", "))
+                }
+                if (detail.cast.isNotEmpty()) {
+                    MobileDetailMetadataSection(
+                        labelRes = R.string.cast,
+                        value = detail.cast.joinToString("  •  ", transform = ::plainPersonName),
+                    )
+                }
+                if (detail.directors.isNotEmpty()) {
+                    MobileDetailMetadataSection(
+                        labelRes = R.string.directors,
+                        value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
+                    )
                 }
             }
         }
@@ -704,14 +742,50 @@ private fun MobileDetailScreen(
         }
     }
 }
+@Composable
+private fun MobileDetailMetadataSection(@StringRes labelRes: Int, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(labelRes),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun plainPersonName(value: String): String =
+    HtmlCompat.fromHtml(value, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
+
 
 @Composable
 private fun EpisodeRow(episode: com.lamphaus.core.model.Episode, onPlay: (com.lamphaus.core.model.Episode?) -> Unit) {
+    val number = episode.numberParts()
     ListItem(
+        leadingContent = {
+            if (!episode.thumbnailUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = episode.thumbnailUrl,
+                    contentDescription = episode.title,
+                    modifier = Modifier.width(80.dp).height(48.dp).clip(RoundedCornerShape(4.dp)),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        },
         headlineContent = { Text(episode.title) },
         supportingContent = { episode.overview?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
         overlineContent = {
-            Text(stringResource(R.string.episode_format, episode.season ?: 0, episode.episode ?: 0))
+            when {
+                number.season != null && number.episode != null ->
+                    Text(stringResource(R.string.episode_format, number.season, number.episode))
+                number.season != null -> Text(stringResource(R.string.season_format, number.season))
+                number.episode != null -> Text(stringResource(R.string.episode_number_format, number.episode))
+            }
         },
         trailingContent = {
             IconButton(onClick = { onPlay(episode) }) {

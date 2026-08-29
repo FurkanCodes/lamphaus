@@ -26,8 +26,14 @@
     <string name="in_library">In Library</string>
     <string name="add_to_library">Add to Library</string>
     <string name="minutes_format">%1$d min</string>
+    <string name="rating_format">★ %1$s</string>
     <string name="episode_format">S%1$d · E%2$d</string>
+    <string name="season_format">Season %1$d</string>
+    <string name="episode_number_format">Episode %1$d</string>
     <string name="play_title_format">Play %1$s</string>
+    <string name="details">Details</string>
+    <string name="genres">Genres</string>
+    <string name="directors">Directors</string>
     <string name="profiles">Profiles</string>
     <string name="child_profile">Child profile</string>
     <string name="adult_profile">Adult profile</string>
@@ -56,6 +62,8 @@
     <string name="refresh_code">Refresh code</string>
     <string name="updating">Updating…</string>
     <string name="view_details">View details</string>
+    <string name="hero_carousel_description">%1$s, featured title %2$d of %3$d. Use left and right to browse.</string>
+    <string name="hero_carousel_position">%1$d / %2$d</string>
     <string name="continue_watching">Continue Watching</string>
     <string name="nothing_here">Nothing here yet.</string>
     <string name="search_tv_hint">Movies, series, or genres</string>
