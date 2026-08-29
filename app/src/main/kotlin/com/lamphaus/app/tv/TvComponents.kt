@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.Alignment
@@ -128,6 +129,7 @@ internal fun TvEditableTextField(
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
     onImeAction: () -> Unit = {},
     onNavigateDown: () -> Boolean = { false },
 ) {
@@ -163,6 +165,7 @@ internal fun TvEditableTextField(
         readOnly = !editing,
         singleLine = true,
         textStyle = MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.onSurface),
+        visualTransformation = visualTransformation,
         keyboardOptions = keyboardOptions,
         keyboardActions = KeyboardActions(onAny = {
             finishEditing()

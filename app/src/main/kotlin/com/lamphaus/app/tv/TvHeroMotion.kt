@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.fixtureArtworkResource
 import com.lamphaus.core.model.MediaPreview
 
@@ -38,11 +39,13 @@ internal fun TvHeroArtwork(
     reducedMotion: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val resolver = LocalArtworkResolver.current
+    val resolvedMedia = resolver.resolve(media).media
     val path = remember(media.stableKey) { kenBurnsPathFor(media.stableKey) }
     val progress = remember(media.stableKey) { Animatable(0f) }
     val hasArtwork = fixtureArtworkResource(media) != null ||
-        !media.backgroundUrl.isNullOrBlank() ||
-        !media.posterUrl.isNullOrBlank()
+        !resolvedMedia.backgroundUrl.isNullOrBlank() ||
+        !resolvedMedia.posterUrl.isNullOrBlank()
     val motionEnabled = shouldAnimateKenBurns(userEnabled, reducedMotion, hasArtwork)
 
     LaunchedEffect(media.stableKey, motionEnabled) {

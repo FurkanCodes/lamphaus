@@ -9,13 +9,12 @@ import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.data.preferences.ThemePreference
+import com.lamphaus.core.model.ArtworkCandidates
+import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.DeviceGrant
 import com.lamphaus.core.model.LibraryEntry
-import com.lamphaus.core.model.MediaDetail
-import com.lamphaus.core.model.MediaPreview
-import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.ProfileKind
 import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderCatalog
@@ -27,6 +26,9 @@ import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.MediaType
+import com.lamphaus.core.model.MediaDetail
+import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
 import java.net.URI
@@ -52,6 +54,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -121,6 +124,15 @@ class AppViewModel(
                         profiles = snapshot.profiles,
                         providers = snapshot.providers,
                         sections = if (accountChanged || nextUserId == null) emptyList() else current.sections,
+                        artworkOverrides = if (accountChanged || nextUserId == null) emptyList() else current.artworkOverrides,
+                        artworkEditor = if (accountChanged || nextUserId == null) null else current.artworkEditor,
+                        artworkKeyConfigured = if (accountChanged || nextUserId == null) false else current.artworkKeyConfigured,
+                        artworkKeyStatusLoading = if (accountChanged || nextUserId == null) false else current.artworkKeyStatusLoading,
+                        lastArtworkLookupFailedAtEpochMillis = if (accountChanged || nextUserId == null) {
+                            null
+                        } else {
+                            current.lastArtworkLookupFailedAtEpochMillis
+                        },
                         activeProfileId = activeId,
                         theme = snapshot.theme,
                         dynamicColor = snapshot.dynamicColor,
@@ -180,6 +192,25 @@ class AppViewModel(
             state.mapActiveProfileId().filterNotNull().flatMapLatest(container.libraryRepository::progress).collectLatest { progress ->
                 mutableState.update { it.copy(progress = progress) }
             }
+        }
+        viewModelScope.launch {
+            combine(
+                container.accountGateway.state,
+                state.mapActiveProfileId(),
+            ) { account, profileId ->
+                (account as? AccountState.SignedIn)?.userId?.let { userId ->
+                    profileId?.let { userId to it }
+                }
+            }
+                .distinctUntilChanged()
+                .flatMapLatest { binding ->
+                    binding?.let { (userId, profileId) ->
+                        container.cloudSyncGateway.artworkOverrides(userId, profileId)
+                    } ?: flowOf(emptyList())
+                }
+                .collectLatest { overrides ->
+                    mutableState.update { it.copy(artworkOverrides = overrides) }
+                }
         }
         // Re-bind the persisted device whenever a signed-in account/session
         // becomes available. The outer loop handles offline/server recovery;
@@ -459,6 +490,151 @@ class AppViewModel(
                 }
             }
         }
+    }
+
+    fun refreshArtworkKeyStatus() = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        mutableState.update { it.copy(artworkKeyStatusLoading = true) }
+        val result = container.cloudSyncGateway.artworkKeyStatus(userId)
+        mutableState.update {
+            it.copy(
+                artworkKeyConfigured = result.getOrDefault(false),
+                artworkKeyStatusLoading = false,
+            )
+        }
+    }
+
+    fun saveArtworkKey(apiKey: String) = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        if (apiKey.trim().isBlank()) {
+            showMessage("Paste a TMDB API key first.")
+            return@launch
+        }
+        container.cloudSyncGateway.saveArtworkKey(userId, apiKey.trim())
+            .onSuccess {
+                mutableState.update {
+                    it.copy(
+                        artworkKeyConfigured = true,
+                        lastArtworkLookupFailedAtEpochMillis = null,
+                    )
+                }
+                showMessage("TMDB artwork key saved.")
+            }
+            .onFailure { showMessage("Could not save the artwork key. Try again.") }
+    }
+
+    fun deleteArtworkKey() = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        container.cloudSyncGateway.deleteArtworkKey(userId)
+            .onSuccess {
+                mutableState.update {
+                    it.copy(
+                        artworkKeyConfigured = false,
+                        lastArtworkLookupFailedAtEpochMillis = null,
+                    )
+                }
+                showMessage("TMDB artwork key removed.")
+            }
+            .onFailure { showMessage("Could not remove the artwork key. Try again.") }
+    }
+
+    fun openArtworkEditor(media: MediaPreview) {
+        val existing = state.value.artworkOverrides.firstOrNull { it.mediaKey == media.stableKey }
+        val resolvedMedia = ArtworkResolver(
+            state.value.artworkOverrides.associateBy { it.mediaKey },
+        ).resolve(media).media
+        mutableState.update {
+            it.copy(
+                artworkEditor = ArtworkEditorState(
+                    media = resolvedMedia,
+                    selectedPosterPath = existing?.posterPath,
+                    selectedBackdropPath = existing?.backdropPath,
+                    selectedLogoPath = existing?.logoPath,
+                ),
+            )
+        }
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId
+        if (userId == null) {
+            mutableState.update { state ->
+                state.copy(artworkEditor = state.artworkEditor?.copy(loading = false, error = "Sign in to edit artwork."))
+            }
+            return
+        }
+        viewModelScope.launch {
+            val result = container.cloudSyncGateway.artworkCandidates(
+                userId = userId,
+                mediaKey = media.stableKey,
+                name = media.name,
+                releaseYear = media.releaseYear,
+            )
+            mutableState.update { state ->
+                val editor = state.artworkEditor?.takeIf { it.media.stableKey == media.stableKey }
+                    ?: return@update state
+                result.fold(
+                    onSuccess = {
+                        state.copy(
+                            artworkEditor = editor.copy(candidates = it, loading = false, error = null),
+                            lastArtworkLookupFailedAtEpochMillis = null,
+                        )
+                    },
+                    onFailure = {
+                        state.copy(
+                            artworkEditor = editor.copy(loading = false, error = "Artwork lookup failed. Check your TMDB key."),
+                            lastArtworkLookupFailedAtEpochMillis = System.currentTimeMillis(),
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    fun closeArtworkEditor() {
+        mutableState.update { it.copy(artworkEditor = null) }
+    }
+
+    fun selectArtworkPoster(path: String?) {
+        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedPosterPath = path)) }
+    }
+
+    fun selectArtworkBackdrop(path: String?) {
+        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedBackdropPath = path)) }
+    }
+
+    fun selectArtworkLogo(path: String?) {
+        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedLogoPath = path)) }
+    }
+
+    fun saveArtworkSelection() = viewModelScope.launch {
+        val editor = state.value.artworkEditor ?: return@launch
+        val profileId = state.value.activeProfileId ?: return@launch
+        if (
+            editor.selectedPosterPath == null &&
+            editor.selectedBackdropPath == null &&
+            editor.selectedLogoPath == null
+        ) {
+            showMessage("Choose a poster, backdrop, or logo first.")
+            return@launch
+        }
+        val override = ArtworkOverride(
+            profileId = profileId,
+            mediaKey = editor.media.stableKey,
+            posterPath = editor.selectedPosterPath,
+            backdropPath = editor.selectedBackdropPath,
+            logoPath = editor.selectedLogoPath,
+            updatedAtEpochMillis = System.currentTimeMillis(),
+        )
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        container.cloudSyncGateway.saveArtworkOverride(userId, override)
+            .onSuccess {
+                mutableState.update { current ->
+                    current.copy(
+                        artworkOverrides = (current.artworkOverrides.filterNot { it.mediaKey == override.mediaKey } + override),
+                        artworkEditor = null,
+                    )
+                }
+                showMessage("Artwork updated.")
+            }
+            .onFailure { showMessage("Could not save artwork. Try again.") }
     }
 
     fun clearDetail() {

@@ -2,6 +2,9 @@ package com.lamphaus.core.data.cloud
 
 import android.util.Log
 import com.lamphaus.core.data.preferences.SyncedSettings
+import com.lamphaus.core.model.ArtworkCandidates
+import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.Profile
@@ -148,7 +151,92 @@ class SupabaseCloudSyncGateway(
             val body = supabase.functions.buildEdgeFunction(FUNCTION_LIST_PROVIDER_CONFIGS)
                 .invoke("{}") { contentType(ContentType.Application.Json) }
                 .bodyOrThrow()
-            json.decodeFromString<ProviderConfigsResponse>(body).configs.map { it.toModel() }
+            // The artwork BYOK key rides the same encrypted table; it is not
+            // an add-on and must never surface in the sources UI.
+            json.decodeFromString<ProviderConfigsResponse>(body).configs
+                .filter { it.providerId != ARTWORK_PROVIDER_ID }
+                .map { it.toModel() }
+        }
+    }
+
+    // ── Artwork (BYOK metadata provider) ─────────────────────────────────
+    override fun artworkOverrides(userId: String, profileId: String): Flow<List<ArtworkOverride>> =
+        supabase.from(TABLE_ARTWORK_OVERRIDES)
+            .selectAsFlow(
+                listOf(ArtworkOverrideRow::profileId, ArtworkOverrideRow::mediaKey),
+                filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
+            )
+            .withSessionRecovery(sessionRecovery)
+            .map { rows -> rows.map { it.toModel() } }
+            .recoverWithEmpty()
+
+    override suspend fun saveArtworkOverride(userId: String, override: ArtworkOverride): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.from(TABLE_ARTWORK_OVERRIDES)
+                .upsert(listOf(ArtworkOverrideRow.of(override))) { onConflict = "profile_id,media_key" }
+        }
+    }
+
+    override suspend fun deleteArtworkOverride(userId: String, profileId: String, mediaKey: String): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.from(TABLE_ARTWORK_OVERRIDES)
+                .delete {
+                    filter {
+                        eq("profile_id", profileId)
+                        eq("media_key", mediaKey)
+                    }
+                }
+        }
+    }
+
+    override suspend fun artworkKeyStatus(userId: String): Result<Boolean> = runCatching {
+        sessionRecovery.withAuthRetry {
+            val body = supabase.functions.buildEdgeFunction(FUNCTION_ARTWORK_KEY_STATUS)
+                .invoke("{}") { contentType(ContentType.Application.Json) }
+                .bodyOrThrow()
+            json.decodeFromString<ArtworkKeyStatusResponse>(body).configured
+        }
+    }
+
+    override suspend fun saveArtworkKey(userId: String, apiKey: String): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.functions.buildEdgeFunction(FUNCTION_SAVE_ARTWORK_CONFIG)
+                .invoke(json.encodeToString(ArtworkKeyUpsert(apiKey = apiKey))) {
+                    contentType(ContentType.Application.Json)
+                }
+                .bodyOrThrow()
+            Unit
+        }
+    }
+
+    override suspend fun deleteArtworkKey(userId: String): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.functions.buildEdgeFunction(FUNCTION_DELETE_ARTWORK_CONFIG)
+                .invoke("{}") { contentType(ContentType.Application.Json) }
+                .bodyOrThrow()
+            Unit
+        }
+    }
+
+    override suspend fun artworkCandidates(
+        userId: String,
+        mediaKey: String,
+        name: String,
+        releaseYear: Int?,
+    ): Result<ArtworkCandidates> = runCatching {
+        sessionRecovery.withAuthRetry {
+            val body = supabase.functions.buildEdgeFunction(FUNCTION_RESOLVE_ARTWORK)
+                .invoke(
+                    json.encodeToString(
+                        ArtworkCandidatesRequest(
+                            mediaKey = mediaKey,
+                            name = name,
+                            releaseYear = releaseYear,
+                        ),
+                    ),
+                ) { contentType(ContentType.Application.Json) }
+                .bodyOrThrow()
+            json.decodeFromString<ArtworkCandidatesResponse>(body).toModel()
         }
     }
 
@@ -292,10 +380,14 @@ class SupabaseCloudSyncGateway(
         private const val TABLE_LIBRARY = "library_entries"
         private const val TABLE_PROGRESS = "watch_progress"
         private const val TABLE_USER_SETTINGS = "user_settings"
+        private const val TABLE_ARTWORK_OVERRIDES = "media_artwork_overrides"
         private const val FUNCTION_SAVE_PROVIDER_CONFIG = "save-provider-config"
         private const val FUNCTION_DELETE_PROVIDER_CONFIG = "delete-provider-config"
         private const val FUNCTION_LIST_PROVIDER_CONFIGS = "list-provider-configs"
-
+        private const val FUNCTION_SAVE_ARTWORK_CONFIG = "save-artwork-config"
+        private const val FUNCTION_DELETE_ARTWORK_CONFIG = "delete-artwork-config"
+        private const val FUNCTION_ARTWORK_KEY_STATUS = "artwork-key-status"
+        private const val FUNCTION_RESOLVE_ARTWORK = "resolve-artwork"
         /**
          * Sync failures (network drops, clock skew rejections, schema drift) must
          * degrade to "no cloud rows this round" instead of crashing the app.
@@ -369,3 +461,70 @@ internal data class ProviderConfigDelete(
 )
 
 private const val KEY_MANIFEST_URL = "manifest_url"
+
+/** Reserved provider_configs row holding the encrypted artwork BYOK key. */
+internal const val ARTWORK_PROVIDER_ID = "artwork.tmdb"
+
+@Serializable
+internal data class ArtworkKeyUpsert(
+    @SerialName("provider") val provider: ArtworkProvider = ArtworkProvider.TMDB,
+    @SerialName("api_key") val apiKey: String,
+)
+
+@Serializable
+internal data class ArtworkCandidatesRequest(
+    @SerialName("provider") val provider: ArtworkProvider = ArtworkProvider.TMDB,
+    @SerialName("media_key") val mediaKey: String,
+    @SerialName("name") val name: String,
+    @SerialName("release_year") val releaseYear: Int? = null,
+)
+
+@Serializable
+internal data class ArtworkCandidatesResponse(
+    @SerialName("provider") val provider: ArtworkProvider = ArtworkProvider.TMDB,
+    @SerialName("posters") val posters: List<String> = emptyList(),
+    @SerialName("backdrops") val backdrops: List<String> = emptyList(),
+    @SerialName("logos") val logos: List<String> = emptyList(),
+) {
+    fun toModel() = ArtworkCandidates(
+        provider = provider,
+        posters = posters,
+        backdrops = backdrops,
+        logos = logos,
+    )
+}
+
+@Serializable
+internal data class ArtworkKeyStatusResponse(
+    val configured: Boolean = false,
+)
+
+@Serializable
+internal data class ArtworkOverrideRow(
+    @SerialName("profile_id") val profileId: String,
+    @SerialName("media_key") val mediaKey: String,
+    @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("backdrop_path") val backdropPath: String? = null,
+    @SerialName("logo_path") val logoPath: String? = null,
+    @SerialName("updated_at_epoch_millis") val updatedAtEpochMillis: Long,
+) {
+    fun toModel() = ArtworkOverride(
+        profileId = profileId,
+        mediaKey = mediaKey,
+        posterPath = posterPath,
+        backdropPath = backdropPath,
+        logoPath = logoPath,
+        updatedAtEpochMillis = updatedAtEpochMillis,
+    )
+
+    companion object {
+        fun of(override: ArtworkOverride) = ArtworkOverrideRow(
+            profileId = override.profileId,
+            mediaKey = override.mediaKey,
+            posterPath = override.posterPath,
+            backdropPath = override.backdropPath,
+            logoPath = override.logoPath,
+            updatedAtEpochMillis = override.updatedAtEpochMillis,
+        )
+    }
+}

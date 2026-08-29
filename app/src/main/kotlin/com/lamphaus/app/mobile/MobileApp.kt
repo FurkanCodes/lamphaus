@@ -1,6 +1,7 @@
 package com.lamphaus.app.mobile
 
 import androidx.activity.compose.BackHandler
+import android.text.format.DateUtils
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -8,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,6 +80,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,19 +96,27 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.text.HtmlCompat
+import com.lamphaus.app.ui.tmdbImageUrl
+import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.ArtworkEditorState
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.ArtworkResolver
+import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
-import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
@@ -143,6 +154,10 @@ fun MobileApp(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LamphausMobileTheme(state.theme, state.dynamicColor) {
+        val artworkResolver = remember(state.artworkOverrides) {
+            ArtworkResolver(state.artworkOverrides.associateBy { it.mediaKey })
+        }
+        CompositionLocalProvider(LocalArtworkResolver provides artworkResolver) {
         val snackbar = remember { SnackbarHostState() }
         LaunchedEffect(state.message) {
             state.message?.let {
@@ -196,6 +211,7 @@ fun MobileApp(
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
             }
+        }
         }
     }
 }
@@ -296,6 +312,12 @@ private fun MobileSignedInApp(
         pendingMediaKey = media.stableKey
         viewModel.loadDetail(media)
     }
+    val watchedEpisodeIds = remember(state.progress) {
+        state.progress.asSequence()
+            .filter { it.completed }
+            .map { it.videoId }
+            .toSet()
+    }
 
     when {
         state.sourcePicker != null -> {
@@ -308,15 +330,28 @@ private fun MobileSignedInApp(
                 onSource = viewModel::playSource,
             )
         }
+        state.artworkEditor != null -> {
+            BackHandler { viewModel.closeArtworkEditor() }
+            MobileArtworkEditorScreen(
+                editor = state.artworkEditor,
+                onBack = viewModel::closeArtworkEditor,
+                onPosterSelected = viewModel::selectArtworkPoster,
+                onBackdropSelected = viewModel::selectArtworkBackdrop,
+                onLogoSelected = viewModel::selectArtworkLogo,
+                onSave = viewModel::saveArtworkSelection,
+            )
+        }
         state.selectedDetail != null -> {
             BackHandler { viewModel.clearDetail() }
             MobileDetailScreen(
                 detail = state.selectedDetail,
                 expanded = widthSizeClass == WindowWidthSizeClass.Expanded,
                 inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
+                watchedEpisodeIds = watchedEpisodeIds,
                 onBack = viewModel::clearDetail,
                 onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
                 onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
+                onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
             )
         }
         settingsOpen -> {
@@ -654,17 +689,23 @@ private fun EmptyProviders(modifier: Modifier = Modifier, onAddSource: (() -> Un
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun MobileDetailScreen(
     detail: MediaDetail?,
     expanded: Boolean,
     inLibrary: Boolean,
+    watchedEpisodeIds: Set<String>,
     onBack: () -> Unit,
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
     onLibrary: () -> Unit,
+    onEditArtwork: () -> Unit,
 ) {
     if (detail == null) return
+    val artworkResolver = LocalArtworkResolver.current
+    val resolvedPreview = remember(detail.preview, artworkResolver) {
+        artworkResolver.resolve(detail.preview).media
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -679,10 +720,10 @@ private fun MobileDetailScreen(
     ) { padding ->
         val info: @Composable () -> Unit = {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (!detail.preview.logoUrl.isNullOrBlank()) {
+                if (!resolvedPreview.logoUrl.isNullOrBlank()) {
                     AsyncImage(
-                        model = detail.preview.logoUrl,
-                        contentDescription = detail.preview.name,
+                        model = resolvedPreview.logoUrl,
+                        contentDescription = resolvedPreview.name,
                         modifier = Modifier.fillMaxWidth().height(64.dp),
                         contentScale = ContentScale.Fit,
                         alignment = Alignment.CenterStart,
@@ -706,6 +747,9 @@ private fun MobileDetailScreen(
                     OutlinedButton(onClick = onLibrary, enabled = !inLibrary) {
                         Text(stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library))
                     }
+                    OutlinedButton(onClick = onEditArtwork) {
+                        Text(stringResource(R.string.edit_artwork))
+                    }
                 }
                 val fullGenres = detail.preview.metadataPresentation(maxGenres = Int.MAX_VALUE).genres
                 if (fullGenres.isNotEmpty()) {
@@ -723,21 +767,232 @@ private fun MobileDetailScreen(
                         value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
                     )
                 }
-            }
         }
+    }
         if (expanded) {
             Row(Modifier.fillMaxSize().padding(padding)) {
                 MediaArtwork(detail.preview, Modifier.fillMaxHeight().weight(0.44f), preferBackdrop = true)
                 LazyColumn(Modifier.weight(0.56f)) {
                     item { info() }
-                    items(detail.episodes, key = { it.id }) { episode -> EpisodeRow(episode, onPlay) }
+                    items(detail.episodes, key = { it.id }) { episode ->
+                        EpisodeRow(episode, episode.id in watchedEpisodeIds, onPlay)
+                    }
                 }
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 item { MediaArtwork(detail.preview, Modifier.fillMaxWidth().height(300.dp), preferBackdrop = true) }
                 item { info() }
-                items(detail.episodes, key = { it.id }) { episode -> EpisodeRow(episode, onPlay) }
+                items(detail.episodes, key = { it.id }) { episode ->
+                    EpisodeRow(episode, episode.id in watchedEpisodeIds, onPlay)
+                }
+            }
+        }
+    }
+}
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MobileArtworkEditorScreen(
+    editor: ArtworkEditorState,
+    onBack: () -> Unit,
+    onPosterSelected: (String) -> Unit,
+    onBackdropSelected: (String) -> Unit,
+    onLogoSelected: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.edit_artwork)) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        if (editor.loading) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                item {
+                    if (!editor.media.logoUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = editor.media.logoUrl,
+                            contentDescription = editor.media.name,
+                            modifier = Modifier.fillMaxWidth().height(72.dp),
+                            contentScale = ContentScale.Fit,
+                            alignment = Alignment.CenterStart,
+                        )
+                    } else {
+                        Text(
+                            text = editor.media.name,
+                            style = MaterialTheme.typography.headlineSmall,
+                        )
+                    }
+                }
+                item {
+                    Text(
+                        text = stringResource(R.string.artwork_choose),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                item { Text(stringResource(R.string.artwork_logos), style = MaterialTheme.typography.titleLarge) }
+                item {
+                    val logos = editor.candidates?.logos.orEmpty()
+                    if (logos.isEmpty()) {
+                        Text(stringResource(R.string.artwork_no_candidates))
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(logos, key = { it }) { path ->
+                                val selected = editor.selectedLogoPath == path
+                                Card(
+                                    modifier = Modifier
+                                        .width(228.dp)
+                                        .height(96.dp)
+                                        .clickable { onLogoSelected(path) }
+                                        .semantics { this.selected = selected },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (selected) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                    ),
+                                ) {
+                                    Box(Modifier.fillMaxSize()) {
+                                        AsyncImage(
+                                            model = tmdbImageUrl(path, "w500"),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f),
+                                                    RoundedCornerShape(8.dp),
+                                                )
+                                                .padding(10.dp),
+                                            contentScale = ContentScale.Fit,
+                                        )
+                                        SelectionCheckmark(
+                                            selected = selected,
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                            selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(8.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                item { Text(stringResource(R.string.artwork_posters), style = MaterialTheme.typography.titleLarge) }
+                item {
+                    if (editor.candidates?.posters.isNullOrEmpty()) {
+                        Text(stringResource(R.string.artwork_no_candidates))
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(editor.candidates.posters, key = { it }) { path ->
+                                val selected = editor.selectedPosterPath == path
+                                Card(
+                                    modifier = Modifier
+                                        .width(112.dp)
+                                        .height(168.dp)
+                                        .clickable { onPosterSelected(path) }
+                                        .semantics { this.selected = selected },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (selected) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                    ),
+                                ) {
+                                    Box(Modifier.fillMaxSize()) {
+                                        AsyncImage(
+                                            model = tmdbImageUrl(path, "w342"),
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize().padding(4.dp),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                        SelectionCheckmark(
+                                            selected = selected,
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                            selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(8.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                item { Text(stringResource(R.string.artwork_backdrops), style = MaterialTheme.typography.titleLarge) }
+                item {
+                    if (editor.candidates?.backdrops.isNullOrEmpty()) {
+                        Text(stringResource(R.string.artwork_no_candidates))
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(editor.candidates.backdrops, key = { it }) { path ->
+                                val selected = editor.selectedBackdropPath == path
+                                Card(
+                                    modifier = Modifier
+                                        .width(228.dp)
+                                        .height(128.dp)
+                                        .clickable { onBackdropSelected(path) }
+                                        .semantics { this.selected = selected },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (selected) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                    ),
+                                ) {
+                                    Box(Modifier.fillMaxSize()) {
+                                        AsyncImage(
+                                            model = tmdbImageUrl(path, "w780"),
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize().padding(4.dp),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                        SelectionCheckmark(
+                                            selected = selected,
+                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                            selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(8.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                editor.error?.let { error ->
+                    item { Text(error, color = MaterialTheme.colorScheme.error) }
+                }
+                item {
+                    Button(
+                        onClick = onSave,
+                        enabled = editor.selectedPosterPath != null ||
+                            editor.selectedBackdropPath != null ||
+                            editor.selectedLogoPath != null,
+                    ) {
+                        Text(stringResource(R.string.save_artwork))
+                    }
+                }
             }
         }
     }
@@ -758,23 +1013,44 @@ private fun MobileDetailMetadataSection(@StringRes labelRes: Int, value: String)
         )
     }
 }
-
 private fun plainPersonName(value: String): String =
     HtmlCompat.fromHtml(value, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
-
-
 @Composable
-private fun EpisodeRow(episode: com.lamphaus.core.model.Episode, onPlay: (com.lamphaus.core.model.Episode?) -> Unit) {
+private fun EpisodeRow(
+    episode: com.lamphaus.core.model.Episode,
+    watched: Boolean,
+    onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
+) {
     val number = episode.numberParts()
+    val watchedDescription = if (watched) stringResource(R.string.watched) else ""
     ListItem(
+        modifier = Modifier.semantics {
+            stateDescription = watchedDescription
+        },
         leadingContent = {
-            if (!episode.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = episode.thumbnailUrl,
-                    contentDescription = episode.title,
-                    modifier = Modifier.width(80.dp).height(48.dp).clip(RoundedCornerShape(4.dp)),
-                    contentScale = ContentScale.Crop,
-                )
+            if (!episode.thumbnailUrl.isNullOrBlank() || watched) {
+                Box(
+                    modifier = Modifier
+                        .width(80.dp)
+                        .height(48.dp),
+                ) {
+                    if (!episode.thumbnailUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = episode.thumbnailUrl,
+                            contentDescription = episode.title,
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    SelectionCheckmark(
+                        selected = watched,
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(2.dp),
+                    )
+                }
             }
         },
         headlineContent = { Text(episode.title) },
@@ -958,8 +1234,10 @@ private fun MobileSourcePickerScreen(
 @Composable
 private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onBack: () -> Unit) {
     var providerUrl by rememberSaveable { mutableStateOf("") }
+    var artworkKey by rememberSaveable { mutableStateOf("") }
     var deviceToRevoke by remember { mutableStateOf<PairedDevice?>(null) }
     var deleteAccountOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
     Scaffold(
         topBar = {
             LargeTopAppBar(
@@ -1111,6 +1389,69 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                     },
                 )
             }
+            item { SettingsHeading(stringResource(R.string.artwork)) }
+            item {
+                Text(
+                    stringResource(R.string.artwork_settings_description),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = artworkKey,
+                    onValueChange = { artworkKey = it },
+                    label = { Text(stringResource(R.string.tmdb_api_key)) },
+                    placeholder = { Text(stringResource(R.string.tmdb_api_key_placeholder)) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = {
+                            viewModel.saveArtworkKey(artworkKey)
+                            artworkKey = ""
+                        },
+                        enabled = artworkKey.isNotBlank(),
+                    ) {
+                        Text(stringResource(R.string.save_artwork_key))
+                    }
+                    if (state.artworkKeyConfigured) {
+                        OutlinedButton(onClick = viewModel::deleteArtworkKey) {
+                            Text(stringResource(R.string.remove_artwork_key))
+                        }
+                    }
+                }
+            }
+            item {
+                val failure = state.lastArtworkLookupFailedAtEpochMillis?.let {
+                    DateUtils.getRelativeTimeSpanString(
+                        it,
+                        System.currentTimeMillis(),
+                        DateUtils.MINUTE_IN_MILLIS,
+                    ).toString()
+                }
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            stringResource(
+                                if (state.artworkKeyConfigured) {
+                                    R.string.artwork_key_active
+                                } else {
+                                    R.string.artwork_key_not_configured
+                                },
+                            ),
+                        )
+                    },
+                    supportingContent = {
+                        failure?.let { Text(stringResource(R.string.artwork_key_last_lookup_failed, it)) }
+                    },
+                )
+            }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item { SettingsHeading(stringResource(R.string.privacy)) }
             item {
                 ConsentRow(stringResource(R.string.crash_reports), state.diagnostics.crashReports) {

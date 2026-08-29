@@ -37,8 +37,10 @@ import coil3.size.Size
 import coil3.toBitmap
 import com.google.android.material.color.DynamicColorsOptions
 import com.google.android.material.color.MaterialColors
-import com.lamphaus.app.ui.fixtureArtworkResource
+import com.lamphaus.app.ui.ArtworkResolution
+import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.app.ui.fixtureArtworkResource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -73,10 +75,13 @@ internal val LocalTvContentAccent = compositionLocalOf<Color?> { null }
 @Composable
 internal fun rememberTvContentAmbient(media: MediaPreview?): TvContentAmbientState {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val resolver = LocalArtworkResolver.current
     val defaultAccent = androidx.tv.material3.MaterialTheme.colorScheme.primary
     val defaultAccentContainer = androidx.tv.material3.MaterialTheme.colorScheme.primaryContainer
-    val artwork = remember(media) { media?.let { selectArtworkSource(context, it) } }
     var state by remember { mutableStateOf(TvContentAmbientState()) }
+    val artwork = remember(media, resolver) {
+        media?.let { selectArtworkSource(context, resolver.resolve(it)) }
+    }
 
     LaunchedEffect(media?.stableKey, artwork?.key) {
         kotlinx.coroutines.delay(TvMotionTokens.heroUpdateDelayMillis)
@@ -158,19 +163,21 @@ internal fun TvContentAmbientBackground(
         )
     }
 }
-
-private fun selectArtworkSource(context: Context, media: MediaPreview): AmbientArtworkSource? {
+private fun selectArtworkSource(context: Context, resolution: ArtworkResolution): AmbientArtworkSource? {
+    val media = resolution.media
     media.backgroundUrl
         ?.takeIf(String::isNotBlank)
         ?.let { return AmbientArtworkSource("url:$it", it) }
     media.posterUrl
         ?.takeIf(String::isNotBlank)
         ?.let { return AmbientArtworkSource("url:$it", it) }
-    fixtureArtworkResource(media)?.let { resourceId ->
-        return AmbientArtworkSource(
-            key = "resource:${context.packageName}:$resourceId",
-            data = resourceId,
-        )
+    if (!resolution.hasOverride) {
+        fixtureArtworkResource(media)?.let { resourceId ->
+            return AmbientArtworkSource(
+                key = "resource:${context.packageName}:$resourceId",
+                data = resourceId,
+            )
+        }
     }
     return null
 }
