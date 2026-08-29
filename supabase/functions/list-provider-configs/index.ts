@@ -82,6 +82,7 @@ async function decryptConfig(
   return JSON.parse(decoder.decode(plaintext));
 }
 
+const ARTWORK_PROVIDER_ID = "artwork.tmdb";
 // ─────────────────────────────── handler ───────────────────────────────
 
 Deno.serve(async (req) => {
@@ -104,6 +105,7 @@ Deno.serve(async (req) => {
   try {
     const configs = [];
     for (const row of rows) {
+      if (row.provider_id === ARTWORK_PROVIDER_ID) continue;
       configs.push({
         provider_id: row.provider_id,
         display_name: row.display_name,

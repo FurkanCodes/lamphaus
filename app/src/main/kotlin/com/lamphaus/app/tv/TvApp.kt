@@ -1,6 +1,7 @@
 package com.lamphaus.app.tv
 
 import androidx.activity.compose.BackHandler
+import android.text.format.DateUtils
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -42,6 +43,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
@@ -80,6 +83,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -91,6 +95,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -106,16 +111,21 @@ import androidx.tv.material3.Text
 import androidx.tv.material3.Switch
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.ArtworkResolver
+import com.lamphaus.app.ui.LocalArtworkResolver
+import com.lamphaus.app.ui.ArtworkEditorState
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.MediaMetadataPresentation
+import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.SourcePickerState
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
 import com.lamphaus.app.ui.sourcePresentation
+import com.lamphaus.app.ui.tmdbImageUrl
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.Episode
@@ -135,6 +145,10 @@ fun TvApp(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LamphausTvTheme {
+        val artworkResolver = remember(state.artworkOverrides) {
+            ArtworkResolver(state.artworkOverrides.associateBy { it.mediaKey })
+        }
+        CompositionLocalProvider(LocalArtworkResolver provides artworkResolver) {
         LaunchedEffect(state.playbackRequest) {
             state.playbackRequest?.let {
                 onPlay(it)
@@ -188,6 +202,7 @@ fun TvApp(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -395,6 +410,12 @@ private fun TvSignedIn(
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val navFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val contentStates = rememberSaveableStateHolder()
+    val watchedEpisodeIds = remember(state.progress) {
+        state.progress.asSequence()
+            .filter { it.completed }
+            .map { it.videoId }
+            .toSet()
+    }
     var navHasFocus by remember { mutableStateOf(true) }
     val openMedia: (MediaPreview) -> Unit = { media ->
         pendingMediaKey = media.stableKey
@@ -420,6 +441,19 @@ private fun TvSignedIn(
         return
     }
 
+    if (state.artworkEditor != null) {
+        BackHandler { viewModel.closeArtworkEditor() }
+        TvArtworkEditorScreen(
+            editor = state.artworkEditor,
+            onBack = viewModel::closeArtworkEditor,
+            onPosterSelected = viewModel::selectArtworkPoster,
+            onBackdropSelected = viewModel::selectArtworkBackdrop,
+            onLogoSelected = viewModel::selectArtworkLogo,
+            onSave = viewModel::saveArtworkSelection,
+        )
+        return
+    }
+
     if (state.selectedDetail != null) {
         BackHandler {
             viewModel.clearDetail()
@@ -428,8 +462,10 @@ private fun TvSignedIn(
         TvDetailScreen(
             detail = state.selectedDetail,
             inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
+            watchedEpisodeIds = watchedEpisodeIds,
             onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
             onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
+            onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
         )
         return
     }
@@ -723,13 +759,17 @@ private fun TvHero(
     var focused by remember { mutableStateOf(false) }
     val reducedMotion = rememberReducedMotion()
     val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
+    val artworkResolver = LocalArtworkResolver.current
+    val resolvedMedia = remember(media, artworkResolver) {
+        artworkResolver.resolve(media).media
+    }
     val currentIndex = carouselItems.indexOfFirst { it.stableKey == media.stableKey }
     val hasCarousel = carouselItems.size > 1 && currentIndex >= 0
     val carouselPosition = currentIndex + 1
     val heroDescription = if (hasCarousel) {
-        stringResource(R.string.hero_carousel_description, media.name, carouselPosition, carouselItems.size)
+        stringResource(R.string.hero_carousel_description, resolvedMedia.name, carouselPosition, carouselItems.size)
     } else {
-        media.name
+        resolvedMedia.name
     }
     Box(
         modifier = modifier
@@ -854,23 +894,23 @@ private fun TvHero(
                 .padding(32.dp),
             verticalArrangement = Arrangement.Bottom,
         ) {
-            if (!media.logoUrl.isNullOrBlank()) {
+            if (!resolvedMedia.logoUrl.isNullOrBlank()) {
                 AsyncImage(
-                    model = media.logoUrl,
-                    contentDescription = media.name,
+                    model = resolvedMedia.logoUrl,
+                    contentDescription = resolvedMedia.name,
                     modifier = Modifier.width(330.dp).height(78.dp),
                     contentScale = ContentScale.Fit,
                     alignment = Alignment.CenterStart,
                 )
             } else {
                 Text(
-                    text = media.name,
+                    text = resolvedMedia.name,
                     style = MaterialTheme.typography.displayMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            media.description?.let {
+            resolvedMedia.description?.let {
                 Text(
                     text = it,
                     modifier = Modifier.padding(top = 8.dp),
@@ -881,7 +921,7 @@ private fun TvHero(
                 )
             }
             TvMetadataLine(
-                presentation = media.metadataPresentation(maxGenres = 2),
+                presentation = resolvedMedia.metadataPresentation(maxGenres = 2),
                 includeGenres = true,
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -1397,10 +1437,16 @@ private fun TvSourceMediaSummary(
 private fun TvDetailScreen(
     detail: MediaDetail?,
     inLibrary: Boolean,
+    watchedEpisodeIds: Set<String>,
     onPlay: (Episode?) -> Unit,
     onLibrary: () -> Unit,
+    onEditArtwork: () -> Unit,
 ) {
     if (detail == null) return
+    val artworkResolver = LocalArtworkResolver.current
+    val resolvedPreview = remember(detail.preview, artworkResolver) {
+        artworkResolver.resolve(detail.preview).media
+    }
     val playFocus = remember(detail.preview.stableKey) { FocusRequester() }
     val libraryFocus = remember(detail.preview.stableKey) { FocusRequester() }
     // Latest action button that held focus — metadata reading surfaces return
@@ -1466,16 +1512,16 @@ private fun TvDetailScreen(
                         .padding(start = TvLayoutTokens.screenHorizontalPadding, top = 138.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    if (!detail.preview.logoUrl.isNullOrBlank()) {
+                    if (!resolvedPreview.logoUrl.isNullOrBlank()) {
                         AsyncImage(
-                            model = detail.preview.logoUrl,
-                            contentDescription = detail.preview.name,
+                            model = resolvedPreview.logoUrl,
+                            contentDescription = resolvedPreview.name,
                             modifier = Modifier.width(330.dp).height(78.dp),
                             contentScale = ContentScale.Fit,
                         )
                     } else {
                         Text(
-                            text = detail.preview.name,
+                            text = resolvedPreview.name,
                             style = MaterialTheme.typography.displaySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1519,6 +1565,11 @@ private fun TvDetailScreen(
                             enabled = !inLibrary,
                             onClick = onLibrary,
                         )
+                        TvAction(
+                            label = stringResource(R.string.edit_artwork),
+                            icon = Icons.Outlined.Palette,
+                            onClick = onEditArtwork,
+                        )
                     }
                     TvExpandablePeopleSection(
                         labelRes = R.string.cast,
@@ -1555,6 +1606,7 @@ private fun TvDetailScreen(
                         items(detail.episodes, key = Episode::id) { episode ->
                             TvEpisodeCard(
                                 episode = episode,
+                                watched = episode.id in watchedEpisodeIds,
                                 fallbackArtworkUrl = detail.preview.backgroundUrl ?: detail.preview.posterUrl,
                                 onClick = { onPlay(episode) },
                             )
@@ -1566,18 +1618,245 @@ private fun TvDetailScreen(
     }
 }
 @Composable
+private fun TvArtworkEditorScreen(
+    editor: ArtworkEditorState,
+    onBack: () -> Unit,
+    onPosterSelected: (String) -> Unit,
+    onBackdropSelected: (String) -> Unit,
+    onLogoSelected: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = TvLayoutTokens.screenHorizontalPadding,
+            end = TvLayoutTokens.screenHorizontalPadding,
+            top = 48.dp,
+            bottom = TvLayoutTokens.bottomListPadding,
+        ),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item {
+            if (!editor.media.logoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = editor.media.logoUrl,
+                    contentDescription = editor.media.name,
+                    modifier = Modifier.width(360.dp).height(96.dp),
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.CenterStart,
+                )
+            } else {
+                Text(editor.media.name, style = MaterialTheme.typography.displaySmall)
+            }
+        }
+        item {
+            Text(
+                stringResource(R.string.artwork_choose),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        editor.error?.let { error ->
+            item { Text(error, color = MaterialTheme.colorScheme.error) }
+        }
+        if (editor.loading) {
+            item {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+        } else {
+            item { Text(stringResource(R.string.artwork_logos), style = MaterialTheme.typography.headlineSmall) }
+            item {
+                val logos = editor.candidates?.logos.orEmpty()
+                if (logos.isEmpty()) {
+                    Text(stringResource(R.string.artwork_no_candidates))
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(logos, key = { it }) { path ->
+                            val selected = editor.selectedLogoPath == path
+                            TvFocusableSurface(
+                                onClick = { onLogoSelected(path) },
+                                modifier = Modifier
+                                    .size(300.dp, 112.dp)
+                                    .semantics { this.selected = selected },
+                                containerColor = if (selected) {
+                                    TvSurfaceTokens.selectedFilter
+                                } else {
+                                    TvSurfaceTokens.card
+                                },
+                                focusedContainerColor = TvFocusTokens.selectedNavigationContainer,
+                            ) { focused ->
+                                Box(Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = tmdbImageUrl(path, "w500"),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f),
+                                                TvShapeTokens.button,
+                                            )
+                                            .padding(12.dp),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                    SelectionCheckmark(
+                                        selected = selected,
+                                        selectedContainerColor = if (focused) {
+                                            TvFocusTokens.focusedContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        },
+                                        selectedContentColor = if (focused) {
+                                            TvFocusTokens.focusedContent
+                                        } else {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(10.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item { Text(stringResource(R.string.artwork_posters), style = MaterialTheme.typography.headlineSmall) }
+            item {
+                val posters = editor.candidates?.posters.orEmpty()
+                if (posters.isEmpty()) {
+                    Text(stringResource(R.string.artwork_no_candidates))
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(posters, key = { it }) { path ->
+                            val selected = editor.selectedPosterPath == path
+                            TvFocusableSurface(
+                                onClick = { onPosterSelected(path) },
+                                modifier = Modifier
+                                    .size(150.dp, 225.dp)
+                                    .semantics { this.selected = selected },
+                                containerColor = if (selected) {
+                                    TvSurfaceTokens.selectedFilter
+                                } else {
+                                    TvSurfaceTokens.card
+                                },
+                                focusedContainerColor = TvFocusTokens.selectedNavigationContainer,
+                            ) { focused ->
+                                Box(Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = tmdbImageUrl(path, "w500"),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    SelectionCheckmark(
+                                        selected = selected,
+                                        selectedContainerColor = if (focused) {
+                                            TvFocusTokens.focusedContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        },
+                                        selectedContentColor = if (focused) {
+                                            TvFocusTokens.focusedContent
+                                        } else {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(10.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            item { Text(stringResource(R.string.artwork_backdrops), style = MaterialTheme.typography.headlineSmall) }
+            item {
+                val backdrops = editor.candidates?.backdrops.orEmpty()
+                if (backdrops.isEmpty()) {
+                    Text(stringResource(R.string.artwork_no_candidates))
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(backdrops, key = { it }) { path ->
+                            val selected = editor.selectedBackdropPath == path
+                            TvFocusableSurface(
+                                onClick = { onBackdropSelected(path) },
+                                modifier = Modifier
+                                    .size(270.dp, 152.dp)
+                                    .semantics { this.selected = selected },
+                                containerColor = if (selected) {
+                                    TvSurfaceTokens.selectedFilter
+                                } else {
+                                    TvSurfaceTokens.card
+                                },
+                                focusedContainerColor = TvFocusTokens.selectedNavigationContainer,
+                            ) { focused ->
+                                Box(Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = tmdbImageUrl(path, "w780"),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    SelectionCheckmark(
+                                        selected = selected,
+                                        selectedContainerColor = if (focused) {
+                                            TvFocusTokens.focusedContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        },
+                                        selectedContentColor = if (focused) {
+                                            TvFocusTokens.focusedContent
+                                        } else {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(10.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvAction(
+                    label = stringResource(R.string.save_artwork),
+                    icon = Icons.Outlined.Check,
+                    enabled = editor.selectedPosterPath != null ||
+                        editor.selectedBackdropPath != null ||
+                        editor.selectedLogoPath != null,
+                    onClick = onSave,
+                )
+                TvAction(
+                    label = stringResource(R.string.back),
+                    icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                    onClick = onBack,
+                )
+            }
+        }
+    }
+}
+@Composable
 private fun TvEpisodeCard(
     episode: Episode,
+    watched: Boolean,
     fallbackArtworkUrl: String?,
     onClick: () -> Unit,
 ) {
     val artworkUrl = episode.thumbnailUrl ?: fallbackArtworkUrl
     val number = episode.numberParts()
+    val watchedDescription = if (watched) stringResource(R.string.watched) else ""
     TvFocusableSurface(
         onClick = onClick,
         modifier = Modifier
             .width(TvLayoutTokens.landscapeCardWidth)
-            .height(TvLayoutTokens.landscapeCardHeight),
+            .height(TvLayoutTokens.landscapeCardHeight)
+            .semantics { stateDescription = watchedDescription },
         containerColor = TvSurfaceTokens.elevated,
         focusedContainerColor = Color.Transparent,
     ) { focused ->
@@ -1594,6 +1873,22 @@ private fun TvEpisodeCard(
                     contentScale = ContentScale.Crop,
                 )
             }
+            SelectionCheckmark(
+                selected = watched,
+                selectedContainerColor = if (focused) {
+                    TvFocusTokens.focusedContainer
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                selectedContentColor = if (focused) {
+                    TvFocusTokens.focusedContent
+                } else {
+                    MaterialTheme.colorScheme.onPrimary
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp),
+            )
             val footerColor = if (focused) TvFocusTokens.focusedContainer else TvSurfaceTokens.elevated
             Column(
                 modifier = Modifier
@@ -1665,6 +1960,7 @@ private enum class TvSettingsSection(
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     SOURCES(R.string.addons, Icons.Outlined.Add),
     APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
+    ARTWORK(R.string.artwork, Icons.Outlined.Palette),
     ABOUT(R.string.about, Icons.Outlined.Info),
 }
 
@@ -1715,6 +2011,7 @@ private fun TvSettings(
                 TvSettingsSection.PROFILES -> TvProfilesSettings(state, viewModel)
                 TvSettingsSection.SOURCES -> TvSourcesSettings(state, viewModel)
                 TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
+                TvSettingsSection.ARTWORK -> TvArtworkSettings(state, viewModel)
                 TvSettingsSection.ABOUT -> TvAboutSettings()
             }
         }
@@ -1826,6 +2123,90 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 checked = state.kenBurnsEnabled,
                 onCheckedChange = viewModel::setKenBurnsEnabled,
             )
+        }
+    }
+}
+@Composable
+private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
+    var artworkKey by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
+    ) {
+        item {
+            Text(stringResource(R.string.artwork), style = MaterialTheme.typography.headlineSmall)
+        }
+        item {
+            Text(
+                stringResource(R.string.artwork_settings_description),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        item {
+            TvEditableTextField(
+                value = artworkKey,
+                onValueChange = { artworkKey = it },
+                label = stringResource(R.string.tmdb_api_key),
+                placeholder = stringResource(R.string.tmdb_api_key_placeholder),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done,
+                ),
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                onImeAction = { viewModel.saveArtworkKey(artworkKey) },
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TvAction(
+                    label = stringResource(R.string.save_artwork_key),
+                    icon = Icons.Outlined.Check,
+                    enabled = artworkKey.isNotBlank(),
+                    onClick = {
+                        viewModel.saveArtworkKey(artworkKey)
+                        artworkKey = ""
+                    },
+                )
+                TvAction(
+                    label = stringResource(R.string.remove_artwork_key),
+                    icon = Icons.Outlined.Delete,
+                    enabled = state.artworkKeyConfigured,
+                    onClick = viewModel::deleteArtworkKey,
+                )
+            }
+        }
+        item {
+            val failure = state.lastArtworkLookupFailedAtEpochMillis?.let {
+                DateUtils.getRelativeTimeSpanString(
+                    it,
+                    System.currentTimeMillis(),
+                    DateUtils.MINUTE_IN_MILLIS,
+                ).toString()
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    stringResource(
+                        if (state.artworkKeyConfigured) {
+                            R.string.artwork_key_active
+                        } else {
+                            R.string.artwork_key_not_configured
+                        },
+                    ),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                failure?.let {
+                    Text(
+                        stringResource(R.string.artwork_key_last_lookup_failed, it),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
     }
 }

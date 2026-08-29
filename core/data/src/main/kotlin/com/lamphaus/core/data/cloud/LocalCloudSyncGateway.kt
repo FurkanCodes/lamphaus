@@ -1,6 +1,8 @@
 package com.lamphaus.core.data.cloud
 
 import com.lamphaus.core.data.preferences.SyncedSettings
+import com.lamphaus.core.model.ArtworkCandidates
+import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.ProviderSubscription
@@ -20,4 +22,12 @@ class LocalCloudSyncGateway : CloudSyncGateway {
     override suspend fun saveProvider(userId: String, provider: ProviderSubscription) = Result.success(Unit)
     override suspend fun deleteProvider(userId: String, providerId: String) = Result.success(Unit)
     override suspend fun providers(userId: String) = Result.success(emptyList<ProviderSubscription>())
+    override fun artworkOverrides(userId: String, profileId: String): Flow<List<ArtworkOverride>> = emptyFlow()
+    override suspend fun saveArtworkOverride(userId: String, override: ArtworkOverride) = Result.success(Unit)
+    override suspend fun deleteArtworkOverride(userId: String, profileId: String, mediaKey: String) = Result.success(Unit)
+    override suspend fun artworkKeyStatus(userId: String) = Result.success(false)
+    override suspend fun saveArtworkKey(userId: String, apiKey: String) = Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun deleteArtworkKey(userId: String) = Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun artworkCandidates(userId: String, mediaKey: String, name: String, releaseYear: Int?) =
+        Result.failure<ArtworkCandidates>(CloudNotConfiguredException())
 }

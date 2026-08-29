@@ -2,6 +2,8 @@ package com.lamphaus.app.ui
 
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
+import com.lamphaus.core.model.ArtworkCandidates
+import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaDetail
@@ -14,6 +16,16 @@ import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.Episode
+
+data class ArtworkEditorState(
+    val media: MediaPreview,
+    val candidates: ArtworkCandidates? = null,
+    val selectedPosterPath: String? = null,
+    val selectedBackdropPath: String? = null,
+    val selectedLogoPath: String? = null,
+    val loading: Boolean = true,
+    val error: String? = null,
+)
 
 data class CatalogSection(
     val id: String,
@@ -52,6 +64,11 @@ data class AppUiState(
     val library: List<LibraryEntry> = emptyList(),
     val progress: List<WatchProgress> = emptyList(),
     val selectedDetail: MediaDetail? = null,
+    val artworkOverrides: List<ArtworkOverride> = emptyList(),
+    val artworkEditor: ArtworkEditorState? = null,
+    val artworkKeyConfigured: Boolean = false,
+    val artworkKeyStatusLoading: Boolean = false,
+    val lastArtworkLookupFailedAtEpochMillis: Long? = null,
     val sourcePicker: SourcePickerState? = null,
     val pairingSession: PairingSession? = null,
     val playbackRequest: PlaybackRequest? = null,
