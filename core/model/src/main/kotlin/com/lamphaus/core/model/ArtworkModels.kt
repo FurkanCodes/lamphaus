@@ -7,32 +7,61 @@ import kotlinx.serialization.Serializable
 enum class ArtworkProvider {
     @SerialName("tmdb")
     TMDB,
+
+    @SerialName("fanart")
+    FANART,
 }
 
-/**
- * A per-profile artwork customization for one title. Paths are TMDB image
- * paths (e.g. "/abc123.jpg"); URLs are built per surface with the right size.
- * Either path may be null — a row can override any subset of poster, backdrop,
- * and logo artwork.
- */
+@Serializable
+data class ArtworkAsset(
+    val provider: ArtworkProvider,
+    val reference: String,
+)
+
 @Serializable
 data class ArtworkOverride(
     val profileId: String,
     val mediaKey: String,
-    val posterPath: String? = null,
-    val backdropPath: String? = null,
-    val logoPath: String? = null,
+    val poster: ArtworkAsset? = null,
+    val backdrop: ArtworkAsset? = null,
+    val logo: ArtworkAsset? = null,
     val updatedAtEpochMillis: Long = 0,
 )
 
-/**
- * Editor candidates for one title, normalized from the artwork provider.
- * Carries provider-relative paths, never URLs or key material.
- */
+@Serializable
+enum class ArtworkLookupStatus {
+    @SerialName("success")
+    SUCCESS,
+
+    @SerialName("no_match")
+    NO_MATCH,
+
+    @SerialName("missing_external_id")
+    MISSING_EXTERNAL_ID,
+
+    @SerialName("invalid_key")
+    INVALID_KEY,
+
+    @SerialName("lookup_failed")
+    LOOKUP_FAILED,
+}
+
+@Serializable
+data class ArtworkProviderResult(
+    val provider: ArtworkProvider,
+    val status: ArtworkLookupStatus,
+)
+
+@Serializable
+data class ArtworkProviderStatus(
+    val provider: ArtworkProvider,
+    val configured: Boolean,
+)
+
 @Serializable
 data class ArtworkCandidates(
-    val provider: ArtworkProvider = ArtworkProvider.TMDB,
-    val posters: List<String> = emptyList(),
-    val backdrops: List<String> = emptyList(),
-    val logos: List<String> = emptyList(),
+    val posters: List<ArtworkAsset> = emptyList(),
+    val backdrops: List<ArtworkAsset> = emptyList(),
+    val logos: List<ArtworkAsset> = emptyList(),
+    val providerResults: List<ArtworkProviderResult> = emptyList(),
 )

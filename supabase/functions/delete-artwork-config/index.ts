@@ -2,7 +2,16 @@ const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_JWT") ??
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ARTWORK_PROVIDER_ID = "artwork.tmdb";
+const ARTWORK_PROVIDER_IDS = {
+  tmdb: "artwork.tmdb",
+  fanart: "artwork.fanart",
+} as const;
+
+type ArtworkProvider = keyof typeof ARTWORK_PROVIDER_IDS;
+
+function isArtworkProvider(value: unknown): value is ArtworkProvider {
+  return value === "tmdb" || value === "fanart";
+}
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -36,11 +45,11 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: "unauthorized" }, 401);
 
   const body = await req.json().catch(() => ({}) as Record<string, unknown>);
-  const provider = typeof body.provider === "string" ? body.provider.trim().toLowerCase() : "tmdb";
-  if (provider !== "tmdb") return json({ error: "unsupported_provider" }, 400);
-
+  const providerValue = typeof body.provider === "string" ? body.provider.trim().toLowerCase() : "";
+  if (!isArtworkProvider(providerValue)) return json({ error: "unsupported_provider" }, 400);
+  const providerConfigId = ARTWORK_PROVIDER_IDS[providerValue];
   const response = await fetch(
-    `${SB_URL}/rest/v1/provider_configs?user_id=eq.${user.id}&provider_id=eq.${encodeURIComponent(ARTWORK_PROVIDER_ID)}`,
+    `${SB_URL}/rest/v1/provider_configs?user_id=eq.${user.id}&provider_id=eq.${encodeURIComponent(providerConfigId)}`,
     {
       method: "DELETE",
       headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` },
@@ -48,5 +57,5 @@ Deno.serve(async (req) => {
   );
   if (!response.ok) return json({ error: "delete_failed" }, 500);
 
-  return json({ ok: true, provider: "tmdb" });
+  return json({ ok: true, provider: providerValue });
 });

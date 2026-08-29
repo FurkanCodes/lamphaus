@@ -45,3 +45,6 @@ class LocalPairingGateway : PairingGateway {
 
 class CloudNotConfiguredException : IllegalStateException("Cloud services are not configured for this build.")
 
+class ArtworkKeysNotConfiguredException :
+    IllegalStateException("Artwork keys are not configured.")
+

@@ -13,6 +13,7 @@
 
 const hexDecode = (hex: string): Uint8Array =>
   new Uint8Array((hex.match(/../g) ?? []).map((byte) => parseInt(byte, 16)));
+const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
 
 async function aesGcm(
   keyBytes: Uint8Array,
@@ -20,11 +21,11 @@ async function aesGcm(
   plaintext: Uint8Array,
   additionalData?: Uint8Array,
 ): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt"]);
+  const key = await crypto.subtle.importKey("raw", bufferSource(keyBytes), "AES-GCM", false, ["encrypt"]);
   const sealed = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData },
+    { name: "AES-GCM", iv: bufferSource(iv), additionalData: additionalData && bufferSource(additionalData) },
     key,
-    plaintext,
+    bufferSource(plaintext),
   );
   // WebCrypto appends the 16-byte tag to the ciphertext; spec vectors list them apart.
   return new Uint8Array(sealed);
@@ -85,7 +86,7 @@ const b64Decode = (text: string): Uint8Array =>
   Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 
 async function importKey(secretBase64: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey("raw", b64Decode(secretBase64), "AES-GCM", false, [
+  return crypto.subtle.importKey("raw", bufferSource(b64Decode(secretBase64)), "AES-GCM", false, [
     "encrypt",
     "decrypt",
   ]);
@@ -99,9 +100,9 @@ async function encryptConfig(
 ): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: encoder.encode(`${userId}:${providerId}`) },
+    { name: "AES-GCM", iv: bufferSource(iv), additionalData: bufferSource(encoder.encode(`${userId}:${providerId}`)) },
     key,
-    encoder.encode(JSON.stringify(config)),
+    bufferSource(encoder.encode(JSON.stringify(config))),
   );
   return `v1.${b64Encode(iv)}.${b64Encode(new Uint8Array(ciphertext))}`;
 }
@@ -115,9 +116,9 @@ async function decryptConfig(
   const [version, ivText, ciphertextText] = blob.split(".");
   if (version !== "v1" || !ivText || !ciphertextText) throw new Error("bad_format");
   const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: b64Decode(ivText), additionalData: encoder.encode(`${userId}:${providerId}`) },
+    { name: "AES-GCM", iv: bufferSource(b64Decode(ivText)), additionalData: bufferSource(encoder.encode(`${userId}:${providerId}`)) },
     key,
-    b64Decode(ciphertextText),
+    bufferSource(b64Decode(ciphertextText)),
   );
   return JSON.parse(decoder.decode(plaintext));
 }
@@ -126,24 +127,23 @@ async function decryptConfig(
   const secret = b64Encode(crypto.getRandomValues(new Uint8Array(32)));
   const key = await importKey(secret);
   const config = { url: "https://example.tld/manifest.json", token: "s3cret", timeoutMs: 5000 };
-
-  const blob = await encryptConfig(key, "user-a", "prov-1", config);
+  const blob = await encryptConfig(key, "user-a", "artwork.tmdb", config);
   if (!blob.startsWith("v1.")) throw new Error("wire format missing version prefix");
-  const roundtrip = await decryptConfig(key, "user-a", "prov-1", blob);
+  const roundtrip = await decryptConfig(key, "user-a", "artwork.tmdb", blob);
   if (JSON.stringify(roundtrip) !== JSON.stringify(config)) throw new Error("roundtrip mismatch");
   console.log("  ✓ wire-format roundtrip v1.<iv>.<ct>");
 
   await expectThrows("AAD binding: different user rejected", () =>
-    decryptConfig(key, "user-b", "prov-1", blob));
-  await expectThrows("AAD binding: different provider rejected", () =>
-    decryptConfig(key, "user-a", "prov-2", blob));
+    decryptConfig(key, "user-b", "artwork.tmdb", blob));
+  await expectThrows("AAD binding: other artwork provider rejected", () =>
+    decryptConfig(key, "user-a", "artwork.fanart", blob));
 
   const parts = blob.split(".");
   parts[2] = b64Encode(
     b64Decode(parts[2]).map((b, i) => i === 0 ? b ^ 1 : b) as Uint8Array,
   );
   await expectThrows("tampered ciphertext rejected", () =>
-    decryptConfig(key, "user-a", "prov-1", parts.join(".")));
+    decryptConfig(key, "user-a", "artwork.tmdb", parts.join(".")));
 
   console.log("provider_config_crypto: ALL PASSED");
 }

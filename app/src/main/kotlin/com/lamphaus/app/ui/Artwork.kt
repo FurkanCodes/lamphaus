@@ -11,7 +11,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
+import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkOverride
+import com.lamphaus.core.model.ArtworkProvider
 import com.lamphaus.core.model.MediaPreview
 
 private const val TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
@@ -25,25 +27,25 @@ internal class ArtworkResolver(
     private val overrides: Map<String, ArtworkOverride>,
 ) {
     fun resolve(media: MediaPreview): ArtworkResolution {
-        val override = overrides[media.stableKey]?.takeIf {
-            !it.posterPath.isNullOrBlank() ||
-                !it.backdropPath.isNullOrBlank() ||
-                !it.logoPath.isNullOrBlank()
-        }
+        val override = overrides[media.stableKey]
+        val posterUrl = artworkImageUrl(override?.poster, "w500")
+        val backdropUrl = artworkImageUrl(override?.backdrop, "original")
+        val logoUrl = artworkImageUrl(override?.logo, "w500")
         return ArtworkResolution(
             media = media.copy(
-                posterUrl = tmdbImageUrl(override?.posterPath, "w500") ?: media.posterUrl,
-                backgroundUrl = tmdbImageUrl(override?.backdropPath, "original") ?: media.backgroundUrl,
-                logoUrl = tmdbImageUrl(override?.logoPath, "w500") ?: media.logoUrl,
+                posterUrl = posterUrl ?: media.posterUrl,
+                backgroundUrl = backdropUrl ?: media.backgroundUrl,
+                logoUrl = logoUrl ?: media.logoUrl,
             ),
-            hasOverride = override != null,
+            hasOverride = posterUrl != null || backdropUrl != null || logoUrl != null,
         )
     }
-    fun hasOverrideFor(media: MediaPreview, preferBackdrop: Boolean): Boolean =
-        overrides[media.stableKey]?.let { override ->
-            (if (preferBackdrop) override.backdropPath else override.posterPath)
-                ?.isNotBlank() == true
-        } == true
+
+    fun hasOverrideFor(media: MediaPreview, preferBackdrop: Boolean): Boolean {
+        val override = overrides[media.stableKey] ?: return false
+        val asset = if (preferBackdrop) override.backdrop else override.poster
+        return artworkImageUrl(asset, if (preferBackdrop) "original" else "w500") != null
+    }
 
     companion object {
         val Empty = ArtworkResolver(emptyMap())
@@ -52,6 +54,14 @@ internal class ArtworkResolver(
 
 internal fun tmdbImageUrl(path: String?, size: String): String? =
     path?.trim()?.takeIf(String::isNotBlank)?.let { "$TMDB_IMAGE_BASE_URL/$size/${it.trimStart('/')}" }
+
+internal fun artworkImageUrl(asset: ArtworkAsset?, tmdbSize: String): String? =
+    when (asset?.provider) {
+        ArtworkProvider.TMDB -> tmdbImageUrl(asset.reference, tmdbSize)
+        ArtworkProvider.FANART -> asset.reference.takeIf { it.isNotBlank() && it.startsWith("https://") }
+        null -> null
+    }
+
 
 internal val LocalArtworkResolver = staticCompositionLocalOf { ArtworkResolver.Empty }
 

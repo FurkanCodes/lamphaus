@@ -2,7 +2,11 @@ const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_JWT") ??
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ARTWORK_PROVIDER_ID = "artwork.tmdb";
+const ARTWORK_PROVIDER_IDS = {
+  tmdb: "artwork.tmdb",
+  fanart: "artwork.fanart",
+} as const;
+const ARTWORK_PROVIDERS = ["tmdb", "fanart"] as const;
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -35,12 +39,28 @@ Deno.serve(async (req) => {
   const user = await requireUser(req);
   if (!user) return json({ error: "unauthorized" }, 401);
 
-  const response = await fetch(
-    `${SB_URL}/rest/v1/provider_configs?select=provider_id&user_id=eq.${user.id}&provider_id=eq.${encodeURIComponent(ARTWORK_PROVIDER_ID)}`,
-    { headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` } },
-  );
+  const query = new URLSearchParams({
+    select: "provider_id",
+    user_id: `eq.${user.id}`,
+    provider_id: `in.(${Object.values(ARTWORK_PROVIDER_IDS).join(",")})`,
+  });
+  const response = await fetch(`${SB_URL}/rest/v1/provider_configs?${query}`, {
+    headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` },
+  });
   if (!response.ok) return json({ error: "status_failed" }, 500);
-  const rows = await response.json();
+  const rows: unknown = await response.json();
+  const configuredIds = Array.isArray(rows)
+    ? new Set(rows.flatMap((row) => {
+      if (typeof row !== "object" || row === null || Array.isArray(row)) return [];
+      const providerId = (row as Record<string, unknown>).provider_id;
+      return typeof providerId === "string" ? [providerId] : [];
+    }))
+    : new Set<string>();
 
-  return json({ configured: Array.isArray(rows) && rows.length > 0, provider: "tmdb" });
+  return json({
+    providers: ARTWORK_PROVIDERS.map((provider) => ({
+      provider,
+      configured: configuredIds.has(ARTWORK_PROVIDER_IDS[provider]),
+    })),
+  });
 });

@@ -121,13 +121,17 @@ import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.MediaMetadataPresentation
 import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.SourcePickerState
+import com.lamphaus.app.ui.artworkImageUrl
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
 import com.lamphaus.app.ui.sourcePresentation
-import com.lamphaus.app.ui.tmdbImageUrl
 import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
+import com.lamphaus.core.model.ArtworkAsset
+import com.lamphaus.core.model.ArtworkLookupStatus
+import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderResult
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
@@ -159,6 +163,12 @@ fun TvApp(
             state.externalPlaybackUrl?.let {
                 onExternalPlay(it)
                 viewModel.playbackLaunchHandled()
+            }
+        }
+        LaunchedEffect(state.configurationUrl) {
+            state.configurationUrl?.let {
+                onExternalPlay(it)
+                viewModel.configurationLaunchHandled()
             }
         }
         Surface(
@@ -449,6 +459,7 @@ private fun TvSignedIn(
             onPosterSelected = viewModel::selectArtworkPoster,
             onBackdropSelected = viewModel::selectArtworkBackdrop,
             onLogoSelected = viewModel::selectArtworkLogo,
+            onProviderSelected = viewModel::selectArtworkProvider,
             onSave = viewModel::saveArtworkSelection,
         )
         return
@@ -1338,10 +1349,14 @@ private fun TvSourceFilterChip(
 }
 
 @Composable
-private fun TvSourceBadge(label: String, focused: Boolean) {
+private fun TvSourceBadge(
+    label: String,
+    focused: Boolean,
+    modifier: Modifier = Modifier,
+) {
     Text(
         text = label,
-        modifier = Modifier
+        modifier = modifier
             .background(
                 color = if (focused) {
                     TvFocusTokens.focusedContent.copy(alpha = 0.10f)
@@ -1621,9 +1636,10 @@ private fun TvDetailScreen(
 private fun TvArtworkEditorScreen(
     editor: ArtworkEditorState,
     onBack: () -> Unit,
-    onPosterSelected: (String) -> Unit,
-    onBackdropSelected: (String) -> Unit,
-    onLogoSelected: (String) -> Unit,
+    onPosterSelected: (ArtworkAsset?) -> Unit,
+    onBackdropSelected: (ArtworkAsset?) -> Unit,
+    onLogoSelected: (ArtworkAsset?) -> Unit,
+    onProviderSelected: (ArtworkProvider?) -> Unit,
     onSave: () -> Unit,
 ) {
     LazyColumn(
@@ -1655,9 +1671,34 @@ private fun TvArtworkEditorScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (editor.availableProviders.isNotEmpty()) {
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        TvSourceFilterChip(
+                            label = stringResource(R.string.artwork_all_sources),
+                            selected = editor.providerFilter == null,
+                            onClick = { onProviderSelected(null) },
+                        )
+                    }
+                    items(editor.availableProviders, key = { it.name }) { provider ->
+                        TvSourceFilterChip(
+                            label = stringResource(provider.nameRes()),
+                            selected = editor.providerFilter == provider,
+                            onClick = { onProviderSelected(provider) },
+                        )
+                    }
+                }
+            }
+        }
         editor.error?.let { error ->
             item { Text(error, color = MaterialTheme.colorScheme.error) }
         }
+        editor.candidates?.providerResults
+            ?.takeIf { results -> results.any { it.status != ArtworkLookupStatus.SUCCESS } }
+            ?.let { results ->
+                item { TvArtworkProviderMessages(results) }
+            }
         if (editor.loading) {
             item {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -1667,15 +1708,15 @@ private fun TvArtworkEditorScreen(
         } else {
             item { Text(stringResource(R.string.artwork_logos), style = MaterialTheme.typography.headlineSmall) }
             item {
-                val logos = editor.candidates?.logos.orEmpty()
+                val logos = editor.filteredLogos
                 if (logos.isEmpty()) {
-                    Text(stringResource(R.string.artwork_no_candidates))
+                    TvArtworkEmptyMessage(editor, stringResource(R.string.artwork_logo_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(logos, key = { it }) { path ->
-                            val selected = editor.selectedLogoPath == path
+                        items(logos, key = { "${it.provider}:${it.reference}" }) { asset ->
+                            val selected = editor.selectedLogo == asset
                             TvFocusableSurface(
-                                onClick = { onLogoSelected(path) },
+                                onClick = { onLogoSelected(asset) },
                                 modifier = Modifier
                                     .size(300.dp, 112.dp)
                                     .semantics { this.selected = selected },
@@ -1688,7 +1729,7 @@ private fun TvArtworkEditorScreen(
                             ) { focused ->
                                 Box(Modifier.fillMaxSize()) {
                                     AsyncImage(
-                                        model = tmdbImageUrl(path, "w500"),
+                                        model = artworkImageUrl(asset, "w500"),
                                         contentDescription = null,
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -1711,9 +1752,12 @@ private fun TvArtworkEditorScreen(
                                         } else {
                                             MaterialTheme.colorScheme.onPrimary
                                         },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(10.dp),
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                                    )
+                                    TvSourceBadge(
+                                        label = stringResource(asset.provider.nameRes()),
+                                        focused = focused,
+                                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                                     )
                                 }
                             }
@@ -1723,15 +1767,15 @@ private fun TvArtworkEditorScreen(
             }
             item { Text(stringResource(R.string.artwork_posters), style = MaterialTheme.typography.headlineSmall) }
             item {
-                val posters = editor.candidates?.posters.orEmpty()
+                val posters = editor.filteredPosters
                 if (posters.isEmpty()) {
-                    Text(stringResource(R.string.artwork_no_candidates))
+                    TvArtworkEmptyMessage(editor, stringResource(R.string.artwork_poster_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(posters, key = { it }) { path ->
-                            val selected = editor.selectedPosterPath == path
+                        items(posters, key = { "${it.provider}:${it.reference}" }) { asset ->
+                            val selected = editor.selectedPoster == asset
                             TvFocusableSurface(
-                                onClick = { onPosterSelected(path) },
+                                onClick = { onPosterSelected(asset) },
                                 modifier = Modifier
                                     .size(150.dp, 225.dp)
                                     .semantics { this.selected = selected },
@@ -1744,7 +1788,7 @@ private fun TvArtworkEditorScreen(
                             ) { focused ->
                                 Box(Modifier.fillMaxSize()) {
                                     AsyncImage(
-                                        model = tmdbImageUrl(path, "w500"),
+                                        model = artworkImageUrl(asset, "w500"),
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize().padding(4.dp),
                                         contentScale = ContentScale.Crop,
@@ -1761,9 +1805,12 @@ private fun TvArtworkEditorScreen(
                                         } else {
                                             MaterialTheme.colorScheme.onPrimary
                                         },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(10.dp),
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                                    )
+                                    TvSourceBadge(
+                                        label = stringResource(asset.provider.nameRes()),
+                                        focused = focused,
+                                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                                     )
                                 }
                             }
@@ -1773,15 +1820,15 @@ private fun TvArtworkEditorScreen(
             }
             item { Text(stringResource(R.string.artwork_backdrops), style = MaterialTheme.typography.headlineSmall) }
             item {
-                val backdrops = editor.candidates?.backdrops.orEmpty()
+                val backdrops = editor.filteredBackdrops
                 if (backdrops.isEmpty()) {
-                    Text(stringResource(R.string.artwork_no_candidates))
+                    TvArtworkEmptyMessage(editor, stringResource(R.string.artwork_backdrop_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(backdrops, key = { it }) { path ->
-                            val selected = editor.selectedBackdropPath == path
+                        items(backdrops, key = { "${it.provider}:${it.reference}" }) { asset ->
+                            val selected = editor.selectedBackdrop == asset
                             TvFocusableSurface(
-                                onClick = { onBackdropSelected(path) },
+                                onClick = { onBackdropSelected(asset) },
                                 modifier = Modifier
                                     .size(270.dp, 152.dp)
                                     .semantics { this.selected = selected },
@@ -1794,7 +1841,7 @@ private fun TvArtworkEditorScreen(
                             ) { focused ->
                                 Box(Modifier.fillMaxSize()) {
                                     AsyncImage(
-                                        model = tmdbImageUrl(path, "w780"),
+                                        model = artworkImageUrl(asset, "w780"),
                                         contentDescription = null,
                                         modifier = Modifier.fillMaxSize().padding(4.dp),
                                         contentScale = ContentScale.Crop,
@@ -1811,9 +1858,12 @@ private fun TvArtworkEditorScreen(
                                         } else {
                                             MaterialTheme.colorScheme.onPrimary
                                         },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(10.dp),
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                                    )
+                                    TvSourceBadge(
+                                        label = stringResource(asset.provider.nameRes()),
+                                        focused = focused,
+                                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                                     )
                                 }
                             }
@@ -1827,9 +1877,9 @@ private fun TvArtworkEditorScreen(
                 TvAction(
                     label = stringResource(R.string.save_artwork),
                     icon = Icons.Outlined.Check,
-                    enabled = editor.selectedPosterPath != null ||
-                        editor.selectedBackdropPath != null ||
-                        editor.selectedLogoPath != null,
+                    enabled = editor.selectedPoster != null ||
+                        editor.selectedBackdrop != null ||
+                        editor.selectedLogo != null,
                     onClick = onSave,
                 )
                 TvAction(
@@ -1841,6 +1891,53 @@ private fun TvArtworkEditorScreen(
         }
     }
 }
+@Composable
+private fun TvArtworkEmptyMessage(editor: ArtworkEditorState, artworkKind: String) {
+    val candidates = editor.candidates
+    val noCandidatesFromAnyProvider = candidates != null &&
+        candidates.posters.isEmpty() &&
+        candidates.backdrops.isEmpty() &&
+        candidates.logos.isEmpty()
+    val text = editor.providerFilter?.let { provider ->
+        stringResource(
+            R.string.artwork_no_source_candidates,
+            artworkKind,
+            stringResource(provider.nameRes()),
+        )
+    } ?: if (noCandidatesFromAnyProvider) {
+        stringResource(R.string.artwork_no_connected_candidates)
+    } else {
+        stringResource(R.string.artwork_no_candidates)
+    }
+    Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun TvArtworkProviderMessages(results: List<ArtworkProviderResult>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        results.filter { it.status != ArtworkLookupStatus.SUCCESS }.forEach { result ->
+            val providerName = stringResource(result.provider.nameRes())
+            val text = when (result.status) {
+                ArtworkLookupStatus.INVALID_KEY ->
+                    stringResource(R.string.artwork_provider_invalid_key, providerName)
+                ArtworkLookupStatus.MISSING_EXTERNAL_ID ->
+                    stringResource(R.string.artwork_provider_missing_external_id)
+                ArtworkLookupStatus.LOOKUP_FAILED ->
+                    stringResource(R.string.artwork_provider_lookup_failed, providerName)
+                ArtworkLookupStatus.NO_MATCH ->
+                    stringResource(R.string.artwork_provider_no_match, providerName)
+                ArtworkLookupStatus.SUCCESS -> null
+            }
+            text?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+private fun ArtworkProvider.nameRes(): Int = when (this) {
+    ArtworkProvider.TMDB -> R.string.artwork_tmdb_name
+    ArtworkProvider.FANART -> R.string.artwork_fanart_name
+}
+
 @Composable
 private fun TvEpisodeCard(
     episode: Episode,
@@ -2128,7 +2225,8 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
 }
 @Composable
 private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
-    var artworkKey by rememberSaveable { mutableStateOf("") }
+    var tmdbArtworkKey by rememberSaveable { mutableStateOf("") }
+    var fanartArtworkKey by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2145,58 +2243,93 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        item {
-            TvEditableTextField(
-                value = artworkKey,
-                onValueChange = { artworkKey = it },
-                label = stringResource(R.string.tmdb_api_key),
-                placeholder = stringResource(R.string.tmdb_api_key_placeholder),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done,
-                ),
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth().height(60.dp),
-                onImeAction = { viewModel.saveArtworkKey(artworkKey) },
+        items(ArtworkProvider.entries, key = { it.name }) { provider ->
+            val providerName = stringResource(provider.nameRes())
+            val helpMessage = stringResource(
+                when (provider) {
+                    ArtworkProvider.TMDB -> R.string.artwork_tmdb_help
+                    ArtworkProvider.FANART -> R.string.artwork_fanart_help
+                },
             )
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvAction(
-                    label = stringResource(R.string.save_artwork_key),
-                    icon = Icons.Outlined.Check,
-                    enabled = artworkKey.isNotBlank(),
-                    onClick = {
-                        viewModel.saveArtworkKey(artworkKey)
-                        artworkKey = ""
-                    },
-                )
-                TvAction(
-                    label = stringResource(R.string.remove_artwork_key),
-                    icon = Icons.Outlined.Delete,
-                    enabled = state.artworkKeyConfigured,
-                    onClick = viewModel::deleteArtworkKey,
-                )
+            val key = when (provider) {
+                ArtworkProvider.TMDB -> tmdbArtworkKey
+                ArtworkProvider.FANART -> fanartArtworkKey
             }
-        }
-        item {
-            val failure = state.lastArtworkLookupFailedAtEpochMillis?.let {
+            val configured = state.artworkProviderStatuses[provider] == true
+            val failure = state.lastArtworkLookupFailures[provider]?.let {
                 DateUtils.getRelativeTimeSpanString(
                     it,
                     System.currentTimeMillis(),
                     DateUtils.MINUTE_IN_MILLIS,
                 ).toString()
             }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(providerName, style = MaterialTheme.typography.titleMedium)
                 Text(
                     stringResource(
-                        if (state.artworkKeyConfigured) {
-                            R.string.artwork_key_active
-                        } else {
-                            R.string.artwork_key_not_configured
+                        when (provider) {
+                            ArtworkProvider.TMDB -> R.string.artwork_tmdb_purpose
+                            ArtworkProvider.FANART -> R.string.artwork_fanart_purpose
                         },
                     ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                TvAction(
+                    label = stringResource(R.string.artwork_get_key, providerName),
+                    icon = Icons.Outlined.Info,
+                    onClick = { viewModel.openArtworkProviderKeyPage(provider) },
+                )
+                TvEditableTextField(
+                    value = key,
+                    onValueChange = { value ->
+                        when (provider) {
+                            ArtworkProvider.TMDB -> tmdbArtworkKey = value
+                            ArtworkProvider.FANART -> fanartArtworkKey = value
+                        }
+                    },
+                    label = stringResource(R.string.artwork_api_key),
+                    placeholder = stringResource(R.string.artwork_api_key_placeholder),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    onImeAction = { viewModel.saveArtworkKey(provider, key) },
+                )
+                TvAction(
+                    label = stringResource(R.string.artwork_get_help),
+                    icon = Icons.Outlined.Info,
+                    onClick = { viewModel.reportMessage(helpMessage) },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvAction(
+                        label = stringResource(R.string.save_artwork_key),
+                        icon = Icons.Outlined.Check,
+                        enabled = key.isNotBlank(),
+                        onClick = {
+                            viewModel.saveArtworkKey(provider, key)
+                            when (provider) {
+                                ArtworkProvider.TMDB -> tmdbArtworkKey = ""
+                                ArtworkProvider.FANART -> fanartArtworkKey = ""
+                            }
+                        },
+                    )
+                    TvAction(
+                        label = stringResource(R.string.remove_artwork_key),
+                        icon = Icons.Outlined.Delete,
+                        enabled = configured,
+                        onClick = { viewModel.deleteArtworkKey(provider) },
+                    )
+                }
+                Text(
+                    when {
+                        state.artworkKeyStatusLoading -> stringResource(R.string.artwork_key_loading, providerName)
+                        configured -> stringResource(R.string.artwork_key_active, providerName)
+                        else -> stringResource(R.string.artwork_key_not_configured, providerName)
+                    },
                     style = MaterialTheme.typography.titleSmall,
                 )
                 failure?.let {
