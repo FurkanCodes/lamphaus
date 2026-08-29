@@ -83,7 +83,8 @@ async function decryptConfig(
   return JSON.parse(decoder.decode(plaintext));
 }
 
-const ARTWORK_PROVIDER_IDS = new Set(["artwork.tmdb", "artwork.fanart"]);
+const isArtworkProviderId = (value: unknown): value is string =>
+  typeof value === "string" && value.toLowerCase().startsWith("artwork.");
 // ─────────────────────────────── handler ───────────────────────────────
 
 Deno.serve(async (req) => {
@@ -106,7 +107,7 @@ Deno.serve(async (req) => {
   try {
     const configs = [];
     for (const row of rows) {
-      if (ARTWORK_PROVIDER_IDS.has(row.provider_id)) continue;
+      if (isArtworkProviderId(row.provider_id)) continue;
       configs.push({
         provider_id: row.provider_id,
         display_name: row.display_name,
@@ -118,7 +119,7 @@ Deno.serve(async (req) => {
     }
     return json({ configs });
   } catch (error) {
-    console.error("decrypt failed:", error instanceof Error ? error.message : "unknown");
+    console.error("decrypt failed", error instanceof Error ? error.name : "unknown");
     return json({ error: "decrypt_failed" }, 500);
   }
 });

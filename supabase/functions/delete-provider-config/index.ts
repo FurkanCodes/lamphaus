@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
   const providerId = typeof body.provider_id === "string" && body.provider_id.trim()
     ? body.provider_id.trim()
     : "";
-  if (!providerId) return json({ error: "missing_provider_id" }, 400);
+  if (providerId.toLowerCase().startsWith("artwork.")) return json({ error: "reserved_provider_id" }, 400);
 
   const removed = await fetch(
     `${SB_URL}/rest/v1/provider_configs?user_id=eq.${user.id}&provider_id=eq.${encodeURIComponent(providerId)}`,

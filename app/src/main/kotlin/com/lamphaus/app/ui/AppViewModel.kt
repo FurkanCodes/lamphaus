@@ -14,7 +14,7 @@ import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
 import com.lamphaus.core.model.ArtworkOverride
-import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.DeviceGrant
@@ -130,10 +130,10 @@ class AppViewModel(
                         sections = if (accountChanged || nextUserId == null) emptyList() else current.sections,
                         artworkOverrides = if (accountChanged || nextUserId == null) emptyList() else current.artworkOverrides,
                         artworkEditor = if (accountChanged || nextUserId == null) null else current.artworkEditor,
-                        artworkProviderStatuses = if (accountChanged || nextUserId == null) {
-                            ArtworkProvider.entries.associateWith { false }
+                        artworkProviders = if (accountChanged || nextUserId == null) {
+                            emptyList()
                         } else {
-                            current.artworkProviderStatuses
+                            current.artworkProviders
                         },
                         artworkKeyStatusLoading = if (accountChanged || nextUserId == null) false else current.artworkKeyStatusLoading,
                         lastArtworkLookupFailures = if (accountChanged || nextUserId == null) {
@@ -141,6 +141,7 @@ class AppViewModel(
                         } else {
                             current.lastArtworkLookupFailures
                         },
+                        artworkProviderCatalogError = if (accountChanged || nextUserId == null) null else current.artworkProviderCatalogError,
                         activeProfileId = activeId,
                         theme = snapshot.theme,
                         dynamicColor = snapshot.dynamicColor,
@@ -503,58 +504,76 @@ class AppViewModel(
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         mutableState.update { it.copy(artworkKeyStatusLoading = true) }
         val result = container.cloudSyncGateway.artworkProviderStatuses(userId)
-        val configured = result.getOrElse { emptyList() }.associate { it.provider to it.configured }
-        mutableState.update {
-            it.copy(
-                artworkProviderStatuses = ArtworkProvider.entries.associateWith { provider ->
-                    configured[provider] == true
+        mutableState.update { current ->
+            result.fold(
+                onSuccess = { providers ->
+                    current.copy(
+                        artworkProviders = providers.sortedWith(compareBy({ it.sortOrder }, { it.provider.value })),
+                        artworkKeyStatusLoading = false,
+                        artworkProviderCatalogError = null,
+                    )
                 },
-                artworkKeyStatusLoading = false,
+                onFailure = {
+                    current.copy(
+                        artworkKeyStatusLoading = false,
+                        message = "Artwork providers could not be loaded. Try again.",
+                        artworkProviderCatalogError = "Artwork providers could not be loaded. Try again.",
+                    )
+                },
             )
         }
     }
 
-    fun saveArtworkKey(provider: ArtworkProvider, apiKey: String) = viewModelScope.launch {
+    fun saveArtworkKey(provider: ArtworkProviderId, apiKey: String) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        val displayName = state.value.artworkProviders.firstOrNull { it.provider == provider }?.displayName ?: provider.value
         if (apiKey.trim().isBlank()) {
-            showMessage("Paste a ${provider.displayName} API key first.")
+            showMessage("Paste a $displayName API key first.")
             return@launch
         }
         container.cloudSyncGateway.saveArtworkKey(userId, provider, apiKey.trim())
             .onSuccess {
-                mutableState.update {
-                    it.copy(
-                        artworkProviderStatuses = it.artworkProviderStatuses + (provider to true),
-                        lastArtworkLookupFailures = it.lastArtworkLookupFailures - provider,
+                mutableState.update { current ->
+                    current.copy(
+                        artworkProviders = current.artworkProviders.map {
+                            if (it.provider == provider) it.copy(configured = true) else it
+                        },
+                        lastArtworkLookupFailures = current.lastArtworkLookupFailures - provider,
                     )
                 }
-                showMessage("${provider.displayName} artwork key saved.")
+                showMessage("$displayName artwork key saved.")
             }
-            .onFailure { showMessage("Could not save the ${provider.displayName} artwork key. Try again.") }
+            .onFailure { showMessage("Could not save the $displayName artwork key. Try again.") }
     }
 
-    fun deleteArtworkKey(provider: ArtworkProvider) = viewModelScope.launch {
+    fun deleteArtworkKey(provider: ArtworkProviderId) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        val displayName = state.value.artworkProviders.firstOrNull { it.provider == provider }?.displayName ?: provider.value
         container.cloudSyncGateway.deleteArtworkKey(userId, provider)
             .onSuccess {
-                mutableState.update {
-                    it.copy(
-                        artworkProviderStatuses = it.artworkProviderStatuses + (provider to false),
-                        lastArtworkLookupFailures = it.lastArtworkLookupFailures - provider,
+                mutableState.update { current ->
+                    current.copy(
+                        artworkProviders = current.artworkProviders.map {
+                            if (it.provider == provider) it.copy(configured = false) else it
+                        },
+                        lastArtworkLookupFailures = current.lastArtworkLookupFailures - provider,
                     )
                 }
-                showMessage("${provider.displayName} artwork key removed.")
+                showMessage("$displayName artwork key removed.")
             }
-            .onFailure { showMessage("Could not remove the ${provider.displayName} artwork key. Try again.") }
+            .onFailure { showMessage("Could not remove the $displayName artwork key. Try again.") }
     }
 
-    fun openArtworkProviderKeyPage(provider: ArtworkProvider) {
+    fun openArtworkProviderKeyPage(providerId: ArtworkProviderId) {
+        val entry = state.value.artworkProviders.firstOrNull { it.provider == providerId }
+        val uri = entry?.keyPageUrl?.let { runCatching { URI(it) }.getOrNull() }
+        val safe = uri?.takeIf {
+            it.scheme.equals("https", ignoreCase = true) && !it.host.isNullOrBlank()
+        }?.toString()
         mutableState.update {
             it.copy(
-                configurationUrl = when (provider) {
-                    ArtworkProvider.TMDB -> TMDB_ARTWORK_KEY_URL
-                    ArtworkProvider.FANART -> FANART_ARTWORK_KEY_URL
-                },
+                configurationUrl = safe,
+                message = if (safe == null) "The provider key page is unavailable." else it.message,
             )
         }
     }
@@ -636,7 +655,7 @@ class AppViewModel(
         mutableState.update { it.copy(artworkEditor = null) }
     }
 
-    fun selectArtworkProvider(provider: ArtworkProvider?) {
+    fun selectArtworkProvider(provider: ArtworkProviderId?) {
         mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(providerFilter = provider)) }
     }
 
@@ -1448,11 +1467,10 @@ class AppViewModel(
     )
 
     companion object {
-        private const val TMDB_ARTWORK_KEY_URL = "https://www.themoviedb.org/settings/api"
-        private const val FANART_ARTWORK_KEY_URL = "https://fanart.tv/get-an-api-key/"
         private const val MAX_DISCOVERED_PROVIDERS = 50
         private const val DEFAULT_CATALOG_SORT_ORDER = -100
         private const val DEFAULT_CATALOG_DISPLAY_NAME = "Lamphaus Catalog"
+
         private const val DEFAULT_CATALOG_PROVIDER_ID = "com.linvo.cinemeta"
         private const val DEFAULT_CATALOG_MANIFEST = "https://v3-cinemeta.strem.io/manifest.json"
         private const val PAIRING_POLL_MILLIS = 3_000L
@@ -1465,11 +1483,6 @@ class AppViewModel(
         }
     }
 }
-private val ArtworkProvider.displayName: String
-    get() = when (this) {
-        ArtworkProvider.TMDB -> "TMDB"
-        ArtworkProvider.FANART -> "Fanart.tv"
-    }
 
 
 private fun String.canonicalProviderAddress(): String {

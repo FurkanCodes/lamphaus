@@ -51,6 +51,7 @@ const encoder = new TextEncoder();
 const b64Encode = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
 const b64Decode = (text: string): Uint8Array =>
   Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
 
 let keyPromise: Promise<CryptoKey> | null = null;
 
@@ -59,7 +60,7 @@ function encryptionKey(): Promise<CryptoKey> {
   if (!secret) return Promise.reject(new Error("PROVIDER_CONFIG_KEY not set"));
   keyPromise ??= crypto.subtle.importKey(
     "raw",
-    b64Decode(secret),
+    bufferSource(b64Decode(secret)),
     "AES-GCM",
     false,
     ["encrypt", "decrypt"],
@@ -67,8 +68,8 @@ function encryptionKey(): Promise<CryptoKey> {
   return keyPromise;
 }
 
-async function aad(userId: string, providerId: string): Promise<Uint8Array> {
-  return encoder.encode(`${userId}:${providerId}`);
+function aad(userId: string, providerId: string): BufferSource {
+  return bufferSource(encoder.encode(`${userId}:${providerId}`));
 }
 
 export async function encryptConfig(
@@ -78,9 +79,9 @@ export async function encryptConfig(
 ): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: await aad(userId, providerId) },
+    { name: "AES-GCM", iv: bufferSource(iv), additionalData: aad(userId, providerId) },
     await encryptionKey(),
-    encoder.encode(JSON.stringify(config)),
+    bufferSource(encoder.encode(JSON.stringify(config))),
   );
   return `v1.${b64Encode(iv)}.${b64Encode(new Uint8Array(ciphertext))}`;
 }
@@ -98,7 +99,7 @@ Deno.serve(async (req) => {
   const providerId = typeof body.provider_id === "string" && body.provider_id.trim()
     ? body.provider_id.trim().slice(0, 200)
     : "";
-  if (!providerId) return json({ error: "missing_provider_id" }, 400);
+  if (providerId.toLowerCase().startsWith("artwork.")) return json({ error: "reserved_provider_id" }, 400);
   if (typeof body.config !== "object" || body.config === null || Array.isArray(body.config)) {
     return json({ error: "config_must_be_object" }, 400);
   }
@@ -107,7 +108,7 @@ Deno.serve(async (req) => {
   try {
     encrypted = await encryptConfig(user.id, providerId, body.config);
   } catch (error) {
-    console.error("encrypt failed:", error.message);
+    console.error("encrypt failed", error instanceof Error ? error.name : "unknown");
     return json({ error: "encrypt_failed" }, 500);
   }
 

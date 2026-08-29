@@ -126,7 +126,7 @@ import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
-import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderResult
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.MediaDetail
@@ -803,7 +803,7 @@ private fun MobileArtworkEditorScreen(
     onPosterSelected: (ArtworkAsset?) -> Unit,
     onBackdropSelected: (ArtworkAsset?) -> Unit,
     onLogoSelected: (ArtworkAsset?) -> Unit,
-    onProviderSelected: (ArtworkProvider?) -> Unit,
+    onProviderSelected: (ArtworkProviderId?) -> Unit,
     onSave: () -> Unit,
 ) {
     Scaffold(
@@ -859,7 +859,7 @@ private fun MobileArtworkEditorScreen(
                                 FilterChip(
                                     selected = editor.providerFilter == provider,
                                     onClick = { onProviderSelected(provider) },
-                                    label = { Text(stringResource(provider.nameRes())) },
+                                    label = { Text(provider.value) },
                                 )
                             }
                         }
@@ -916,7 +916,7 @@ private fun MobileArtworkEditorScreen(
                                             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                                         )
                                         Text(
-                                            text = stringResource(asset.provider.nameRes()),
+                                            text = asset.provider.value,
                                             modifier = Modifier
                                                 .align(Alignment.BottomStart)
                                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
@@ -966,7 +966,7 @@ private fun MobileArtworkEditorScreen(
                                             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                                         )
                                         Text(
-                                            text = stringResource(asset.provider.nameRes()),
+                                            text = asset.provider.value,
                                             modifier = Modifier
                                                 .align(Alignment.BottomStart)
                                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
@@ -1016,7 +1016,7 @@ private fun MobileArtworkEditorScreen(
                                             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                                         )
                                         Text(
-                                            text = stringResource(asset.provider.nameRes()),
+                                            text = asset.provider.value,
                                             modifier = Modifier
                                                 .align(Alignment.BottomStart)
                                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
@@ -1054,7 +1054,7 @@ private fun MobileArtworkEmptyMessage(editor: ArtworkEditorState, artworkKind: S
         stringResource(
             R.string.artwork_no_source_candidates,
             artworkKind,
-            stringResource(provider.nameRes()),
+            provider.value,
         )
     } ?: if (noCandidatesFromAnyProvider) {
         stringResource(R.string.artwork_no_connected_candidates)
@@ -1068,12 +1068,12 @@ private fun MobileArtworkEmptyMessage(editor: ArtworkEditorState, artworkKind: S
 private fun MobileArtworkProviderMessages(results: List<ArtworkProviderResult>) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         results.filter { it.status != ArtworkLookupStatus.SUCCESS }.forEach { result ->
-            val providerName = stringResource(result.provider.nameRes())
+            val providerName = result.displayName
             val text = when (result.status) {
                 ArtworkLookupStatus.INVALID_KEY ->
                     stringResource(R.string.artwork_provider_invalid_key, providerName)
                 ArtworkLookupStatus.MISSING_EXTERNAL_ID ->
-                    stringResource(R.string.artwork_provider_missing_external_id)
+                    stringResource(R.string.artwork_provider_missing_external_id, providerName)
                 ArtworkLookupStatus.LOOKUP_FAILED ->
                     stringResource(R.string.artwork_provider_lookup_failed, providerName)
                 ArtworkLookupStatus.NO_MATCH ->
@@ -1085,10 +1085,6 @@ private fun MobileArtworkProviderMessages(results: List<ArtworkProviderResult>) 
 }
 }
 
-private fun ArtworkProvider.nameRes(): Int = when (this) {
-    ArtworkProvider.TMDB -> R.string.artwork_tmdb_name
-    ArtworkProvider.FANART -> R.string.artwork_fanart_name
-}
 
 @Composable
 private fun MobileDetailMetadataSection(@StringRes labelRes: Int, value: String) {
@@ -1327,8 +1323,7 @@ private fun MobileSourcePickerScreen(
 @Composable
 private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onBack: () -> Unit) {
     var providerUrl by rememberSaveable { mutableStateOf("") }
-    var tmdbArtworkKey by rememberSaveable { mutableStateOf("") }
-    var fanartArtworkKey by rememberSaveable { mutableStateOf("") }
+    var artworkKeys by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
     var deviceToRevoke by remember { mutableStateOf<PairedDevice?>(null) }
     var deleteAccountOpen by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
@@ -1491,20 +1486,19 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            items(ArtworkProvider.entries, key = { it.name }) { provider ->
-                val providerName = stringResource(provider.nameRes())
-                val helpMessage = stringResource(
-                    when (provider) {
-                        ArtworkProvider.TMDB -> R.string.artwork_tmdb_help
-                        ArtworkProvider.FANART -> R.string.artwork_fanart_help
-                    },
-                )
-                val key = when (provider) {
-                    ArtworkProvider.TMDB -> tmdbArtworkKey
-                    ArtworkProvider.FANART -> fanartArtworkKey
+            if (state.artworkProviders.isEmpty() && state.artworkProviderCatalogError != null) {
+                item {
+                    Text(state.artworkProviderCatalogError, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = viewModel::refreshArtworkKeyStatus) {
+                        Text("Retry")
+                    }
                 }
-                val configured = state.artworkProviderStatuses[provider] == true
-                val failure = state.lastArtworkLookupFailures[provider]?.let {
+            }
+            items(state.artworkProviders, key = { it.provider.value }) { provider ->
+                val providerId = provider.provider
+                val providerName = provider.displayName
+                val apiKey = artworkKeys[providerId.value].orEmpty()
+                val failure = state.lastArtworkLookupFailures[providerId]?.let {
                     DateUtils.getRelativeTimeSpanString(
                         it,
                         System.currentTimeMillis(),
@@ -1520,73 +1514,66 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(providerName, style = MaterialTheme.typography.titleLarge)
-                        Text(
-                            stringResource(
-                                when (provider) {
-                                    ArtworkProvider.TMDB -> R.string.artwork_tmdb_purpose
-                                    ArtworkProvider.FANART -> R.string.artwork_fanart_purpose
-                                },
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(
-                            onClick = { viewModel.openArtworkProviderKeyPage(provider) },
-                            modifier = Modifier.sizeIn(minHeight = 48.dp),
-                        ) {
-                            Text(stringResource(R.string.artwork_get_key, providerName))
-                        }
-                        OutlinedTextField(
-                            value = key,
-                            onValueChange = { value ->
-                                when (provider) {
-                                    ArtworkProvider.TMDB -> tmdbArtworkKey = value
-                                    ArtworkProvider.FANART -> fanartArtworkKey = value
-                                }
-                            },
-                            label = { Text(stringResource(R.string.artwork_api_key)) },
-                            placeholder = { Text(stringResource(R.string.artwork_api_key_placeholder)) },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        TextButton(
-                            onClick = { viewModel.reportMessage(helpMessage) },
-                            modifier = Modifier.sizeIn(minHeight = 48.dp),
-                        ) {
-                            Text(stringResource(R.string.artwork_get_help))
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(
-                                onClick = {
-                                    viewModel.saveArtworkKey(provider, key)
-                                    when (provider) {
-                                        ArtworkProvider.TMDB -> tmdbArtworkKey = ""
-                                        ArtworkProvider.FANART -> fanartArtworkKey = ""
-                                    }
-                                },
-                                enabled = key.isNotBlank(),
-                            ) {
-                                Text(stringResource(R.string.save_artwork_key))
-                            }
-                            if (configured) {
-                                OutlinedButton(onClick = { viewModel.deleteArtworkKey(provider) }) {
+                        if (!provider.enabled) {
+                            Text("This provider is no longer available. You can remove its saved key.")
+                            if (provider.configured) {
+                                OutlinedButton(onClick = { viewModel.deleteArtworkKey(providerId) }) {
                                     Text(stringResource(R.string.remove_artwork_key))
                                 }
                             }
-                        }
-                        Text(
-                            when {
-                                state.artworkKeyStatusLoading -> stringResource(R.string.artwork_key_loading, providerName)
-                                configured -> stringResource(R.string.artwork_key_active, providerName)
-                                else -> stringResource(R.string.artwork_key_not_configured, providerName)
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        failure?.let {
-                            Text(
-                                stringResource(R.string.artwork_key_last_lookup_failed, it),
-                                color = MaterialTheme.colorScheme.error,
+                        } else {
+                            Text(provider.purpose, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(
+                                onClick = { viewModel.openArtworkProviderKeyPage(providerId) },
+                                modifier = Modifier.sizeIn(minHeight = 48.dp),
+                            ) {
+                                Text(stringResource(R.string.artwork_get_key, providerName))
+                            }
+                            OutlinedTextField(
+                                value = apiKey,
+                                onValueChange = { value -> artworkKeys = artworkKeys + (providerId.value to value) },
+                                label = { Text(stringResource(R.string.artwork_api_key)) },
+                                placeholder = { Text(stringResource(R.string.artwork_api_key_placeholder)) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
                             )
+                            TextButton(
+                                onClick = { viewModel.reportMessage(provider.helpText) },
+                                modifier = Modifier.sizeIn(minHeight = 48.dp),
+                            ) {
+                                Text(stringResource(R.string.artwork_get_help))
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(
+                                    onClick = {
+                                        viewModel.saveArtworkKey(providerId, apiKey)
+                                        artworkKeys = artworkKeys - providerId.value
+                                    },
+                                    enabled = apiKey.isNotBlank(),
+                                ) {
+                                    Text(stringResource(R.string.save_artwork_key))
+                                }
+                                if (provider.configured) {
+                                    OutlinedButton(onClick = { viewModel.deleteArtworkKey(providerId) }) {
+                                        Text(stringResource(R.string.remove_artwork_key))
+                                    }
+                                }
+                            }
+                            Text(
+                                when {
+                                    state.artworkKeyStatusLoading -> stringResource(R.string.artwork_key_loading, providerName)
+                                    provider.configured -> stringResource(R.string.artwork_key_active, providerName)
+                                    else -> stringResource(R.string.artwork_key_not_configured, providerName)
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            failure?.let {
+                                Text(
+                                    stringResource(R.string.artwork_key_last_lookup_failed, it),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
                 }

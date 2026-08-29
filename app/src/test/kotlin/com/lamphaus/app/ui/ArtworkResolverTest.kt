@@ -2,7 +2,7 @@ package com.lamphaus.app.ui
 
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkOverride
-import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
 import org.junit.Assert.assertEquals
@@ -28,16 +28,15 @@ class ArtworkResolverTest {
                 media.stableKey to ArtworkOverride(
                     profileId = "profile",
                     mediaKey = media.stableKey,
-                    poster = ArtworkAsset(ArtworkProvider.TMDB, "/poster.jpg"),
-                    backdrop = ArtworkAsset(ArtworkProvider.FANART, "https://fanart.example/backdrop.jpg"),
-                    logo = ArtworkAsset(ArtworkProvider.FANART, "https://fanart.example/logo.png"),
+                    poster = ArtworkAsset(ArtworkProviderId.TMDB, "/poster.jpg"),
+                    backdrop = ArtworkAsset(ArtworkProviderId.FANART, "https://fanart.example/backdrop.jpg"),
+                    logo = ArtworkAsset(ArtworkProviderId("fixture_art"), "https://fixture.example/logo.png"),
                 ),
             ),
         ).resolve(media)
-
         assertEquals("https://image.tmdb.org/t/p/w500/poster.jpg", resolved.media.posterUrl)
         assertEquals("https://fanart.example/backdrop.jpg", resolved.media.backgroundUrl)
-        assertEquals("https://fanart.example/logo.png", resolved.media.logoUrl)
+        assertEquals("https://fixture.example/logo.png", resolved.media.logoUrl)
         assertTrue(resolved.hasOverride)
     }
 
@@ -48,25 +47,24 @@ class ArtworkResolverTest {
                 media.stableKey to ArtworkOverride(
                     profileId = "profile",
                     mediaKey = media.stableKey,
-                    backdrop = ArtworkAsset(ArtworkProvider.TMDB, " /custom.jpg "),
+                    backdrop = ArtworkAsset(ArtworkProviderId.TMDB, " /custom.jpg "),
                 ),
             ),
         ).resolve(media)
-        val invalidFanart = ArtworkResolver(
+        val invalid = ArtworkResolver(
             mapOf(
                 media.stableKey to ArtworkOverride(
                     profileId = "profile",
                     mediaKey = media.stableKey,
-                    poster = ArtworkAsset(ArtworkProvider.FANART, "http://fanart.example/poster.jpg"),
-                    backdrop = ArtworkAsset(ArtworkProvider.FANART, " "),
+                    poster = ArtworkAsset(ArtworkProviderId("fixture_art"), "http://fixture.example/poster.jpg"),
+                    backdrop = ArtworkAsset(ArtworkProviderId("fixture_art"), "not-a-url"),
                 ),
             ),
         ).resolve(media)
-
         assertEquals("https://catalog.example/poster.jpg", partial.media.posterUrl)
         assertEquals("https://image.tmdb.org/t/p/original/custom.jpg", partial.media.backgroundUrl)
-        assertEquals(media.posterUrl, invalidFanart.media.posterUrl)
-        assertEquals(media.backgroundUrl, invalidFanart.media.backgroundUrl)
-        assertFalse(invalidFanart.hasOverride)
+        assertEquals(media.posterUrl, invalid.media.posterUrl)
+        assertEquals(media.backgroundUrl, invalid.media.backgroundUrl)
+        assertFalse(invalid.hasOverride)
     }
 }

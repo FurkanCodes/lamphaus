@@ -1,20 +1,23 @@
 package com.lamphaus.core.model
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class ArtworkProvider {
-    @SerialName("tmdb")
-    TMDB,
+@JvmInline
+value class ArtworkProviderId(val value: String) {
+    companion object {
+        private val pattern = Regex("^[a-z][a-z0-9_-]{0,63}$")
+        val TMDB = ArtworkProviderId("tmdb")
+        val FANART = ArtworkProviderId("fanart")
 
-    @SerialName("fanart")
-    FANART,
+        fun parseOrNull(value: String): ArtworkProviderId? =
+            value.takeIf { pattern.matches(it) }?.let(::ArtworkProviderId)
+    }
 }
 
 @Serializable
 data class ArtworkAsset(
-    val provider: ArtworkProvider,
+    val provider: ArtworkProviderId,
     val reference: String,
 )
 
@@ -30,32 +33,30 @@ data class ArtworkOverride(
 
 @Serializable
 enum class ArtworkLookupStatus {
-    @SerialName("success")
     SUCCESS,
-
-    @SerialName("no_match")
     NO_MATCH,
-
-    @SerialName("missing_external_id")
     MISSING_EXTERNAL_ID,
-
-    @SerialName("invalid_key")
     INVALID_KEY,
-
-    @SerialName("lookup_failed")
     LOOKUP_FAILED,
 }
 
 @Serializable
 data class ArtworkProviderResult(
-    val provider: ArtworkProvider,
+    val provider: ArtworkProviderId,
     val status: ArtworkLookupStatus,
+    val displayName: String = provider.value,
 )
 
 @Serializable
 data class ArtworkProviderStatus(
-    val provider: ArtworkProvider,
-    val configured: Boolean,
+    val provider: ArtworkProviderId,
+    val displayName: String = provider.value,
+    val purpose: String = "",
+    val helpText: String = "",
+    val keyPageUrl: String = "",
+    val sortOrder: Int = 0,
+    val enabled: Boolean = true,
+    val configured: Boolean = false,
 )
 
 @Serializable

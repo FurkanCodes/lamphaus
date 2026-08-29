@@ -54,17 +54,11 @@
     <string name="ken_burns_effect">Animate TV hero artwork</string>
     <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
     <string name="artwork">Artwork</string>
-    <string name="artwork_settings_description">Connect one or both services to choose where posters, backdrops, and logos come from.</string>
-    <string name="artwork_tmdb_name">TMDB</string>
-    <string name="artwork_fanart_name">Fanart.tv</string>
-    <string name="artwork_tmdb_purpose">Best source for matching titles and core artwork. Required to match Fanart.tv artwork for TV series.</string>
-    <string name="artwork_fanart_purpose">Extra posters, backgrounds, and transparent logos.</string>
+    <string name="artwork_settings_description">Connect providers to choose where posters, backdrops, and logos come from.</string>
     <string name="artwork_api_key">API key</string>
     <string name="artwork_api_key_placeholder">Paste your API key</string>
     <string name="artwork_get_key">Get %1$s key</string>
     <string name="artwork_get_help">Get help</string>
-    <string name="artwork_tmdb_help">Go to the TMDB website, copy the v3 API key - not the Read Access Token - and paste it here.</string>
-    <string name="artwork_fanart_help">Go to the Fanart.tv website, copy your personal API key, and paste it here.</string>
     <string name="save_artwork_key">Save key</string>
     <string name="save_artwork">Save artwork</string>
     <string name="remove_artwork_key">Remove key</string>
@@ -86,7 +80,7 @@
     <string name="artwork_choose">Choose a poster, backdrop, or logo, then save.</string>
     <string name="artwork_lookup_failed">Artwork lookup failed. Try again.</string>
     <string name="artwork_provider_invalid_key">%1$s key was rejected. Update it in Settings &gt; Artwork.</string>
-    <string name="artwork_provider_missing_external_id">Fanart.tv could not match this TV series. Connect TMDB so Lamphaus can find its TVDB ID.</string>
+    <string name="artwork_provider_missing_external_id">%1$s could not match this title because a required external ID was unavailable.</string>
     <string name="artwork_provider_lookup_failed">%1$s could not be reached. Try again later.</string>
     <string name="artwork_provider_no_match">%1$s did not match this title.</string>
     <string name="artwork_saved">Artwork updated.</string>
