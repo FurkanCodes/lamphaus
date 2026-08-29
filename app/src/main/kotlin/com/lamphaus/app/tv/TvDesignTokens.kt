@@ -67,6 +67,10 @@ internal object TvMotionTokens {
     const val confirmationPulseDurationMillis = 110
     const val startupSweepDurationMillis = 480
     const val focusedArtworkScale = 1.02f
+    const val kenBurnsDurationMillis = 24_000
+    const val kenBurnsMaxScale = 1.08f
+    const val kenBurnsHorizontalTranslationFraction = 0.020f
+    const val kenBurnsVerticalTranslationFraction = 0.008f
 }
 
 internal object TvAmbientTokens {

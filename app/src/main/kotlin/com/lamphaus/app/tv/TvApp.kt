@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
@@ -88,6 +89,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,6 +104,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
+import androidx.tv.material3.Switch
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.AppUiState
@@ -603,6 +608,7 @@ private fun TvHome(
         featured?.let { media ->
             item("hero") {
                 TvHero(
+                    kenBurnsEnabled = state.kenBurnsEnabled,
                     media = media,
                     onMedia = onMedia,
                     onFocused = { focusedCandidate = media; onFocused(media) },
@@ -709,6 +715,7 @@ private fun TvHero(
     media: MediaPreview,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
+    kenBurnsEnabled: Boolean,
     carouselItems: List<MediaPreview>,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -778,11 +785,11 @@ private fun TvHero(
             },
             label = "hero artwork",
         ) { featuredMedia ->
-            MediaArtwork(
+            TvHeroArtwork(
                 media = featuredMedia,
+                userEnabled = kenBurnsEnabled,
+                reducedMotion = reducedMotion,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                preferBackdrop = true,
             )
         }
         Box(
@@ -1667,6 +1674,7 @@ private enum class TvSettingsSection(
 ) {
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     SOURCES(R.string.addons, Icons.Outlined.Add),
+    APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
     ABOUT(R.string.about, Icons.Outlined.Info),
 }
 
@@ -1716,6 +1724,7 @@ private fun TvSettings(
             when (section) {
                 TvSettingsSection.PROFILES -> TvProfilesSettings(state, viewModel)
                 TvSettingsSection.SOURCES -> TvSourcesSettings(state, viewModel)
+                TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
                 TvSettingsSection.ABOUT -> TvAboutSettings()
             }
         }
@@ -1806,6 +1815,68 @@ private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
+    ) {
+        item {
+            Text(stringResource(R.string.appearance), style = MaterialTheme.typography.headlineSmall)
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.ken_burns_effect),
+                description = stringResource(R.string.ken_burns_effect_description),
+                checked = state.kenBurnsEnabled,
+                onCheckedChange = viewModel::setKenBurnsEnabled,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvSettingsToggleRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    TvFocusableSurface(
+        onClick = { onCheckedChange(!checked) },
+        role = Role.Switch,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .semantics { toggleableState = ToggleableState(checked) },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = null,
+                modifier = Modifier.clearAndSetSemantics {},
+            )
         }
     }
 }

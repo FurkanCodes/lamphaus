@@ -106,7 +106,7 @@ class AppViewModel(
                 container.libraryRepository.providers(),
                 container.preferences.settings,
             ) { account, profiles, providers, settings ->
-                Snapshot(account, profiles, providers, settings.activeProfileId, settings.theme, settings.dynamicColor, settings.diagnostics)
+                Snapshot(account, profiles, providers, settings.activeProfileId, settings.theme, settings.dynamicColor, settings.kenBurnsEnabled, settings.diagnostics)
             }.collectLatest { snapshot ->
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
                     ?: snapshot.profiles.firstOrNull()?.id
@@ -124,6 +124,7 @@ class AppViewModel(
                         activeProfileId = activeId,
                         theme = snapshot.theme,
                         dynamicColor = snapshot.dynamicColor,
+                        kenBurnsEnabled = snapshot.kenBurnsEnabled,
                         diagnostics = snapshot.diagnostics,
                         initialContentLoading = if (accountChanged || nextUserId == null) {
                             true
@@ -760,6 +761,11 @@ class AppViewModel(
         pushSyncedSettings()
     }
 
+    fun setKenBurnsEnabled(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setKenBurnsEnabled(enabled)
+        pushSyncedSettings()
+    }
+
     fun setDiagnostics(consent: DiagnosticsConsent) = viewModelScope.launch {
         container.preferences.setDiagnostics(consent.copy(updatedAtEpochMillis = System.currentTimeMillis()))
         // Diagnostics backends are being replaced alongside the Supabase migration;
@@ -1093,7 +1099,7 @@ class AppViewModel(
             when {
                 remote == null -> container.cloudSyncGateway.saveSettings(
                     userId,
-                    SyncedSettings(local.theme, local.dynamicColor, local.diagnostics, local.updatedAtEpochMillis),
+                    SyncedSettings(local.theme, local.dynamicColor, local.kenBurnsEnabled, local.diagnostics, local.updatedAtEpochMillis),
                 ).onFailure { error -> CloudLog.w("settings.seed failed — staying local", error) }
 
                 remote.updatedAtEpochMillis > local.updatedAtEpochMillis ->
@@ -1108,7 +1114,7 @@ class AppViewModel(
         val local = container.preferences.current()
         container.cloudSyncGateway.saveSettings(
             userId,
-            SyncedSettings(local.theme, local.dynamicColor, local.diagnostics, local.updatedAtEpochMillis),
+            SyncedSettings(local.theme, local.dynamicColor, local.kenBurnsEnabled, local.diagnostics, local.updatedAtEpochMillis),
         ).onFailure { error -> CloudLog.w("settings.push failed — converges next session", error) }
     }
 
@@ -1213,6 +1219,7 @@ class AppViewModel(
         val activeProfileId: String?,
         val theme: ThemePreference,
         val dynamicColor: Boolean,
+        val kenBurnsEnabled: Boolean,
         val diagnostics: DiagnosticsConsent,
     )
 

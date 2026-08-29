@@ -59,6 +59,7 @@ data class AppUiState(
     val configurationUrl: String? = null,
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
+    val kenBurnsEnabled: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val pairedDevices: List<PairedDevice> = emptyList(),
     val initialContentLoading: Boolean = true,
@@ -78,6 +79,7 @@ data class AppUiState(
         account = account,
         theme = theme,
         dynamicColor = dynamicColor,
+        kenBurnsEnabled = kenBurnsEnabled,
         diagnostics = diagnostics,
         initialContentLoading = false,
     )

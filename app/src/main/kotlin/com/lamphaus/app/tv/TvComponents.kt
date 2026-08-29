@@ -636,6 +636,7 @@ internal fun TvFocusableSurface(
     enabled: Boolean = true,
     containerColor: Color = TvFocusTokens.defaultContainer,
     focusedContainerColor: Color = TvFocusTokens.focusedContainer,
+    role: Role = Role.Button,
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -656,9 +657,9 @@ internal fun TvFocusableSurface(
                 shape = TvShapeTokens.button,
             )
             .clip(TvShapeTokens.button)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, role = role, onClick = onClick)
             .focusable(enabled)
-            .semantics { role = Role.Button },
+            .semantics { this.role = role },
     ) {
         content(focused)
     }

@@ -20,6 +20,7 @@ data class UserSettings(
     val activeProfileId: String? = null,
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
+    val kenBurnsEnabled: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val updatedAtEpochMillis: Long = 0,
 )
@@ -34,6 +35,7 @@ data class UserSettings(
 data class SyncedSettings(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
+    val kenBurnsEnabled: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val updatedAtEpochMillis: Long = 0,
 )
@@ -45,6 +47,7 @@ class UserPreferences(private val context: Context) {
             theme = values[THEME]?.let { runCatching { ThemePreference.valueOf(it) }.getOrNull() }
                 ?: ThemePreference.SYSTEM,
             dynamicColor = values[DYNAMIC_COLOR] ?: true,
+            kenBurnsEnabled = values[KEN_BURNS_ENABLED] ?: true,
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -84,6 +87,13 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    suspend fun setKenBurnsEnabled(enabled: Boolean) {
+        context.dataStore.edit {
+            it[KEN_BURNS_ENABLED] = enabled
+            it[SETTINGS_UPDATED] = System.currentTimeMillis()
+        }
+    }
+
     suspend fun setDiagnostics(consent: DiagnosticsConsent) {
         context.dataStore.edit {
             it[CRASH_REPORTS] = consent.crashReports
@@ -100,6 +110,7 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit {
             it[THEME] = remote.theme.name
             it[DYNAMIC_COLOR] = remote.dynamicColor
+            it[KEN_BURNS_ENABLED] = remote.kenBurnsEnabled
             it[CRASH_REPORTS] = remote.diagnostics.crashReports
             it[PERFORMANCE] = remote.diagnostics.performanceMetrics
             it[SETTINGS_UPDATED] = remote.updatedAtEpochMillis
@@ -115,6 +126,7 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit {
             it.remove(THEME)
             it.remove(DYNAMIC_COLOR)
+            it.remove(KEN_BURNS_ENABLED)
             it.remove(CRASH_REPORTS)
             it.remove(PERFORMANCE)
             it.remove(SETTINGS_UPDATED)
@@ -126,6 +138,7 @@ class UserPreferences(private val context: Context) {
         val PAIRING_DEVICE_ID = stringPreferencesKey("pairing_device_id")
         val THEME = stringPreferencesKey("theme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val KEN_BURNS_ENABLED = booleanPreferencesKey("ken_burns_enabled")
         val CRASH_REPORTS = booleanPreferencesKey("crash_reports")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")

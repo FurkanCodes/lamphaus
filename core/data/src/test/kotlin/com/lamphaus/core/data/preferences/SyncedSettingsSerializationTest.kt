@@ -30,10 +30,20 @@ class SyncedSettingsSerializationTest {
         val settings = SyncedSettings(
             theme = ThemePreference.DARK,
             dynamicColor = false,
+            kenBurnsEnabled = false,
             diagnostics = DiagnosticsConsent(crashReports = true, updatedAtEpochMillis = 42),
         )
 
         assertEquals(settings, json.decodeFromString<SyncedSettings>(json.encodeToString(settings)))
+    }
+
+    @Test
+    fun `older payload defaults ken burns to enabled`() {
+        val decoded = json.decodeFromString<SyncedSettings>(
+            """{"theme":"LIGHT","dynamicColor":false}""",
+        )
+
+        assertEquals(true, decoded.kenBurnsEnabled)
     }
 
     @Test

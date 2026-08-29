@@ -1102,6 +1102,15 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                     },
                 )
             }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.ken_burns_effect)) },
+                    supportingContent = { Text(stringResource(R.string.ken_burns_effect_description)) },
+                    trailingContent = {
+                        Switch(checked = state.kenBurnsEnabled, onCheckedChange = viewModel::setKenBurnsEnabled)
+                    },
+                )
+            }
             item { SettingsHeading(stringResource(R.string.privacy)) }
             item {
                 ConsentRow(stringResource(R.string.crash_reports), state.diagnostics.crashReports) {

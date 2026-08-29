@@ -51,6 +51,8 @@
     <string name="appearance">Appearance</string>
     <string name="use_device_colors">Use device colors</string>
     <string name="device_colors_requirement">Available on Android 12 and newer</string>
+    <string name="ken_burns_effect">Animate TV hero artwork</string>
+    <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
     <string name="privacy">Privacy</string>
     <string name="crash_reports">Crash reports</string>
     <string name="performance_metrics">Performance metrics</string>
