@@ -7,10 +7,14 @@ import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.AppContainer
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
+import com.lamphaus.core.data.cloud.CloudNotConfiguredException
+import com.lamphaus.core.data.cloud.ArtworkKeysNotConfiguredException
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.data.preferences.ThemePreference
-import com.lamphaus.core.model.ArtworkCandidates
+import com.lamphaus.core.model.ArtworkAsset
+import com.lamphaus.core.model.ArtworkLookupStatus
 import com.lamphaus.core.model.ArtworkOverride
+import com.lamphaus.core.model.ArtworkProvider
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.DeviceGrant
@@ -126,12 +130,16 @@ class AppViewModel(
                         sections = if (accountChanged || nextUserId == null) emptyList() else current.sections,
                         artworkOverrides = if (accountChanged || nextUserId == null) emptyList() else current.artworkOverrides,
                         artworkEditor = if (accountChanged || nextUserId == null) null else current.artworkEditor,
-                        artworkKeyConfigured = if (accountChanged || nextUserId == null) false else current.artworkKeyConfigured,
-                        artworkKeyStatusLoading = if (accountChanged || nextUserId == null) false else current.artworkKeyStatusLoading,
-                        lastArtworkLookupFailedAtEpochMillis = if (accountChanged || nextUserId == null) {
-                            null
+                        artworkProviderStatuses = if (accountChanged || nextUserId == null) {
+                            ArtworkProvider.entries.associateWith { false }
                         } else {
-                            current.lastArtworkLookupFailedAtEpochMillis
+                            current.artworkProviderStatuses
+                        },
+                        artworkKeyStatusLoading = if (accountChanged || nextUserId == null) false else current.artworkKeyStatusLoading,
+                        lastArtworkLookupFailures = if (accountChanged || nextUserId == null) {
+                            emptyMap()
+                        } else {
+                            current.lastArtworkLookupFailures
                         },
                         activeProfileId = activeId,
                         theme = snapshot.theme,
@@ -491,51 +499,64 @@ class AppViewModel(
             }
         }
     }
-
     fun refreshArtworkKeyStatus() = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         mutableState.update { it.copy(artworkKeyStatusLoading = true) }
-        val result = container.cloudSyncGateway.artworkKeyStatus(userId)
+        val result = container.cloudSyncGateway.artworkProviderStatuses(userId)
+        val configured = result.getOrElse { emptyList() }.associate { it.provider to it.configured }
         mutableState.update {
             it.copy(
-                artworkKeyConfigured = result.getOrDefault(false),
+                artworkProviderStatuses = ArtworkProvider.entries.associateWith { provider ->
+                    configured[provider] == true
+                },
                 artworkKeyStatusLoading = false,
             )
         }
     }
 
-    fun saveArtworkKey(apiKey: String) = viewModelScope.launch {
+    fun saveArtworkKey(provider: ArtworkProvider, apiKey: String) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         if (apiKey.trim().isBlank()) {
-            showMessage("Paste a TMDB API key first.")
+            showMessage("Paste a ${provider.displayName} API key first.")
             return@launch
         }
-        container.cloudSyncGateway.saveArtworkKey(userId, apiKey.trim())
+        container.cloudSyncGateway.saveArtworkKey(userId, provider, apiKey.trim())
             .onSuccess {
                 mutableState.update {
                     it.copy(
-                        artworkKeyConfigured = true,
-                        lastArtworkLookupFailedAtEpochMillis = null,
+                        artworkProviderStatuses = it.artworkProviderStatuses + (provider to true),
+                        lastArtworkLookupFailures = it.lastArtworkLookupFailures - provider,
                     )
                 }
-                showMessage("TMDB artwork key saved.")
+                showMessage("${provider.displayName} artwork key saved.")
             }
-            .onFailure { showMessage("Could not save the artwork key. Try again.") }
+            .onFailure { showMessage("Could not save the ${provider.displayName} artwork key. Try again.") }
     }
 
-    fun deleteArtworkKey() = viewModelScope.launch {
+    fun deleteArtworkKey(provider: ArtworkProvider) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
-        container.cloudSyncGateway.deleteArtworkKey(userId)
+        container.cloudSyncGateway.deleteArtworkKey(userId, provider)
             .onSuccess {
                 mutableState.update {
                     it.copy(
-                        artworkKeyConfigured = false,
-                        lastArtworkLookupFailedAtEpochMillis = null,
+                        artworkProviderStatuses = it.artworkProviderStatuses + (provider to false),
+                        lastArtworkLookupFailures = it.lastArtworkLookupFailures - provider,
                     )
                 }
-                showMessage("TMDB artwork key removed.")
+                showMessage("${provider.displayName} artwork key removed.")
             }
-            .onFailure { showMessage("Could not remove the artwork key. Try again.") }
+            .onFailure { showMessage("Could not remove the ${provider.displayName} artwork key. Try again.") }
+    }
+
+    fun openArtworkProviderKeyPage(provider: ArtworkProvider) {
+        mutableState.update {
+            it.copy(
+                configurationUrl = when (provider) {
+                    ArtworkProvider.TMDB -> TMDB_ARTWORK_KEY_URL
+                    ArtworkProvider.FANART -> FANART_ARTWORK_KEY_URL
+                },
+            )
+        }
     }
 
     fun openArtworkEditor(media: MediaPreview) {
@@ -547,9 +568,9 @@ class AppViewModel(
             it.copy(
                 artworkEditor = ArtworkEditorState(
                     media = resolvedMedia,
-                    selectedPosterPath = existing?.posterPath,
-                    selectedBackdropPath = existing?.backdropPath,
-                    selectedLogoPath = existing?.logoPath,
+                    selectedPoster = existing?.poster,
+                    selectedBackdrop = existing?.backdrop,
+                    selectedLogo = existing?.logo,
                 ),
             )
         }
@@ -566,21 +587,44 @@ class AppViewModel(
                 mediaKey = media.stableKey,
                 name = media.name,
                 releaseYear = media.releaseYear,
+                mediaType = media.type,
             )
             mutableState.update { state ->
                 val editor = state.artworkEditor?.takeIf { it.media.stableKey == media.stableKey }
                     ?: return@update state
                 result.fold(
-                    onSuccess = {
+                    onSuccess = { candidates ->
+                        val now = System.currentTimeMillis()
+                        val failures = state.lastArtworkLookupFailures.toMutableMap()
+                        candidates.providerResults.forEach { providerResult ->
+                            if (providerResult.status == ArtworkLookupStatus.SUCCESS) {
+                                failures.remove(providerResult.provider)
+                            } else {
+                                failures[providerResult.provider] = now
+                            }
+                        }
                         state.copy(
-                            artworkEditor = editor.copy(candidates = it, loading = false, error = null),
-                            lastArtworkLookupFailedAtEpochMillis = null,
+                            artworkEditor = editor.copy(
+                                candidates = candidates,
+                                loading = false,
+                                error = null,
+                            ),
+                            lastArtworkLookupFailures = failures,
                         )
-                    },
-                    onFailure = {
+                },
+                    onFailure = { error ->
+                        val keysMissing = error is ArtworkKeysNotConfiguredException ||
+                            error is CloudNotConfiguredException
                         state.copy(
-                            artworkEditor = editor.copy(loading = false, error = "Artwork lookup failed. Check your TMDB key."),
-                            lastArtworkLookupFailedAtEpochMillis = System.currentTimeMillis(),
+                            message = if (keysMissing) {
+                                "Please add artwork keys from Settings > Artwork."
+                            } else {
+                                state.message
+                            },
+                            artworkEditor = editor.copy(
+                                loading = false,
+                                error = if (keysMissing) null else "Artwork lookup failed. Try again.",
+                            ),
                         )
                     },
                 )
@@ -592,25 +636,29 @@ class AppViewModel(
         mutableState.update { it.copy(artworkEditor = null) }
     }
 
-    fun selectArtworkPoster(path: String?) {
-        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedPosterPath = path)) }
+    fun selectArtworkProvider(provider: ArtworkProvider?) {
+        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(providerFilter = provider)) }
     }
 
-    fun selectArtworkBackdrop(path: String?) {
-        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedBackdropPath = path)) }
+    fun selectArtworkPoster(asset: ArtworkAsset?) {
+        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedPoster = asset)) }
     }
 
-    fun selectArtworkLogo(path: String?) {
-        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedLogoPath = path)) }
+    fun selectArtworkBackdrop(asset: ArtworkAsset?) {
+        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedBackdrop = asset)) }
+    }
+
+    fun selectArtworkLogo(asset: ArtworkAsset?) {
+        mutableState.update { it.copy(artworkEditor = it.artworkEditor?.copy(selectedLogo = asset)) }
     }
 
     fun saveArtworkSelection() = viewModelScope.launch {
         val editor = state.value.artworkEditor ?: return@launch
         val profileId = state.value.activeProfileId ?: return@launch
         if (
-            editor.selectedPosterPath == null &&
-            editor.selectedBackdropPath == null &&
-            editor.selectedLogoPath == null
+            editor.selectedPoster == null &&
+            editor.selectedBackdrop == null &&
+            editor.selectedLogo == null
         ) {
             showMessage("Choose a poster, backdrop, or logo first.")
             return@launch
@@ -618,9 +666,9 @@ class AppViewModel(
         val override = ArtworkOverride(
             profileId = profileId,
             mediaKey = editor.media.stableKey,
-            posterPath = editor.selectedPosterPath,
-            backdropPath = editor.selectedBackdropPath,
-            logoPath = editor.selectedLogoPath,
+            poster = editor.selectedPoster,
+            backdrop = editor.selectedBackdrop,
+            logo = editor.selectedLogo,
             updatedAtEpochMillis = System.currentTimeMillis(),
         )
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
@@ -1400,6 +1448,8 @@ class AppViewModel(
     )
 
     companion object {
+        private const val TMDB_ARTWORK_KEY_URL = "https://www.themoviedb.org/settings/api"
+        private const val FANART_ARTWORK_KEY_URL = "https://fanart.tv/get-an-api-key/"
         private const val MAX_DISCOVERED_PROVIDERS = 50
         private const val DEFAULT_CATALOG_SORT_ORDER = -100
         private const val DEFAULT_CATALOG_DISPLAY_NAME = "Lamphaus Catalog"
@@ -1415,6 +1465,12 @@ class AppViewModel(
         }
     }
 }
+private val ArtworkProvider.displayName: String
+    get() = when (this) {
+        ArtworkProvider.TMDB -> "TMDB"
+        ArtworkProvider.FANART -> "Fanart.tv"
+    }
+
 
 private fun String.canonicalProviderAddress(): String {
     val uri = runCatching { URI(trim()) }.getOrNull() ?: return trim()

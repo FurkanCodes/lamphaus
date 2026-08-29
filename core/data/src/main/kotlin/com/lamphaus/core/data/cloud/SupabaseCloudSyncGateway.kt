@@ -2,11 +2,15 @@ package com.lamphaus.core.data.cloud
 
 import android.util.Log
 import com.lamphaus.core.data.preferences.SyncedSettings
+import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkCandidates
-import com.lamphaus.core.model.ArtworkProvider
 import com.lamphaus.core.model.ArtworkOverride
+import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderResult
+import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.ProfileKind
 import com.lamphaus.core.model.ProviderSubscription
@@ -154,7 +158,7 @@ class SupabaseCloudSyncGateway(
             // The artwork BYOK key rides the same encrypted table; it is not
             // an add-on and must never surface in the sources UI.
             json.decodeFromString<ProviderConfigsResponse>(body).configs
-                .filter { it.providerId != ARTWORK_PROVIDER_ID }
+                .filter { it.providerId !in ARTWORK_PROVIDER_IDS }
                 .map { it.toModel() }
         }
     }
@@ -189,19 +193,23 @@ class SupabaseCloudSyncGateway(
         }
     }
 
-    override suspend fun artworkKeyStatus(userId: String): Result<Boolean> = runCatching {
+    override suspend fun artworkProviderStatuses(userId: String): Result<List<ArtworkProviderStatus>> = runCatching {
         sessionRecovery.withAuthRetry {
             val body = supabase.functions.buildEdgeFunction(FUNCTION_ARTWORK_KEY_STATUS)
                 .invoke("{}") { contentType(ContentType.Application.Json) }
                 .bodyOrThrow()
-            json.decodeFromString<ArtworkKeyStatusResponse>(body).configured
+            json.decodeFromString<ArtworkKeyStatusResponse>(body).toModels()
         }
     }
 
-    override suspend fun saveArtworkKey(userId: String, apiKey: String): Result<Unit> = runCatching {
+    override suspend fun saveArtworkKey(
+        userId: String,
+        provider: ArtworkProvider,
+        apiKey: String,
+    ): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
             supabase.functions.buildEdgeFunction(FUNCTION_SAVE_ARTWORK_CONFIG)
-                .invoke(json.encodeToString(ArtworkKeyUpsert(apiKey = apiKey))) {
+                .invoke(json.encodeToString(ArtworkKeyUpsert(provider = provider, apiKey = apiKey))) {
                     contentType(ContentType.Application.Json)
                 }
                 .bodyOrThrow()
@@ -209,10 +217,12 @@ class SupabaseCloudSyncGateway(
         }
     }
 
-    override suspend fun deleteArtworkKey(userId: String): Result<Unit> = runCatching {
+    override suspend fun deleteArtworkKey(userId: String, provider: ArtworkProvider): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
             supabase.functions.buildEdgeFunction(FUNCTION_DELETE_ARTWORK_CONFIG)
-                .invoke("{}") { contentType(ContentType.Application.Json) }
+                .invoke(json.encodeToString(ArtworkKeyDelete(provider))) {
+                    contentType(ContentType.Application.Json)
+                }
                 .bodyOrThrow()
             Unit
         }
@@ -223,20 +233,34 @@ class SupabaseCloudSyncGateway(
         mediaKey: String,
         name: String,
         releaseYear: Int?,
+        mediaType: MediaType,
     ): Result<ArtworkCandidates> = runCatching {
         sessionRecovery.withAuthRetry {
-            val body = supabase.functions.buildEdgeFunction(FUNCTION_RESOLVE_ARTWORK)
-                .invoke(
-                    json.encodeToString(
-                        ArtworkCandidatesRequest(
-                            mediaKey = mediaKey,
-                            name = name,
-                            releaseYear = releaseYear,
+            val body = try {
+                supabase.functions.buildEdgeFunction(FUNCTION_RESOLVE_ARTWORK)
+                    .invoke(
+                        json.encodeToString(
+                            ArtworkCandidatesRequest(
+                                mediaKey = mediaKey,
+                                name = name,
+                                releaseYear = releaseYear,
+                                mediaType = mediaType,
+                            ),
                         ),
-                    ),
-                ) { contentType(ContentType.Application.Json) }
-                .bodyOrThrow()
-            json.decodeFromString<ArtworkCandidatesResponse>(body).toModel()
+                    ) { contentType(ContentType.Application.Json) }
+                    .bodyOrThrow()
+            } catch (error: SupabaseFunctionException) {
+                if (error.responseCode == ARTWORK_KEYS_NOT_CONFIGURED) {
+                    throw ArtworkKeysNotConfiguredException()
+                }
+                throw error
+            }
+            val decoded = runCatching {
+                json.decodeFromString<ArtworkCandidatesResponse>(body).toModel()
+            }.getOrElse {
+                json.decodeFromString<LegacyArtworkCandidatesResponse>(body).toModel()
+            }
+            decoded
         }
     }
 
@@ -462,58 +486,98 @@ internal data class ProviderConfigDelete(
 
 private const val KEY_MANIFEST_URL = "manifest_url"
 
-/** Reserved provider_configs row holding the encrypted artwork BYOK key. */
-internal const val ARTWORK_PROVIDER_ID = "artwork.tmdb"
+/** Reserved provider_configs rows holding encrypted artwork BYOK keys. */
+internal val ARTWORK_PROVIDER_IDS = setOf("artwork.tmdb", "artwork.fanart")
+private const val ARTWORK_KEYS_NOT_CONFIGURED = "artwork_key_not_configured"
 
 @Serializable
 internal data class ArtworkKeyUpsert(
-    @SerialName("provider") val provider: ArtworkProvider = ArtworkProvider.TMDB,
+    @SerialName("provider") val provider: ArtworkProvider,
     @SerialName("api_key") val apiKey: String,
 )
 
 @Serializable
+internal data class ArtworkKeyDelete(
+    @SerialName("provider") val provider: ArtworkProvider,
+)
+
+@Serializable
 internal data class ArtworkCandidatesRequest(
-    @SerialName("provider") val provider: ArtworkProvider = ArtworkProvider.TMDB,
     @SerialName("media_key") val mediaKey: String,
     @SerialName("name") val name: String,
     @SerialName("release_year") val releaseYear: Int? = null,
+    @SerialName("media_type") val mediaType: MediaType,
 )
 
 @Serializable
 internal data class ArtworkCandidatesResponse(
-    @SerialName("provider") val provider: ArtworkProvider = ArtworkProvider.TMDB,
+    @SerialName("posters") val posters: List<ArtworkAssetWire> = emptyList(),
+    @SerialName("backdrops") val backdrops: List<ArtworkAssetWire> = emptyList(),
+    @SerialName("logos") val logos: List<ArtworkAssetWire> = emptyList(),
+    @SerialName("provider_results") val providerResults: List<ArtworkProviderResult> = emptyList(),
+) {
+    fun toModel() = ArtworkCandidates(
+        posters = posters.map(ArtworkAssetWire::toModel),
+        backdrops = backdrops.map(ArtworkAssetWire::toModel),
+        logos = logos.map(ArtworkAssetWire::toModel),
+        providerResults = providerResults,
+    )
+}
+@Serializable
+internal data class LegacyArtworkCandidatesResponse(
     @SerialName("posters") val posters: List<String> = emptyList(),
     @SerialName("backdrops") val backdrops: List<String> = emptyList(),
     @SerialName("logos") val logos: List<String> = emptyList(),
 ) {
     fun toModel() = ArtworkCandidates(
-        provider = provider,
-        posters = posters,
-        backdrops = backdrops,
-        logos = logos,
+        posters = posters.map { ArtworkAsset(ArtworkProvider.TMDB, it) },
+        backdrops = backdrops.map { ArtworkAsset(ArtworkProvider.TMDB, it) },
+        logos = logos.map { ArtworkAsset(ArtworkProvider.TMDB, it) },
     )
 }
 
 @Serializable
+internal data class ArtworkAssetWire(
+    @SerialName("provider") val provider: ArtworkProvider,
+    @SerialName("reference") val reference: String,
+) {
+    fun toModel() = ArtworkAsset(provider = provider, reference = reference)
+}
+
+@Serializable
 internal data class ArtworkKeyStatusResponse(
-    val configured: Boolean = false,
-)
+    @SerialName("providers") val providers: List<ArtworkProviderStatus> = emptyList(),
+    @SerialName("configured") val legacyConfigured: Boolean? = null,
+) {
+    fun toModels(): List<ArtworkProviderStatus> =
+        if (providers.isNotEmpty()) {
+            providers
+        } else {
+            listOf(
+                ArtworkProviderStatus(ArtworkProvider.TMDB, legacyConfigured == true),
+                ArtworkProviderStatus(ArtworkProvider.FANART, configured = false),
+            )
+        }
+}
 
 @Serializable
 internal data class ArtworkOverrideRow(
     @SerialName("profile_id") val profileId: String,
     @SerialName("media_key") val mediaKey: String,
     @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("poster_provider") val posterProvider: ArtworkProvider = ArtworkProvider.TMDB,
     @SerialName("backdrop_path") val backdropPath: String? = null,
+    @SerialName("backdrop_provider") val backdropProvider: ArtworkProvider = ArtworkProvider.TMDB,
     @SerialName("logo_path") val logoPath: String? = null,
+    @SerialName("logo_provider") val logoProvider: ArtworkProvider = ArtworkProvider.TMDB,
     @SerialName("updated_at_epoch_millis") val updatedAtEpochMillis: Long,
 ) {
     fun toModel() = ArtworkOverride(
         profileId = profileId,
         mediaKey = mediaKey,
-        posterPath = posterPath,
-        backdropPath = backdropPath,
-        logoPath = logoPath,
+        poster = posterPath.toAsset(posterProvider),
+        backdrop = backdropPath.toAsset(backdropProvider),
+        logo = logoPath.toAsset(logoProvider),
         updatedAtEpochMillis = updatedAtEpochMillis,
     )
 
@@ -521,10 +585,16 @@ internal data class ArtworkOverrideRow(
         fun of(override: ArtworkOverride) = ArtworkOverrideRow(
             profileId = override.profileId,
             mediaKey = override.mediaKey,
-            posterPath = override.posterPath,
-            backdropPath = override.backdropPath,
-            logoPath = override.logoPath,
+            posterPath = override.poster?.reference,
+            posterProvider = override.poster?.provider ?: ArtworkProvider.TMDB,
+            backdropPath = override.backdrop?.reference,
+            backdropProvider = override.backdrop?.provider ?: ArtworkProvider.TMDB,
+            logoPath = override.logo?.reference,
+            logoProvider = override.logo?.provider ?: ArtworkProvider.TMDB,
             updatedAtEpochMillis = override.updatedAtEpochMillis,
         )
     }
 }
+
+private fun String?.toAsset(provider: ArtworkProvider): ArtworkAsset? =
+    this?.trim()?.takeIf(String::isNotBlank)?.let { ArtworkAsset(provider, it) }

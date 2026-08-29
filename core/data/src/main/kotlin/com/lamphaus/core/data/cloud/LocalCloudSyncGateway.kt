@@ -3,9 +3,12 @@ package com.lamphaus.core.data.cloud
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.model.ArtworkCandidates
 import com.lamphaus.core.model.ArtworkOverride
+import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.LibraryEntry
-import com.lamphaus.core.model.Profile
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.ProviderSubscription
+import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.WatchProgress
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -25,9 +28,17 @@ class LocalCloudSyncGateway : CloudSyncGateway {
     override fun artworkOverrides(userId: String, profileId: String): Flow<List<ArtworkOverride>> = emptyFlow()
     override suspend fun saveArtworkOverride(userId: String, override: ArtworkOverride) = Result.success(Unit)
     override suspend fun deleteArtworkOverride(userId: String, profileId: String, mediaKey: String) = Result.success(Unit)
-    override suspend fun artworkKeyStatus(userId: String) = Result.success(false)
-    override suspend fun saveArtworkKey(userId: String, apiKey: String) = Result.failure<Unit>(CloudNotConfiguredException())
-    override suspend fun deleteArtworkKey(userId: String) = Result.failure<Unit>(CloudNotConfiguredException())
-    override suspend fun artworkCandidates(userId: String, mediaKey: String, name: String, releaseYear: Int?) =
-        Result.failure<ArtworkCandidates>(CloudNotConfiguredException())
+    override suspend fun artworkProviderStatuses(userId: String) =
+        Result.success(ArtworkProvider.entries.map { ArtworkProviderStatus(it, configured = false) })
+    override suspend fun saveArtworkKey(userId: String, provider: ArtworkProvider, apiKey: String) =
+        Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun deleteArtworkKey(userId: String, provider: ArtworkProvider) =
+        Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun artworkCandidates(
+        userId: String,
+        mediaKey: String,
+        name: String,
+        releaseYear: Int?,
+        mediaType: MediaType,
+    ) = Result.failure<ArtworkCandidates>(CloudNotConfiguredException())
 }

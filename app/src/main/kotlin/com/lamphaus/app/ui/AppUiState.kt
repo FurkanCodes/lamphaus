@@ -2,8 +2,10 @@ package com.lamphaus.app.ui
 
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
+import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkCandidates
 import com.lamphaus.core.model.ArtworkOverride
+import com.lamphaus.core.model.ArtworkProvider
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaDetail
@@ -20,12 +22,30 @@ import com.lamphaus.core.model.Episode
 data class ArtworkEditorState(
     val media: MediaPreview,
     val candidates: ArtworkCandidates? = null,
-    val selectedPosterPath: String? = null,
-    val selectedBackdropPath: String? = null,
-    val selectedLogoPath: String? = null,
+    val selectedPoster: ArtworkAsset? = null,
+    val selectedBackdrop: ArtworkAsset? = null,
+    val selectedLogo: ArtworkAsset? = null,
+    val providerFilter: ArtworkProvider? = null,
     val loading: Boolean = true,
     val error: String? = null,
-)
+) {
+    val availableProviders: List<ArtworkProvider>
+        get() {
+            val present = candidates?.providerResults?.map { it.provider }.orEmpty().toSet()
+            return ArtworkProvider.entries.filter(present::contains)
+        }
+    val filteredPosters: List<ArtworkAsset>
+        get() = candidates?.posters.orEmpty().filterByProvider(providerFilter)
+
+    val filteredBackdrops: List<ArtworkAsset>
+        get() = candidates?.backdrops.orEmpty().filterByProvider(providerFilter)
+
+    val filteredLogos: List<ArtworkAsset>
+        get() = candidates?.logos.orEmpty().filterByProvider(providerFilter)
+}
+
+private fun List<ArtworkAsset>.filterByProvider(provider: ArtworkProvider?): List<ArtworkAsset> =
+    provider?.let { selected -> filter { it.provider == selected } } ?: this
 
 data class CatalogSection(
     val id: String,
@@ -66,9 +86,10 @@ data class AppUiState(
     val selectedDetail: MediaDetail? = null,
     val artworkOverrides: List<ArtworkOverride> = emptyList(),
     val artworkEditor: ArtworkEditorState? = null,
-    val artworkKeyConfigured: Boolean = false,
+    val artworkProviderStatuses: Map<ArtworkProvider, Boolean> =
+        ArtworkProvider.entries.associateWith { false },
     val artworkKeyStatusLoading: Boolean = false,
-    val lastArtworkLookupFailedAtEpochMillis: Long? = null,
+    val lastArtworkLookupFailures: Map<ArtworkProvider, Long> = emptyMap(),
     val sourcePicker: SourcePickerState? = null,
     val pairingSession: PairingSession? = null,
     val playbackRequest: PlaybackRequest? = null,

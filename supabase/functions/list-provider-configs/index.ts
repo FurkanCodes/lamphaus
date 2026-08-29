@@ -45,6 +45,7 @@ const decoder = new TextDecoder();
 
 const b64Decode = (text: string): Uint8Array =>
   Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
 
 let keyPromise: Promise<CryptoKey> | null = null;
 
@@ -53,7 +54,7 @@ function encryptionKey(): Promise<CryptoKey> {
   if (!secret) return Promise.reject(new Error("PROVIDER_CONFIG_KEY not set"));
   keyPromise ??= crypto.subtle.importKey(
     "raw",
-    b64Decode(secret),
+    bufferSource(b64Decode(secret)),
     "AES-GCM",
     false,
     ["encrypt", "decrypt"],
@@ -73,16 +74,16 @@ async function decryptConfig(
   const plaintext = await crypto.subtle.decrypt(
     {
       name: "AES-GCM",
-      iv: b64Decode(ivText),
-      additionalData: new TextEncoder().encode(`${userId}:${providerId}`),
+      iv: bufferSource(b64Decode(ivText)),
+      additionalData: bufferSource(new TextEncoder().encode(`${userId}:${providerId}`)),
     },
     await encryptionKey(),
-    b64Decode(ciphertextText),
+    bufferSource(b64Decode(ciphertextText)),
   );
   return JSON.parse(decoder.decode(plaintext));
 }
 
-const ARTWORK_PROVIDER_ID = "artwork.tmdb";
+const ARTWORK_PROVIDER_IDS = new Set(["artwork.tmdb", "artwork.fanart"]);
 // ─────────────────────────────── handler ───────────────────────────────
 
 Deno.serve(async (req) => {
@@ -105,7 +106,7 @@ Deno.serve(async (req) => {
   try {
     const configs = [];
     for (const row of rows) {
-      if (row.provider_id === ARTWORK_PROVIDER_ID) continue;
+      if (ARTWORK_PROVIDER_IDS.has(row.provider_id)) continue;
       configs.push({
         provider_id: row.provider_id,
         display_name: row.display_name,
@@ -117,7 +118,7 @@ Deno.serve(async (req) => {
     }
     return json({ configs });
   } catch (error) {
-    console.error("decrypt failed:", error.message);
+    console.error("decrypt failed:", error instanceof Error ? error.message : "unknown");
     return json({ error: "decrypt_failed" }, 500);
   }
 });
