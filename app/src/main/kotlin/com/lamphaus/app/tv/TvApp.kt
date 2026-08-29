@@ -130,7 +130,7 @@ import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
-import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderResult
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
@@ -1639,7 +1639,7 @@ private fun TvArtworkEditorScreen(
     onPosterSelected: (ArtworkAsset?) -> Unit,
     onBackdropSelected: (ArtworkAsset?) -> Unit,
     onLogoSelected: (ArtworkAsset?) -> Unit,
-    onProviderSelected: (ArtworkProvider?) -> Unit,
+    onProviderSelected: (ArtworkProviderId?) -> Unit,
     onSave: () -> Unit,
 ) {
     LazyColumn(
@@ -1681,9 +1681,9 @@ private fun TvArtworkEditorScreen(
                             onClick = { onProviderSelected(null) },
                         )
                     }
-                    items(editor.availableProviders, key = { it.name }) { provider ->
+                    items(editor.availableProviders, key = { it.value }) { provider ->
                         TvSourceFilterChip(
-                            label = stringResource(provider.nameRes()),
+                            label = provider.value,
                             selected = editor.providerFilter == provider,
                             onClick = { onProviderSelected(provider) },
                         )
@@ -1755,7 +1755,7 @@ private fun TvArtworkEditorScreen(
                                         modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
                                     )
                                     TvSourceBadge(
-                                        label = stringResource(asset.provider.nameRes()),
+                                        label = asset.provider.value,
                                         focused = focused,
                                         modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                                     )
@@ -1808,7 +1808,7 @@ private fun TvArtworkEditorScreen(
                                         modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
                                     )
                                     TvSourceBadge(
-                                        label = stringResource(asset.provider.nameRes()),
+                                        label = asset.provider.value,
                                         focused = focused,
                                         modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                                     )
@@ -1861,7 +1861,7 @@ private fun TvArtworkEditorScreen(
                                         modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
                                     )
                                     TvSourceBadge(
-                                        label = stringResource(asset.provider.nameRes()),
+                                        label = asset.provider.value,
                                         focused = focused,
                                         modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                                     )
@@ -1902,7 +1902,7 @@ private fun TvArtworkEmptyMessage(editor: ArtworkEditorState, artworkKind: Strin
         stringResource(
             R.string.artwork_no_source_candidates,
             artworkKind,
-            stringResource(provider.nameRes()),
+            provider.value,
         )
     } ?: if (noCandidatesFromAnyProvider) {
         stringResource(R.string.artwork_no_connected_candidates)
@@ -1916,12 +1916,12 @@ private fun TvArtworkEmptyMessage(editor: ArtworkEditorState, artworkKind: Strin
 private fun TvArtworkProviderMessages(results: List<ArtworkProviderResult>) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         results.filter { it.status != ArtworkLookupStatus.SUCCESS }.forEach { result ->
-            val providerName = stringResource(result.provider.nameRes())
+            val providerName = result.displayName
             val text = when (result.status) {
                 ArtworkLookupStatus.INVALID_KEY ->
                     stringResource(R.string.artwork_provider_invalid_key, providerName)
                 ArtworkLookupStatus.MISSING_EXTERNAL_ID ->
-                    stringResource(R.string.artwork_provider_missing_external_id)
+                    stringResource(R.string.artwork_provider_missing_external_id, providerName)
                 ArtworkLookupStatus.LOOKUP_FAILED ->
                     stringResource(R.string.artwork_provider_lookup_failed, providerName)
                 ArtworkLookupStatus.NO_MATCH ->
@@ -1933,10 +1933,6 @@ private fun TvArtworkProviderMessages(results: List<ArtworkProviderResult>) {
     }
 }
 
-private fun ArtworkProvider.nameRes(): Int = when (this) {
-    ArtworkProvider.TMDB -> R.string.artwork_tmdb_name
-    ArtworkProvider.FANART -> R.string.artwork_fanart_name
-}
 
 @Composable
 private fun TvEpisodeCard(
@@ -2225,8 +2221,7 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
 }
 @Composable
 private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
-    var tmdbArtworkKey by rememberSaveable { mutableStateOf("") }
-    var fanartArtworkKey by rememberSaveable { mutableStateOf("") }
+    var artworkKeys by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
     LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2243,20 +2238,17 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        items(ArtworkProvider.entries, key = { it.name }) { provider ->
-            val providerName = stringResource(provider.nameRes())
-            val helpMessage = stringResource(
-                when (provider) {
-                    ArtworkProvider.TMDB -> R.string.artwork_tmdb_help
-                    ArtworkProvider.FANART -> R.string.artwork_fanart_help
-                },
-            )
-            val key = when (provider) {
-                ArtworkProvider.TMDB -> tmdbArtworkKey
-                ArtworkProvider.FANART -> fanartArtworkKey
+        if (state.artworkProviders.isEmpty() && state.artworkProviderCatalogError != null) {
+            item {
+                Text(state.artworkProviderCatalogError, color = MaterialTheme.colorScheme.error)
+                TvAction(label = "Retry", icon = Icons.Outlined.Refresh, onClick = viewModel::refreshArtworkKeyStatus)
             }
-            val configured = state.artworkProviderStatuses[provider] == true
-            val failure = state.lastArtworkLookupFailures[provider]?.let {
+        }
+        items(state.artworkProviders, key = { it.provider.value }) { provider ->
+            val providerId = provider.provider
+            val providerName = provider.displayName
+            val apiKey = artworkKeys[providerId.value].orEmpty()
+            val failure = state.lastArtworkLookupFailures[providerId]?.let {
                 DateUtils.getRelativeTimeSpanString(
                     it,
                     System.currentTimeMillis(),
@@ -2265,79 +2257,79 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
             }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(providerName, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(
-                        when (provider) {
-                            ArtworkProvider.TMDB -> R.string.artwork_tmdb_purpose
-                            ArtworkProvider.FANART -> R.string.artwork_fanart_purpose
-                        },
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                TvAction(
-                    label = stringResource(R.string.artwork_get_key, providerName),
-                    icon = Icons.Outlined.Info,
-                    onClick = { viewModel.openArtworkProviderKeyPage(provider) },
-                )
-                TvEditableTextField(
-                    value = key,
-                    onValueChange = { value ->
-                        when (provider) {
-                            ArtworkProvider.TMDB -> tmdbArtworkKey = value
-                            ArtworkProvider.FANART -> fanartArtworkKey = value
-                        }
-                    },
-                    label = stringResource(R.string.artwork_api_key),
-                    placeholder = stringResource(R.string.artwork_api_key_placeholder),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done,
-                    ),
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth().height(60.dp),
-                    onImeAction = { viewModel.saveArtworkKey(provider, key) },
-                )
-                TvAction(
-                    label = stringResource(R.string.artwork_get_help),
-                    icon = Icons.Outlined.Info,
-                    onClick = { viewModel.reportMessage(helpMessage) },
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TvAction(
-                        label = stringResource(R.string.save_artwork_key),
-                        icon = Icons.Outlined.Check,
-                        enabled = key.isNotBlank(),
-                        onClick = {
-                            viewModel.saveArtworkKey(provider, key)
-                            when (provider) {
-                                ArtworkProvider.TMDB -> tmdbArtworkKey = ""
-                                ArtworkProvider.FANART -> fanartArtworkKey = ""
-                            }
-                        },
-                    )
+                if (!provider.enabled) {
+                    Text("This provider is no longer available. You can remove its saved key.")
                     TvAction(
                         label = stringResource(R.string.remove_artwork_key),
                         icon = Icons.Outlined.Delete,
-                        enabled = configured,
-                        onClick = { viewModel.deleteArtworkKey(provider) },
+                        enabled = provider.configured,
+                        onClick = { viewModel.deleteArtworkKey(providerId) },
                     )
-                }
-                Text(
-                    when {
-                        state.artworkKeyStatusLoading -> stringResource(R.string.artwork_key_loading, providerName)
-                        configured -> stringResource(R.string.artwork_key_active, providerName)
-                        else -> stringResource(R.string.artwork_key_not_configured, providerName)
-                    },
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                failure?.let {
+                } else {
                     Text(
-                        stringResource(R.string.artwork_key_last_lookup_failed, it),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
+                        provider.purpose,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
+                    TvAction(
+                        label = stringResource(R.string.artwork_get_key, providerName),
+                        icon = Icons.Outlined.Info,
+                        onClick = { viewModel.openArtworkProviderKeyPage(providerId) },
+                    )
+                    TvEditableTextField(
+                        value = apiKey,
+                        onValueChange = { value -> artworkKeys = artworkKeys + (providerId.value to value) },
+                        label = stringResource(R.string.artwork_api_key),
+                        placeholder = stringResource(R.string.artwork_api_key_placeholder),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done,
+                        ),
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth().height(60.dp),
+                        onImeAction = {
+                            viewModel.saveArtworkKey(providerId, apiKey)
+                            artworkKeys = artworkKeys - providerId.value
+                        },
+                    )
+                    TvAction(
+                        label = stringResource(R.string.artwork_get_help),
+                        icon = Icons.Outlined.Info,
+                        onClick = { viewModel.reportMessage(provider.helpText) },
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TvAction(
+                            label = stringResource(R.string.save_artwork_key),
+                            icon = Icons.Outlined.Check,
+                            enabled = apiKey.isNotBlank(),
+                            onClick = {
+                                viewModel.saveArtworkKey(providerId, apiKey)
+                                artworkKeys = artworkKeys - providerId.value
+                            },
+                        )
+                        TvAction(
+                            label = stringResource(R.string.remove_artwork_key),
+                            icon = Icons.Outlined.Delete,
+                            enabled = provider.configured,
+                            onClick = { viewModel.deleteArtworkKey(providerId) },
+                        )
+                    }
+                    Text(
+                        when {
+                            state.artworkKeyStatusLoading -> stringResource(R.string.artwork_key_loading, providerName)
+                            provider.configured -> stringResource(R.string.artwork_key_active, providerName)
+                            else -> stringResource(R.string.artwork_key_not_configured, providerName)
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    failure?.let {
+                        Text(
+                            stringResource(R.string.artwork_key_last_lookup_failed, it),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
         }

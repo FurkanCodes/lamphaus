@@ -5,7 +5,8 @@ import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkCandidates
 import com.lamphaus.core.model.ArtworkOverride
-import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderId
+import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaDetail
@@ -25,14 +26,17 @@ data class ArtworkEditorState(
     val selectedPoster: ArtworkAsset? = null,
     val selectedBackdrop: ArtworkAsset? = null,
     val selectedLogo: ArtworkAsset? = null,
-    val providerFilter: ArtworkProvider? = null,
+    val providerFilter: ArtworkProviderId? = null,
     val loading: Boolean = true,
     val error: String? = null,
 ) {
-    val availableProviders: List<ArtworkProvider>
+    val availableProviders: List<ArtworkProviderId>
         get() {
-            val present = candidates?.providerResults?.map { it.provider }.orEmpty().toSet()
-            return ArtworkProvider.entries.filter(present::contains)
+            val resultProviders = candidates?.providerResults?.map { it.provider }.orEmpty()
+            val assetProviders = candidates?.let {
+                (it.posters + it.backdrops + it.logos).map { asset -> asset.provider }
+            }.orEmpty()
+            return (resultProviders + assetProviders).distinct()
         }
     val filteredPosters: List<ArtworkAsset>
         get() = candidates?.posters.orEmpty().filterByProvider(providerFilter)
@@ -44,7 +48,7 @@ data class ArtworkEditorState(
         get() = candidates?.logos.orEmpty().filterByProvider(providerFilter)
 }
 
-private fun List<ArtworkAsset>.filterByProvider(provider: ArtworkProvider?): List<ArtworkAsset> =
+private fun List<ArtworkAsset>.filterByProvider(provider: ArtworkProviderId?): List<ArtworkAsset> =
     provider?.let { selected -> filter { it.provider == selected } } ?: this
 
 data class CatalogSection(
@@ -86,10 +90,10 @@ data class AppUiState(
     val selectedDetail: MediaDetail? = null,
     val artworkOverrides: List<ArtworkOverride> = emptyList(),
     val artworkEditor: ArtworkEditorState? = null,
-    val artworkProviderStatuses: Map<ArtworkProvider, Boolean> =
-        ArtworkProvider.entries.associateWith { false },
+    val artworkProviders: List<ArtworkProviderStatus> = emptyList(),
     val artworkKeyStatusLoading: Boolean = false,
-    val lastArtworkLookupFailures: Map<ArtworkProvider, Long> = emptyMap(),
+    val lastArtworkLookupFailures: Map<ArtworkProviderId, Long> = emptyMap(),
+    val artworkProviderCatalogError: String? = null,
     val sourcePicker: SourcePickerState? = null,
     val pairingSession: PairingSession? = null,
     val playbackRequest: PlaybackRequest? = null,

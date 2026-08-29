@@ -135,8 +135,8 @@ async function decryptConfig(
 
   await expectThrows("AAD binding: different user rejected", () =>
     decryptConfig(key, "user-b", "artwork.tmdb", blob));
-  await expectThrows("AAD binding: other artwork provider rejected", () =>
-    decryptConfig(key, "user-a", "artwork.fanart", blob));
+  await expectThrows("AAD binding: fixture provider rejected", () =>
+    decryptConfig(key, "user-a", "artwork.fixture_art", blob));
 
   const parts = blob.split(".");
   parts[2] = b64Encode(

@@ -13,7 +13,7 @@ import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkOverride
-import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.MediaPreview
 
 private const val TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
@@ -53,14 +53,20 @@ internal class ArtworkResolver(
 }
 
 internal fun tmdbImageUrl(path: String?, size: String): String? =
-    path?.trim()?.takeIf(String::isNotBlank)?.let { "$TMDB_IMAGE_BASE_URL/$size/${it.trimStart('/')}" }
-
-internal fun artworkImageUrl(asset: ArtworkAsset?, tmdbSize: String): String? =
-    when (asset?.provider) {
-        ArtworkProvider.TMDB -> tmdbImageUrl(asset.reference, tmdbSize)
-        ArtworkProvider.FANART -> asset.reference.takeIf { it.isNotBlank() && it.startsWith("https://") }
-        null -> null
+    path?.trim()?.takeIf { it.isNotBlank() && it.startsWith("/") }?.let {
+        "$TMDB_IMAGE_BASE_URL/$size/${it.trimStart('/')}"
     }
+
+internal fun artworkImageUrl(asset: ArtworkAsset?, tmdbSize: String): String? {
+    val value = asset?.reference?.trim()?.takeIf(String::isNotBlank) ?: return null
+    if (asset.provider == ArtworkProviderId.TMDB && value.startsWith("/")) {
+        return tmdbImageUrl(value, tmdbSize)
+    }
+    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return null
+    return value.takeIf {
+        uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
+    }
+}
 
 
 internal val LocalArtworkResolver = staticCompositionLocalOf { ArtworkResolver.Empty }

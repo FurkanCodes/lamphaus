@@ -3,7 +3,7 @@ package com.lamphaus.core.data.cloud
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.model.ArtworkCandidates
 import com.lamphaus.core.model.ArtworkOverride
-import com.lamphaus.core.model.ArtworkProvider
+import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.Profile
@@ -37,8 +37,8 @@ interface CloudSyncGateway {
     suspend fun deleteArtworkOverride(userId: String, profileId: String, mediaKey: String): Result<Unit>
 
     suspend fun artworkProviderStatuses(userId: String): Result<List<ArtworkProviderStatus>>
-    suspend fun saveArtworkKey(userId: String, provider: ArtworkProvider, apiKey: String): Result<Unit>
-    suspend fun deleteArtworkKey(userId: String, provider: ArtworkProvider): Result<Unit>
+    suspend fun saveArtworkKey(userId: String, provider: ArtworkProviderId, apiKey: String): Result<Unit>
+    suspend fun deleteArtworkKey(userId: String, provider: ArtworkProviderId): Result<Unit>
     suspend fun artworkCandidates(
         userId: String,
         mediaKey: String,

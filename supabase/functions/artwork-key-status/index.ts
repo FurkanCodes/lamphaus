@@ -1,13 +1,13 @@
+import {
+  isValidArtworkCatalogRow,
+  projectArtworkKeyStatus,
+  type ArtworkCatalogRow,
+} from "./catalog.ts";
+
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_JWT") ??
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ARTWORK_PROVIDER_IDS = {
-  tmdb: "artwork.tmdb",
-  fanart: "artwork.fanart",
-} as const;
-const ARTWORK_PROVIDERS = ["tmdb", "fanart"] as const;
-
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -32,35 +32,54 @@ async function requireUser(req: Request): Promise<{ id: string } | null> {
   return typeof user?.id === "string" ? user : null;
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-
-  const user = await requireUser(req);
-  if (!user) return json({ error: "unauthorized" }, 401);
-
+async function loadCatalog(): Promise<ArtworkCatalogRow[]> {
   const query = new URLSearchParams({
-    select: "provider_id",
-    user_id: `eq.${user.id}`,
-    provider_id: `in.(${Object.values(ARTWORK_PROVIDER_IDS).join(",")})`,
+    select: "id,display_name,purpose,help_text,key_page_url,sort_order,enabled",
+    order: "sort_order.asc,id.asc",
   });
+  const response = await fetch(`${SB_URL}/rest/v1/artwork_providers?${query}`, {
+    headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` },
+  });
+  if (!response.ok) {
+    console.error("artwork catalog lookup failed", response.status);
+    throw new Error("catalog_lookup_failed");
+  }
+  const rows: unknown = await response.json();
+  if (!Array.isArray(rows) || !rows.every(isValidArtworkCatalogRow)) throw new Error("catalog_invalid");
+  if (new Set(rows.map((row) => row.id)).size !== rows.length) throw new Error("catalog_invalid");
+  return rows;
+}
+
+async function loadConfiguredIds(userId: string): Promise<Set<string>> {
+  const query = new URLSearchParams({ select: "provider_id", user_id: `eq.${userId}` });
   const response = await fetch(`${SB_URL}/rest/v1/provider_configs?${query}`, {
     headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` },
   });
-  if (!response.ok) return json({ error: "status_failed" }, 500);
+  if (!response.ok) {
+    console.error("artwork status lookup failed", response.status);
+    throw new Error("status_lookup_failed");
+  }
   const rows: unknown = await response.json();
-  const configuredIds = Array.isArray(rows)
-    ? new Set(rows.flatMap((row) => {
-      if (typeof row !== "object" || row === null || Array.isArray(row)) return [];
-      const providerId = (row as Record<string, unknown>).provider_id;
-      return typeof providerId === "string" ? [providerId] : [];
-    }))
-    : new Set<string>();
+  if (!Array.isArray(rows)) throw new Error("status_lookup_failed");
+  return new Set(rows.flatMap((row) => {
+    if (typeof row !== "object" || row === null || Array.isArray(row)) return [];
+    const providerId = (row as Record<string, unknown>).provider_id;
+    return typeof providerId === "string" && providerId.toLowerCase().startsWith("artwork.") ? [providerId] : [];
+  }));
+}
 
-  return json({
-    providers: ARTWORK_PROVIDERS.map((provider) => ({
-      provider,
-      configured: configuredIds.has(ARTWORK_PROVIDER_IDS[provider]),
-    })),
-  });
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  const user = await requireUser(req);
+  if (!user) return json({ error: "unauthorized" }, 401);
+  const body = await req.json().catch(() => ({}) as Record<string, unknown>);
+  const contractVersion = body.contract_version === 2 ? 2 : undefined;
+  try {
+    const [catalog, configured] = await Promise.all([loadCatalog(), loadConfiguredIds(user.id)]);
+    return json(projectArtworkKeyStatus(catalog, configured, contractVersion));
+  } catch (error) {
+    console.error("artwork catalog/status failed", error instanceof Error ? error.name : "unknown");
+    return json({ error: error instanceof Error && error.message === "catalog_invalid" ? "catalog_invalid" : "status_failed" }, 500);
+  }
 });
