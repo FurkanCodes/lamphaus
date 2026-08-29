@@ -98,7 +98,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.core.text.HtmlCompat
 import coil3.compose.AsyncImage
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
@@ -1403,6 +1402,10 @@ private fun TvDetailScreen(
 ) {
     if (detail == null) return
     val playFocus = remember(detail.preview.stableKey) { FocusRequester() }
+    val libraryFocus = remember(detail.preview.stableKey) { FocusRequester() }
+    // Latest action button that held focus — metadata reading surfaces return
+    // here when focus re-approaches them from below.
+    var lastActionFocus by remember(detail.preview.stableKey) { mutableStateOf<FocusRequester?>(null) }
     val reducedMotion = rememberReducedMotion()
     val libraryPulse = remember(detail.preview.stableKey) { Animatable(1f) }
     var previousLibraryState by remember(detail.preview.stableKey) { mutableStateOf(inLibrary) }
@@ -1458,7 +1461,7 @@ private fun TvDetailScreen(
             item("details-header") {
                 Column(
                     modifier = Modifier
-                        .height(440.dp)
+                        .heightIn(min = 440.dp)
                         .width(520.dp)
                         .padding(start = TvLayoutTokens.screenHorizontalPadding, top = 138.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1481,12 +1484,10 @@ private fun TvDetailScreen(
                     detail.preview.description
                         ?.takeIf(String::isNotBlank)
                         ?.let {
-                            Text(
+                            TvExpandableText(
                                 text = it,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                                collapsedLines = 2,
+                                returnFocusProvider = { lastActionFocus },
                             )
                         }
                     TvMetadataLine(
@@ -1500,22 +1501,35 @@ private fun TvDetailScreen(
                         TvAction(
                             label = stringResource(R.string.play),
                             icon = Icons.Outlined.PlayArrow,
-                            modifier = Modifier.focusRequester(playFocus),
+                            modifier = Modifier
+                                .focusRequester(playFocus)
+                                .onFocusChanged { if (it.isFocused) lastActionFocus = playFocus },
                             onClick = { onPlay(null) },
                         )
                         TvAction(
                             label = stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library),
                             icon = if (inLibrary) Icons.Outlined.Check else Icons.Outlined.Add,
-                            modifier = Modifier.graphicsLayer {
-                                scaleX = libraryPulse.value
-                                scaleY = libraryPulse.value
-                            },
+                            modifier = Modifier
+                                .graphicsLayer {
+                                    scaleX = libraryPulse.value
+                                    scaleY = libraryPulse.value
+                                }
+                                .focusRequester(libraryFocus)
+                                .onFocusChanged { if (it.isFocused) lastActionFocus = libraryFocus },
                             enabled = !inLibrary,
                             onClick = onLibrary,
                         )
                     }
-                    TvPeopleSection(R.string.cast, detail.cast)
-                    TvPeopleSection(R.string.directors, detail.directors)
+                    TvExpandablePeopleSection(
+                        labelRes = R.string.cast,
+                        people = detail.cast,
+                        returnFocusProvider = { lastActionFocus },
+                    )
+                    TvExpandablePeopleSection(
+                        labelRes = R.string.directors,
+                        people = detail.directors,
+                        returnFocusProvider = { lastActionFocus },
+                    )
                 }
             }
             if (detail.episodes.isNotEmpty()) {
@@ -1551,30 +1565,6 @@ private fun TvDetailScreen(
         }
     }
 }
-@Composable
-private fun TvPeopleSection(@StringRes labelRes: Int, people: List<String>) {
-    if (people.isEmpty()) return
-    Column(
-        modifier = Modifier.padding(top = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(
-            text = stringResource(labelRes),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Text(
-            text = people.take(6).joinToString("  •  ") { name ->
-                HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
-            },
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
 @Composable
 private fun TvEpisodeCard(
     episode: Episode,
