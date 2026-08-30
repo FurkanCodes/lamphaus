@@ -1326,6 +1326,7 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
     var artworkKeys by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
     var deviceToRevoke by remember { mutableStateOf<PairedDevice?>(null) }
     var deleteAccountOpen by remember { mutableStateOf(false) }
+    var pendingArtworkStorageMode by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
     Scaffold(
         topBar = {
@@ -1486,6 +1487,19 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.local_only_artwork_keys)) },
+                    supportingContent = { Text(stringResource(R.string.local_only_artwork_keys_description)) },
+                    trailingContent = {
+                        Switch(
+                            checked = state.localOnlyArtworkKeys,
+                            onCheckedChange = { pendingArtworkStorageMode = it },
+                            enabled = !state.artworkStorageModeChanging,
+                        )
+                    },
+                )
+            }
             if (state.artworkProviders.isEmpty() && state.artworkProviderCatalogError != null) {
                 item {
                     Text(state.artworkProviderCatalogError, color = MaterialTheme.colorScheme.error)
@@ -1517,7 +1531,10 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                         if (!provider.enabled) {
                             Text("This provider is no longer available. You can remove its saved key.")
                             if (provider.configured) {
-                                OutlinedButton(onClick = { viewModel.deleteArtworkKey(providerId) }) {
+                                OutlinedButton(
+                                    onClick = { viewModel.deleteArtworkKey(providerId) },
+                                    enabled = !state.artworkStorageModeChanging,
+                                ) {
                                     Text(stringResource(R.string.remove_artwork_key))
                                 }
                             }
@@ -1550,12 +1567,15 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                                         viewModel.saveArtworkKey(providerId, apiKey)
                                         artworkKeys = artworkKeys - providerId.value
                                     },
-                                    enabled = apiKey.isNotBlank(),
+                                    enabled = !state.artworkStorageModeChanging && apiKey.isNotBlank(),
                                 ) {
                                     Text(stringResource(R.string.save_artwork_key))
                                 }
                                 if (provider.configured) {
-                                    OutlinedButton(onClick = { viewModel.deleteArtworkKey(providerId) }) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.deleteArtworkKey(providerId) },
+                                        enabled = !state.artworkStorageModeChanging,
+                                    ) {
                                         Text(stringResource(R.string.remove_artwork_key))
                                     }
                                 }
@@ -1653,6 +1673,40 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
             },
             dismissButton = {
                 TextButton(onClick = { deleteAccountOpen = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+    pendingArtworkStorageMode?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingArtworkStorageMode = null },
+            title = {
+                Text(
+                    stringResource(
+                        if (target) R.string.artwork_storage_enable_title
+                        else R.string.artwork_storage_disable_title,
+                    ),
+                )
+            },
+            text = {
+                Text(
+                    stringResource(
+                        if (target) R.string.artwork_storage_enable_body
+                        else R.string.artwork_storage_disable_body,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingArtworkStorageMode = null
+                    viewModel.changeArtworkKeyStorageMode(target)
+                }) {
+                    Text(stringResource(R.string.delete_keys_and_switch), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingArtworkStorageMode = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
             },
         )
     }

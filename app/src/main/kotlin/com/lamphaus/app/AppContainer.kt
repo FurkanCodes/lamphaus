@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.provider.Settings
 import androidx.room.Room
+import com.lamphaus.core.data.cloud.ArtworkStorageModeGateway
+import com.lamphaus.core.data.cloud.LocalArtworkClient
 import com.lamphaus.core.data.cloud.AccountGateway
 import com.lamphaus.core.data.cloud.LocalAccountGateway
 import com.lamphaus.core.data.cloud.LocalPairingGateway
@@ -26,6 +28,7 @@ import com.lamphaus.core.data.repository.LibraryRepository
 import com.lamphaus.core.data.repository.RoomLibraryRepository
 import com.lamphaus.core.data.security.AndroidKeystoreStringCipher
 import com.lamphaus.core.provider.HttpProviderClient
+import com.lamphaus.core.data.security.LocalArtworkKeyStore
 import com.lamphaus.core.provider.ProviderAggregator
 import com.lamphaus.core.provider.ProviderClient
 import com.lamphaus.core.provider.ProviderUrlPolicy
@@ -98,11 +101,18 @@ class AppContainer(context: Context) {
     } else {
         LocalPairingGateway()
     }
-    val cloudSyncGateway: CloudSyncGateway = if (supabase != null) {
+    private val baseCloudSyncGateway: CloudSyncGateway = if (supabase != null) {
         SupabaseCloudSyncGateway(supabase, checkNotNull(sessionRecovery))
     } else {
         LocalCloudSyncGateway()
     }
+    val artworkStorageModeGateway = ArtworkStorageModeGateway(
+        delegate = baseCloudSyncGateway,
+        preferences = preferences,
+        localKeys = LocalArtworkKeyStore(context),
+        localArtwork = LocalArtworkClient(),
+    )
+    val cloudSyncGateway: CloudSyncGateway = artworkStorageModeGateway
 
     fun openDevelopmentSession() {
         check(BuildConfig.DEBUG) { "Development sessions are disabled in this build." }

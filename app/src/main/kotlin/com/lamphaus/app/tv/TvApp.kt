@@ -102,6 +102,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import androidx.tv.material3.MaterialTheme
@@ -2222,6 +2223,7 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
 @Composable
 private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
     var artworkKeys by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var pendingArtworkStorageMode by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2236,6 +2238,15 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                 stringResource(R.string.artwork_settings_description),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.local_only_artwork_keys),
+                description = stringResource(R.string.local_only_artwork_keys_description),
+                checked = state.localOnlyArtworkKeys,
+                onCheckedChange = { pendingArtworkStorageMode = it },
+                enabled = !state.artworkStorageModeChanging,
             )
         }
         if (state.artworkProviders.isEmpty() && state.artworkProviderCatalogError != null) {
@@ -2262,7 +2273,7 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                     TvAction(
                         label = stringResource(R.string.remove_artwork_key),
                         icon = Icons.Outlined.Delete,
-                        enabled = provider.configured,
+                        enabled = provider.configured && !state.artworkStorageModeChanging,
                         onClick = { viewModel.deleteArtworkKey(providerId) },
                     )
                 } else {
@@ -2274,6 +2285,7 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                     TvAction(
                         label = stringResource(R.string.artwork_get_key, providerName),
                         icon = Icons.Outlined.Info,
+                        enabled = !state.artworkStorageModeChanging,
                         onClick = { viewModel.openArtworkProviderKeyPage(providerId) },
                     )
                     TvEditableTextField(
@@ -2282,6 +2294,7 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                         label = stringResource(R.string.artwork_api_key),
                         placeholder = stringResource(R.string.artwork_api_key_placeholder),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                        enabled = !state.artworkStorageModeChanging,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Password,
                             imeAction = ImeAction.Done,
@@ -2296,13 +2309,14 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                     TvAction(
                         label = stringResource(R.string.artwork_get_help),
                         icon = Icons.Outlined.Info,
+                        enabled = !state.artworkStorageModeChanging,
                         onClick = { viewModel.reportMessage(provider.helpText) },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         TvAction(
                             label = stringResource(R.string.save_artwork_key),
                             icon = Icons.Outlined.Check,
-                            enabled = apiKey.isNotBlank(),
+                            enabled = !state.artworkStorageModeChanging && apiKey.isNotBlank(),
                             onClick = {
                                 viewModel.saveArtworkKey(providerId, apiKey)
                                 artworkKeys = artworkKeys - providerId.value
@@ -2311,7 +2325,7 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                         TvAction(
                             label = stringResource(R.string.remove_artwork_key),
                             icon = Icons.Outlined.Delete,
-                            enabled = provider.configured,
+                            enabled = provider.configured && !state.artworkStorageModeChanging,
                             onClick = { viewModel.deleteArtworkKey(providerId) },
                         )
                     }
@@ -2334,6 +2348,66 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
             }
         }
     }
+    pendingArtworkStorageMode?.let { target ->
+        TvArtworkStorageModeDialog(
+            target = target,
+            onDismiss = { pendingArtworkStorageMode = null },
+            onConfirm = {
+                pendingArtworkStorageMode = null
+                viewModel.changeArtworkKeyStorageMode(target)
+            },
+        )
+    }
+}
+
+@Composable
+private fun TvArtworkStorageModeDialog(
+    target: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val cancelFocusRequester = remember { FocusRequester() }
+    Dialog(onDismissRequest = onDismiss) {
+        LaunchedEffect(Unit) { cancelFocusRequester.requestFocus() }
+        Surface(
+            modifier = Modifier.width(720.dp),
+            colors = SurfaceDefaults.colors(containerColor = TvSurfaceTokens.elevated),
+        ) {
+            Column(
+                modifier = Modifier.padding(32.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Text(
+                    stringResource(
+                        if (target) R.string.artwork_storage_enable_title
+                        else R.string.artwork_storage_disable_title,
+                    ),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Text(
+                    stringResource(
+                        if (target) R.string.artwork_storage_enable_body
+                        else R.string.artwork_storage_disable_body,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvAction(
+                        label = stringResource(R.string.cancel),
+                        icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                        modifier = Modifier.focusRequester(cancelFocusRequester),
+                        onClick = onDismiss,
+                    )
+                    TvAction(
+                        label = stringResource(R.string.delete_keys_and_switch),
+                        icon = Icons.Outlined.Delete,
+                        onClick = onConfirm,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -2342,9 +2416,11 @@ private fun TvSettingsToggleRow(
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     TvFocusableSurface(
         onClick = { onCheckedChange(!checked) },
+        enabled = enabled,
         role = Role.Switch,
         modifier = Modifier
             .fillMaxWidth()

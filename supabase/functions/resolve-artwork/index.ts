@@ -11,6 +11,8 @@ import {
 } from "./provider.ts";
 import { fanartAdapter } from "./providers/fanart.ts";
 import { tmdbAdapter } from "./providers/tmdb.ts";
+import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
+
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -57,46 +59,19 @@ async function requireUser(req: Request): Promise<{ id: string } | null> {
   return typeof user?.id === "string" ? user : null;
 }
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-let encryptionKeyPromise: Promise<CryptoKey> | null = null;
-
-function b64Decode(text: string): Uint8Array {
-  return Uint8Array.from(atob(text), (character) => character.charCodeAt(0));
-}
-const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
-
-function encryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get("PROVIDER_CONFIG_KEY");
-  if (!secret) return Promise.reject(new Error("encryption_key_unavailable"));
-  encryptionKeyPromise ??= crypto.subtle.importKey(
-    "raw",
-    bufferSource(b64Decode(secret)),
-    "AES-GCM",
-    false,
-    ["decrypt"],
-  );
-  return encryptionKeyPromise;
-}
+const providerConfigCrypto = createProviderConfigCrypto({
+  activeKeyId: Deno.env.get("PROVIDER_CONFIG_ACTIVE_KEY_ID") ?? "",
+  encodedKeys: Deno.env.get("PROVIDER_CONFIG_KEYRING") ?? "",
+  legacyEncodedKey: Deno.env.get("PROVIDER_CONFIG_KEY"),
+});
 
 async function decryptConfig(userId: string, provider: ArtworkProviderId, blob: string): Promise<string> {
-  const [version, ivText, ciphertextText] = blob.split(".");
-  if (version !== "v1" || !ivText || !ciphertextText) throw new Error("invalid_encrypted_config");
-  const plaintext = await crypto.subtle.decrypt(
-    {
-      name: "AES-GCM",
-      iv: bufferSource(b64Decode(ivText)),
-      additionalData: bufferSource(encoder.encode(`${userId}:artwork.${provider}`)),
-    },
-    await encryptionKey(),
-    bufferSource(b64Decode(ciphertextText)),
-  );
-  const config: unknown = JSON.parse(decoder.decode(plaintext));
+  const { config } = await providerConfigCrypto.decrypt(userId, `artwork.${provider}`, blob);
   const apiKey = typeof config === "object" && config !== null && !Array.isArray(config)
     ? (config as Record<string, unknown>).api_key
     : null;
   if (typeof apiKey !== "string" || apiKey.trim().length < 1 || apiKey.length > 512) {
-    throw new Error("invalid_decrypted_config");
+    throw new Error("provider_config_invalid_decrypted_config");
   }
   return apiKey;
 }
@@ -205,7 +180,7 @@ Deno.serve(async (req) => {
         sortOrder: definition.sort_order,
       });
     } catch (error) {
-      console.error("artwork provider config invalid", config.id, error instanceof Error ? error.name : "unknown");
+      console.error("artwork provider config invalid", config.id, error instanceof Error ? error.message : "unknown");
       results.push({ ...failedProviderResolution(config.id), displayName: definition.display_name, sortOrder: definition.sort_order });
     }
   }

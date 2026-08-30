@@ -39,6 +39,7 @@ interface CloudSyncGateway {
     suspend fun artworkProviderStatuses(userId: String): Result<List<ArtworkProviderStatus>>
     suspend fun saveArtworkKey(userId: String, provider: ArtworkProviderId, apiKey: String): Result<Unit>
     suspend fun deleteArtworkKey(userId: String, provider: ArtworkProviderId): Result<Unit>
+    suspend fun clearArtworkKeys(userId: String): Result<Unit>
     suspend fun artworkCandidates(
         userId: String,
         mediaKey: String,

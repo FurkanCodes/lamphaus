@@ -55,6 +55,13 @@
     <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
     <string name="artwork">Artwork</string>
     <string name="artwork_settings_description">Connect providers to choose where posters, backdrops, and logos come from.</string>
+    <string name="local_only_artwork_keys">Keep artwork keys on this device</string>
+    <string name="local_only_artwork_keys_description">Lamphaus does not receive or sync these keys. Artwork lookups run directly from this device and keys are protected by Android Keystore.</string>
+    <string name="artwork_storage_enable_title">Switch to local-only artwork keys?</string>
+    <string name="artwork_storage_enable_body">All artwork API keys stored in Lamphaus cloud storage and any stale artwork keys on this device will be permanently deleted. You must re-enter your keys locally. These keys cannot be recovered.</string>
+    <string name="artwork_storage_disable_title">Switch to cloud artwork keys?</string>
+    <string name="artwork_storage_disable_body">All device-local artwork API keys will be permanently deleted, and cloud storage starts empty. These keys cannot be recovered.</string>
+    <string name="delete_keys_and_switch">Delete keys and switch</string>
     <string name="artwork_api_key">API key</string>
     <string name="artwork_api_key_placeholder">Paste your API key</string>
     <string name="artwork_get_key">Get %1$s key</string>

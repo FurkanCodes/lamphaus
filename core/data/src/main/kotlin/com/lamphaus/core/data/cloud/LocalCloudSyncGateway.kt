@@ -34,6 +34,7 @@ class LocalCloudSyncGateway : CloudSyncGateway {
         Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun deleteArtworkKey(userId: String, provider: ArtworkProviderId) =
         Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun clearArtworkKeys(userId: String) = Result.success(Unit)
     override suspend fun artworkCandidates(
         userId: String,
         mediaKey: String,
