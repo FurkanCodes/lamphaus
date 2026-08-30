@@ -25,6 +25,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -161,7 +162,7 @@ class HttpProviderClientTest {
     fun `catalog normalizes provider supplied preview metadata variants`() = runTest {
         server.enqueue(
             jsonResponse(
-                """{"metas":[{"id":"m1","type":"movie","name":"Night Signal","posterUrl":"https://images.example/poster.jpg","backdrop":"https://images.example/backdrop.jpg","overview":"A mystery.","genre":"Drama","content_rating":"PG-13","ratings":{"imdb":"8.4"}}]}""",
+                """{"metas":[{"id":"m1","type":"movie","name":"Night Signal","posterUrl":"https://images.example/poster.jpg","_rawPosterUrl":"https://images.example/raw.jpg","backdrop":"https://images.example/backdrop.jpg","landscapePoster":"https://images.example/landscape.jpg","overview":"A mystery.","genre":"Drama","content_rating":"PG-13","ratings":{"imdb":"8.4"}}]}""",
             ),
         )
 
@@ -178,6 +179,113 @@ class HttpProviderClientTest {
         assertEquals("PG-13", item.contentRating)
         assertEquals(8.4, item.rating)
     }
+
+    @Test
+    fun `preview extension aliases fill missing artwork`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"metas":[{"id":"m2","type":"movie","name":"Fallback","_rawPosterUrl":"https://images.example/raw.jpg","landscapePoster":"https://images.example/landscape.jpg"}]}""",
+            ),
+        )
+
+        val item = (client.catalog(
+            server.url("/manifest.json").toString(),
+            "fixture.provider",
+            CatalogQuery("movie", "featured"),
+        ) as ProviderResult.Success).value.single()
+
+        assertEquals("https://images.example/raw.jpg", item.posterUrl)
+        assertEquals("https://images.example/landscape.jpg", item.backgroundUrl)
+    }
+
+    @Test
+    fun `personalized manifest path and query survive resource requests`() = runTest {
+        server.enqueue(jsonResponse("""{"id":"configured","name":"Configured","version":"1"}"""))
+        server.enqueue(jsonResponse("""{"metas":[{"id":"tt123","type":"movie","name":"Configured title"}]}"""))
+        val manifestUrl = server.url("/configure/user-42/manifest.json?token=fixture").toString()
+
+        client.manifest(manifestUrl)
+        client.catalog(manifestUrl, "configured", CatalogQuery("movie", "featured"))
+
+        assertEquals("/configure/user-42/manifest.json?token=fixture", server.takeRequest().path)
+        assertEquals(
+            "/configure/user-42/catalog/movie/featured.json?token=fixture",
+            server.takeRequest().path,
+        )
+    }
+
+    @Test
+    fun `object and top-level catalog extras retain descriptor metadata`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"id":"fixture","name":"Fixture","version":"1","catalogs":[{
+                    "type":"movie","id":"featured","name":"Featured","extraSupported":["genre","skip"],
+                    "extraRequired":["genre"],"pageSize":50,"showInHome":false,
+                    "extra":[{"name":"genre","isRequired":true,"default":"Action","options":["Action","Comedy"],"optionsLimit":1}]
+                }]}""".replace("\n", ""),
+            ),
+        )
+
+        val catalog = (client.manifest(server.url("/manifest.json").toString()) as ProviderResult.Success)
+            .value.catalogs.single()
+
+        assertEquals(setOf("genre", "skip"), catalog.extras)
+        assertEquals(setOf("genre"), catalog.requiredExtras)
+        assertEquals(mapOf("genre" to "Action"), catalog.extraDefaults)
+        assertEquals(mapOf("genre" to listOf("Action", "Comedy")), catalog.extraOptions)
+        assertEquals(mapOf("genre" to 1), catalog.extraOptionsLimits)
+        assertEquals(50, catalog.pageSize)
+        assertEquals(false, catalog.showInHome)
+    }
+
+
+    @Test
+    fun `custom media type stays raw across catalog metadata and streams`() = runTest {
+        server.enqueue(
+            jsonResponse("""{"metas":[{"id":"anime-1","type":"anime","name":"Custom title"}]}"""),
+        )
+        server.enqueue(
+            jsonResponse("""{"meta":{"id":"anime-1","type":"anime","name":"Custom title","description":"Details"}}"""),
+        )
+        server.enqueue(
+            jsonResponse("""{"streams":[{"name":"Custom source","url":"https://cdn.example/anime.m3u8"}]}"""),
+        )
+        val manifestUrl = server.url("/manifest.json").toString()
+
+        val preview = (client.catalog(
+            manifestUrl,
+            "fixture.provider",
+            CatalogQuery("anime", "featured"),
+        ) as ProviderResult.Success).value.single()
+        client.meta(manifestUrl, "fixture.provider", "anime", "anime-1")
+        client.streams(manifestUrl, "fixture.provider", "anime", "anime-1")
+
+        assertEquals(MediaType.UNKNOWN, preview.type)
+        assertEquals("anime", preview.rawType)
+        assertEquals("anime:anime-1", preview.stableKey)
+        assertEquals("/catalog/anime/featured.json", server.takeRequest().path)
+        assertEquals("/meta/anime/anime-1.json", server.takeRequest().path)
+        assertEquals("/stream/anime/anime-1.json", server.takeRequest().path)
+    }
+    @Test
+    fun `decorated catalog poster is preserved without inferred rating`() = runTest {
+        val decoratedPoster = "https://poster.example/rpdb/8.7/tt123.jpg"
+        server.enqueue(
+            jsonResponse(
+                """{"metas":[{"id":"tt123","type":"movie","name":"Decorated","poster":"$decoratedPoster"}]}""",
+            ),
+        )
+
+        val item = (client.catalog(
+            server.url("/manifest.json").toString(),
+            "betterposters",
+            CatalogQuery("movie", "featured"),
+        ) as ProviderResult.Success).value.single()
+
+        assertEquals(decoratedPoster, item.posterUrl)
+        assertNull(item.rating)
+    }
+
 
     @Test
     fun `stream parser keeps direct external hash youtube sources and embedded subtitles`() = runTest {

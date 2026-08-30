@@ -32,6 +32,10 @@ data class ProviderCatalog(
     val extras: Set<String> = emptySet(),
     val requiredExtras: Set<String> = emptySet(),
     val extraOptions: Map<String, List<String>> = emptyMap(),
+    val extraDefaults: Map<String, String> = emptyMap(),
+    val extraOptionsLimits: Map<String, Int> = emptyMap(),
+    val pageSize: Int? = null,
+    val showInHome: Boolean = true,
     val posterShape: String? = null,
 )
 

@@ -87,6 +87,22 @@ class CatalogRefreshPolicyTest {
         assertEquals("Unavailable", merged.single().errorMessage)
     }
 
+    @Test
+    fun `unavailable catalog sections retain refreshed provider order`() {
+        val refreshed = listOf(
+            section("provider:movie:unavailable", "provider", error = "Missing required extras: region"),
+            section("provider:series:featured", "provider", items = listOf(media("series"))),
+        )
+
+        val merged = mergeCatalogRefresh(emptyList(), refreshed)
+
+        assertEquals(
+            listOf("provider:movie:unavailable", "provider:series:featured"),
+            merged.map(CatalogSection::id),
+        )
+        assertEquals("Missing required extras: region", merged.first().errorMessage)
+    }
+
     private fun fingerprint() = CatalogRefreshFingerprint(
         userId = "user",
         childFilterEnabled = false,

@@ -67,4 +67,28 @@ class ArtworkResolverTest {
         assertEquals(media.backgroundUrl, invalid.media.backgroundUrl)
         assertFalse(invalid.hasOverride)
     }
+
+    @Test
+    fun `decorated provider poster passes through and profile override wins`() {
+        val decorated = media.copy(posterUrl = "https://poster.example/rpdb/8.7/tt1234567.jpg")
+        val native = ArtworkResolver(emptyMap()).resolve(decorated)
+        assertEquals(decorated.posterUrl, native.media.posterUrl)
+        assertFalse(native.hasOverride)
+
+        val overridden = ArtworkResolver(
+            mapOf(
+                decorated.stableKey to ArtworkOverride(
+                    profileId = "profile",
+                    mediaKey = decorated.stableKey,
+                    poster = ArtworkAsset(
+                        ArtworkProviderId("profile"),
+                        "https://profile.example/poster.jpg",
+                    ),
+                ),
+            ),
+        ).resolve(decorated)
+
+        assertEquals("https://profile.example/poster.jpg", overridden.media.posterUrl)
+        assertTrue(overridden.hasOverride)
+    }
 }

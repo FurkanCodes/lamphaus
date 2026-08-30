@@ -487,7 +487,11 @@ class AppViewModel(
             }
             val candidates = state.value.providers
                 .filter(ProviderSubscription::enabled)
-                .sortedBy(ProviderSubscription::sortOrder)
+                .sortedWith(
+                    compareBy<ProviderSubscription> { if (it.id in media.providerIds) 0 else 1 }
+                        .thenBy(ProviderSubscription::sortOrder)
+                        .thenBy(ProviderSubscription::id),
+                )
             if (candidates.isEmpty()) {
                 mutableState.update { it.copy(refreshing = false) }
                 return@launch
@@ -1233,40 +1237,51 @@ class AppViewModel(
                                 subscription.manifestUrl == DEFAULT_CATALOG_MANIFEST
                             manifestResult.value.catalogs
                                 .flatMap { catalog ->
-                                    catalog.homeRequests(
+                                    catalog.homePlans(
                                         includeCuratedGenres = includeCuratedGenres,
                                         currentYear = Calendar.getInstance().get(Calendar.YEAR),
-                                    )
-                                }
-                                .map { request ->
-                                    val query = request.query
-                                    async {
-                                        val id = "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}"
-                                        when (val result = container.providerClient.catalog(
-                                            subscription.manifestUrl,
-                                            subscription.id,
-                                            query,
-                                        )) {
-                                            is ProviderResult.Success -> CatalogSection(
-                                                id = id,
-                                                providerId = subscription.id,
-                                                title = request.title,
-                                                providerName = subscription.displayName,
-                                                items = filterForProfile(
-                                                    result.value,
-                                                    current.activeProfile?.let { profile ->
-                                                        profile.kind == ProfileKind.CHILD && profile.hideUnrated
-                                                    } == true,
-                                                ),
-                                            )
-                                            is ProviderResult.Failure -> CatalogSection(
-                                                id = id,
-                                                providerId = subscription.id,
-                                                title = request.title,
-                                                providerName = subscription.displayName,
-                                                items = emptyList(),
-                                                errorMessage = result.safeMessage,
-                                            )
+                                    ).map { plan ->
+                                        async {
+                                            when (plan) {
+                                                is CatalogHomePlan.Request -> {
+                                                    val query = plan.query
+                                                    val id = "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}"
+                                                    when (val result = container.providerClient.catalog(
+                                                        subscription.manifestUrl,
+                                                        subscription.id,
+                                                        query,
+                                                    )) {
+                                                        is ProviderResult.Success -> CatalogSection(
+                                                            id = id,
+                                                            providerId = subscription.id,
+                                                            title = plan.title,
+                                                            providerName = subscription.displayName,
+                                                            items = filterForProfile(
+                                                                result.value,
+                                                                current.activeProfile?.let { profile ->
+                                                                    profile.kind == ProfileKind.CHILD && profile.hideUnrated
+                                                                } == true,
+                                                            ),
+                                                        )
+                                                        is ProviderResult.Failure -> CatalogSection(
+                                                            id = id,
+                                                            providerId = subscription.id,
+                                                            title = plan.title,
+                                                            providerName = subscription.displayName,
+                                                            items = emptyList(),
+                                                            errorMessage = result.safeMessage,
+                                                        )
+                                                    }
+                                                }
+                                                is CatalogHomePlan.Unavailable -> CatalogSection(
+                                                    id = "${subscription.id}:${catalog.type}:${catalog.id}:unavailable",
+                                                    providerId = subscription.id,
+                                                    title = plan.title,
+                                                    providerName = subscription.displayName,
+                                                    items = emptyList(),
+                                                    errorMessage = plan.reason,
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1618,7 +1633,7 @@ private fun String.inferMimeType(): String? = when {
     else -> null
 }
 
-private fun MediaDetail.merge(other: MediaDetail): MediaDetail = MediaDetail(
+internal fun MediaDetail.merge(other: MediaDetail): MediaDetail = MediaDetail(
     preview = preview.merge(other.preview),
     runtimeMinutes = runtimeMinutes ?: other.runtimeMinutes,
     cast = (cast + other.cast).distinct(),
@@ -1630,7 +1645,7 @@ private fun MediaDetail.merge(other: MediaDetail): MediaDetail = MediaDetail(
     embeddedStreams = (embeddedStreams + other.embeddedStreams).distinctBy(::sourceIdentity),
 )
 
-private fun Episode.merge(other: Episode): Episode = copy(
+internal fun Episode.merge(other: Episode): Episode = copy(
     title = title.ifBlank { other.title },
     season = season ?: other.season,
     episode = episode ?: other.episode,
@@ -1640,7 +1655,7 @@ private fun Episode.merge(other: Episode): Episode = copy(
     streams = (streams + other.streams).distinctBy(::sourceIdentity),
 )
 
-private fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
+internal fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
     posterUrl = posterUrl ?: other.posterUrl,
     backgroundUrl = backgroundUrl ?: other.backgroundUrl,
     logoUrl = logoUrl ?: other.logoUrl,

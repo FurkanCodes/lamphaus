@@ -3,43 +3,67 @@ package com.lamphaus.app.ui
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.ProviderCatalog
 
-internal data class CatalogSectionRequest(
-    val title: String,
-    val query: CatalogQuery,
-)
+internal sealed interface CatalogHomePlan {
+    data class Request(
+        val title: String,
+        val query: CatalogQuery,
+    ) : CatalogHomePlan
+
+    data class Unavailable(
+        val title: String,
+        val reason: String,
+    ) : CatalogHomePlan
+}
 
 /**
  * Builds the first page for every provider catalog. The bundled catalog also gets a compact,
  * curated set of genre shelves so Home is useful before the user installs anything else.
  */
-internal fun ProviderCatalog.homeRequests(
+internal fun ProviderCatalog.homePlans(
     includeCuratedGenres: Boolean,
     currentYear: Int,
-): List<CatalogSectionRequest> {
+): List<CatalogHomePlan> {
+    if (!showInHome || requiredExtras == setOf("search")) return emptyList()
+
+    val unresolvedRequiredExtras = requiredExtras - extraDefaults.keys
+    val yearGenreCatalog = includeCuratedGenres &&
+        id == "year" &&
+        requiredExtras == setOf("genre")
     val baseQuery = when {
-        requiredExtras.isEmpty() -> CatalogQuery(type, id, posterShape = posterShape)
-        id == "year" && requiredExtras == setOf("genre") -> CatalogQuery(
+        yearGenreCatalog -> CatalogQuery(
             type = type,
             catalogId = id,
             genre = currentYear.toString(),
+            extras = extraDefaults,
             posterShape = posterShape,
         )
-        else -> null
-    } ?: return emptyList()
+        unresolvedRequiredExtras.isEmpty() -> CatalogQuery(
+            type = type,
+            catalogId = id,
+            extras = extraDefaults,
+            posterShape = posterShape,
+        )
+        else -> return listOf(
+            CatalogHomePlan.Unavailable(
+                title = displayTitle(),
+                reason = "Missing required extras: ${unresolvedRequiredExtras.sorted().joinToString(", ")}",
+            ),
+        )
+    }
 
-    val requests = mutableListOf(CatalogSectionRequest(displayTitle(), baseQuery))
-    if (!includeCuratedGenres || id != "top" || "genre" !in extras) return requests
+    val plans = mutableListOf<CatalogHomePlan>(CatalogHomePlan.Request(displayTitle(), baseQuery))
+    if (!includeCuratedGenres || id != "top" || "genre" !in extras) return plans
 
     val supportedGenres = extraOptions["genre"].orEmpty().toSet()
     curatedGenres(type)
         .filter { supportedGenres.isEmpty() || it in supportedGenres }
         .forEach { genre ->
-            requests += CatalogSectionRequest(
+            plans += CatalogHomePlan.Request(
                 title = "$genre ${typeLabel()}",
                 query = baseQuery.copy(genre = genre),
             )
         }
-    return requests
+    return plans
 }
 
 private fun ProviderCatalog.displayTitle(): String = when (type.lowercase()) {

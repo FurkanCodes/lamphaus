@@ -237,25 +237,48 @@ class HttpProviderClient(
             (item as? JsonObject)?.let { catalog ->
                 val type = catalog.string("type") ?: return@let null
                 val catalogId = catalog.string("id") ?: return@let null
-                val extras = catalog.array("extra").orEmpty().mapNotNull { extra ->
-                    (extra as? JsonObject)?.string("name") ?: (extra as? JsonPrimitive)?.contentOrNull
-                }.toSet()
+                val extraDefinitions = catalog.array("extra").orEmpty()
+                val extras = buildSet {
+                    addAll(catalog.stringsOrSingle("extraSupported"))
+                    addAll(catalog.stringsOrSingle("extraRequired"))
+                    extraDefinitions.forEach { extra ->
+                        when (extra) {
+                            is JsonObject -> extra.string("name")?.let(::add)
+                            is JsonPrimitive -> extra.contentOrNull?.let(::add)
+                            else -> Unit
+                        }
+                    }
+                }
                 val requiredExtras = buildSet {
-                    addAll(catalog.strings("extraRequired"))
-                    catalog.array("extra").orEmpty().forEach { extra ->
+                    addAll(catalog.stringsOrSingle("extraRequired"))
+                    extraDefinitions.forEach { extra ->
                         if ((extra as? JsonObject)?.boolean("isRequired") == true) {
                             extra.string("name")?.let(::add)
                         }
                     }
                 }
                 val extraOptions = buildMap {
-                    catalog.array("extra").orEmpty().forEach { extra ->
+                    extraDefinitions.forEach { extra ->
                         val definition = extra as? JsonObject ?: return@forEach
                         val name = definition.string("name") ?: return@forEach
                         definition.strings("options").takeIf(List<String>::isNotEmpty)?.let { put(name, it) }
                     }
                     catalog.strings("genres").takeIf(List<String>::isNotEmpty)?.let { genres ->
                         putIfAbsent("genre", genres)
+                    }
+                }
+                val extraDefaults = buildMap {
+                    extraDefinitions.forEach { extra ->
+                        val definition = extra as? JsonObject ?: return@forEach
+                        val name = definition.string("name") ?: return@forEach
+                        definition.string("default")?.let { put(name, it) }
+                    }
+                }
+                val extraOptionsLimits = buildMap {
+                    extraDefinitions.forEach { extra ->
+                        val definition = extra as? JsonObject ?: return@forEach
+                        val name = definition.string("name") ?: return@forEach
+                        definition.int("optionsLimit")?.let { put(name, it) }
                     }
                 }
                 ProviderCatalog(
@@ -265,6 +288,10 @@ class HttpProviderClient(
                     extras = extras,
                     requiredExtras = requiredExtras,
                     extraOptions = extraOptions,
+                    extraDefaults = extraDefaults,
+                    extraOptionsLimits = extraOptionsLimits,
+                    pageSize = catalog.int("pageSize"),
+                    showInHome = catalog.boolean("showInHome") ?: true,
                     posterShape = catalog.string("posterShape"),
                 )
             }
@@ -301,8 +328,8 @@ class HttpProviderClient(
             type = rawType.toMediaType(),
             rawType = rawType,
             name = string("name") ?: "Untitled",
-            posterUrl = firstString("poster", "posterUrl"),
-            backgroundUrl = firstString("background", "backdrop", "backdropUrl"),
+            posterUrl = firstString("poster", "posterUrl") ?: string("_rawPosterUrl"),
+            backgroundUrl = firstString("background", "backdrop", "backdropUrl") ?: string("landscapePoster"),
             logoUrl = firstString("logo", "logoUrl") ?: obj("logo")?.string("url"),
             description = firstString("description", "overview"),
             releaseYear = (string("releaseInfo") ?: string("year"))?.take(4)?.toIntOrNull() ?: int("year"),
@@ -397,12 +424,6 @@ class HttpProviderClient(
             filename = filename,
             videoHash = hints?.string("videoHash"),
             videoSize = hints?.long("videoSize"),
-            bingeGroup = hints?.string("bingeGroup"),
-            mimeType = string("mimeType"),
-            quality = string("quality")
-                ?: tags.firstNotNullOfOrNull { it.qualityHint() }
-                ?: listOfNotNull(string("name"), string("title"), string("description"), filename)
-                    .firstNotNullOfOrNull { it.qualityHint() },
             tags = tags,
             headers = headers,
             subtitles = subtitles,
@@ -425,10 +446,10 @@ class HttpProviderClient(
     }
 
     private fun CatalogQuery.extras(): Map<String, String> = buildMap {
+        putAll(extras)
         search?.takeIf(String::isNotBlank)?.let { put("search", it) }
         genre?.takeIf(String::isNotBlank)?.let { put("genre", it) }
         if (skip > 0) put("skip", skip.toString())
-        putAll(extras)
     }
 
     private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
