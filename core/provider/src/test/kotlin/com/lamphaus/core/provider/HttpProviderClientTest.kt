@@ -446,6 +446,102 @@ class HttpProviderClientTest {
         assertEquals(setOf("broken"), slice.failures.keys)
     }
 
+    @Test
+    fun `manifest parser coerces mixed catalog descriptor forms`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"id":"fixture","name":"Fixture","version":"1","catalogs":[{
+                    "type":"movie","id":"mixed","extraSupported":[" Search ","genre"],
+                    "extraRequired":" SEARCH ","pageSize":"25",
+                    "extra":[
+                        {"name":" Rating ","isRequired":1,"default":"  Action ","options":[1,true,"Comedy"],"optionsLimit":"2"},
+                        {"name":"skip"}
+                    ]
+                }]}""".replace("\n", ""),
+            ),
+        )
+
+        val catalog = (client.manifest(server.url("/manifest.json").toString()) as ProviderResult.Success)
+            .value.catalogs.single()
+        assertEquals(setOf("Search", "genre", "Rating", "skip"), catalog.extras)
+        assertEquals(setOf("Search", "Rating"), catalog.requiredExtras)
+        assertEquals(mapOf("search" to "Search", "genre" to "genre", "rating" to "Rating", "skip" to "skip"), catalog.extraWireNames)
+        assertEquals(mapOf("Rating" to "Action"), catalog.extraDefaults)
+        assertEquals(mapOf("Rating" to listOf("1", "true", "Comedy")), catalog.extraOptions)
+        assertEquals(mapOf("Rating" to 2), catalog.extraOptionsLimits)
+        assertEquals(25, catalog.pageSize)
+    }
+
+    @Test
+    fun `personalized manifest identity survives catalog meta stream and subtitle requests`() = runTest {
+        server.enqueue(jsonResponse("""{"id":"configured","name":"Configured","version":"1"}"""))
+        server.enqueue(jsonResponse("""{"metas":[{"id":"m1","type":"movie","name":"Title"}]}"""))
+        server.enqueue(jsonResponse("""{"meta":{"id":"m1","type":"movie","name":"Title"}}"""))
+        server.enqueue(jsonResponse("""{"streams":[{"url":"https://cdn.example/title.mp4"}]}"""))
+        server.enqueue(jsonResponse("""{"subtitles":[{"id":"en","lang":"en","url":"https://cdn.example/en.vtt"}]}"""))
+        val manifestUrl = server.url("/configure/user-42/manifest.json?token=fixture").toString()
+
+        client.manifest(manifestUrl)
+        client.catalog(manifestUrl, "configured", CatalogQuery("movie", "featured", extras = mapOf("genre" to "Drama")))
+        client.meta(manifestUrl, "configured", "movie", "m1")
+        client.streams(manifestUrl, "configured", "movie", "m1")
+        client.subtitles(manifestUrl, "movie", "m1", mapOf("videoId" to "v1"))
+
+        assertEquals("/configure/user-42/manifest.json?token=fixture", server.takeRequest().path)
+        assertEquals("/configure/user-42/catalog/movie/featured/genre=Drama.json?token=fixture", server.takeRequest().path)
+        assertEquals("/configure/user-42/meta/movie/m1.json?token=fixture", server.takeRequest().path)
+        assertEquals("/configure/user-42/stream/movie/m1.json?token=fixture", server.takeRequest().path)
+        assertEquals("/configure/user-42/subtitles/movie/m1/videoId=v1.json?token=fixture", server.takeRequest().path)
+    }
+
+    @Test
+    fun `metadata aliases and stream hints map to existing models`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"meta":{
+                    "id":"show","type":"series","name":"Show","releaseInfo":"2026-08-24","app_extras":{"certification":"TV-14","cast":[{"name":"Actor"}],"directors":[{"name":"Director"}]},
+                    "cast":"Lead","writers":"Writer","videos":[{"id":"show:1:2","number":"2","description":"Episode details"}],
+                    "streams":[{"url":"https://cdn.example/show.mp4","behaviorHints":{"bingeGroup":"show","proxyHeaders":{"request":{" Authorization ":" Bearer fixture ","Range":"bytes=0-"," ":"ignored"}},"videoHash":"hash","videoSize":"42"},"mimeType":"video/mp4","quality":"1080p","filename":"show.mp4"}]
+                }}""".replace("\n", ""),
+            ),
+        )
+
+        val detail = (client.meta(server.url("/manifest.json").toString(), "fixture", "series", "show") as ProviderResult.Success).value
+        val source = detail.embeddedStreams.single()
+
+        assertEquals(2026, detail.preview.releaseYear)
+        assertEquals("TV-14", detail.preview.contentRating)
+        assertEquals(listOf("Lead"), detail.cast)
+        assertEquals(listOf("Writer"), detail.directors)
+        assertEquals(2, detail.episodes.single().episode)
+        assertEquals("Episode details", detail.episodes.single().overview)
+        assertEquals("show", source.bingeGroup)
+        assertEquals("video/mp4", source.mimeType)
+        assertEquals("1080p", source.quality)
+        assertEquals("hash", source.videoHash)
+        assertEquals(42L, source.videoSize)
+        assertEquals("show.mp4", source.filename)
+        assertEquals(mapOf("Authorization" to "Bearer fixture"), source.headers)
+    }
+
+    @Test
+    fun `singular subtitle capability still routes standard subtitle resource`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"id":"fixture","name":"Fixture","version":"1","resources":["subtitle"],"types":["movie"]}""",
+            ),
+        )
+        server.enqueue(jsonResponse("""{"subtitles":[{"id":"en","lang":"en","url":"https://cdn.example/en.vtt"}]}"""))
+        val manifestUrl = server.url("/manifest.json").toString()
+
+        val manifest = (client.manifest(manifestUrl) as ProviderResult.Success).value
+        assertEquals("subtitle", manifest.resources.single().name)
+        client.subtitles(manifestUrl, "movie", "m1")
+
+        assertEquals("/manifest.json", server.takeRequest().path)
+        assertEquals("/subtitles/movie/m1.json", server.takeRequest().path)
+    }
+
     private fun preview(id: String, name: String, provider: String) = MediaPreview(
         id = id,
         type = MediaType.MOVIE,

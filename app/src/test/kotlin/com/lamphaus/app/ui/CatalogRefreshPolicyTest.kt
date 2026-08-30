@@ -103,6 +103,60 @@ class CatalogRefreshPolicyTest {
         assertEquals("Missing required extras: region", merged.first().errorMessage)
     }
 
+    @Test
+    fun `first page learns smaller provider page size`() {
+        val initial = section("paged", "a").copy(supportsSkip = true, skipStep = 100)
+
+        val page = firstCatalogPage(initial, listOf(media("one"), media("two")))
+
+        assertEquals(2, page.skipStep)
+        assertEquals(2, page.nextSkip)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun `next page appends unseen items and advances learned offset`() {
+        val initial = firstCatalogPage(
+            section("paged", "a").copy(supportsSkip = true, skipStep = 100),
+            listOf(media("one"), media("two")),
+        )
+
+        val page = mergeCatalogPage(initial, listOf(media("two"), media("three")))
+
+        assertEquals(listOf("one", "two", "three"), page.items.map(MediaPreview::id))
+        assertEquals(4, page.nextSkip)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun `empty or duplicate page terminates without losing content`() {
+        val initial = firstCatalogPage(
+            section("paged", "a").copy(supportsSkip = true, skipStep = 100),
+            listOf(media("one")),
+        )
+
+        val page = mergeCatalogPage(initial, listOf(media("one")))
+
+        assertEquals(listOf("one"), page.items.map(MediaPreview::id))
+        assertFalse(page.hasMore)
+    }
+
+    @Test
+    fun `page failure retains content and retry clears the error`() {
+        val initial = firstCatalogPage(
+            section("paged", "a").copy(supportsSkip = true, skipStep = 100),
+            listOf(media("one")),
+        )
+
+        val failed = mergeCatalogPage(initial, null, errorMessage = "offline")
+        val retried = mergeCatalogPage(failed, listOf(media("two")))
+
+        assertEquals(listOf("one"), failed.items.map(MediaPreview::id))
+        assertEquals("offline", failed.loadMoreError)
+        assertEquals(listOf("one", "two"), retried.items.map(MediaPreview::id))
+        assertEquals(null, retried.loadMoreError)
+    }
+
     private fun fingerprint() = CatalogRefreshFingerprint(
         userId = "user",
         childFilterEnabled = false,

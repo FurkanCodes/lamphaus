@@ -18,6 +18,11 @@
     <string name="library_empty_body">Open a movie or series and choose Add to Library.</string>
     <string name="search_movies_series">Search movies and series</string>
     <string name="search_no_results">No matching movies or series.</string>
+    <string name="loading">Loading…</string>
+    <string name="retry">Retry</string>
+    <string name="load_more">Load more</string>
+    <string name="all_genres">All genres</string>
+    <string name="load_more_description">Load the next catalog page</string>
     <string name="install_first_addon">Install your first add-on</string>
     <string name="install_addon_explanation">Add a compatible HTTPS manifest or add-on catalog to load content.</string>
     <string name="install_addon">Install add-on</string>

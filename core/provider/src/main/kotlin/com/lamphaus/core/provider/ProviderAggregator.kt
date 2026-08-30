@@ -74,8 +74,9 @@ class ProviderAggregator(
     }
 
     fun supports(manifest: ProviderManifest, resource: String, type: String, id: String? = null): Boolean {
+        val requestedResource = resource.canonicalResourceName()
         return manifest.resources
-            .filter { it.name.equals(resource, ignoreCase = true) }
+            .filter { it.name.canonicalResourceName() == requestedResource }
             .any { descriptor ->
                 val supportedTypes = descriptor.types ?: manifest.types
                 val supportedPrefixes = descriptor.idPrefixes ?: manifest.idPrefixes
@@ -84,6 +85,9 @@ class ProviderAggregator(
                 supportsType && supportsId
             }
     }
+
+    private fun String.canonicalResourceName(): String =
+        trim().lowercase().let { if (it == "subtitle") "subtitles" else it }
 
     private fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
         posterUrl = posterUrl ?: other.posterUrl,

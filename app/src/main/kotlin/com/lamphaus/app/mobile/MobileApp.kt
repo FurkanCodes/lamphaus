@@ -398,6 +398,8 @@ private fun MobileSignedInApp(
                                 state = state,
                                 onMedia = openMedia,
                                 onAddSource = { settingsOpen = true },
+                                onLoadMore = viewModel::loadMoreCatalog,
+                                onRetry = viewModel::retryCatalogPage,
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
@@ -416,6 +418,13 @@ private fun MobileSignedInApp(
                             MobileDestination.SEARCH -> SearchScreen(
                                 state = state,
                                 onSearch = viewModel::searchContent,
+                                onBrowseType = viewModel::selectBrowseType,
+                                onBrowseCatalog = viewModel::selectBrowseCatalog,
+                                onBrowseGenre = viewModel::selectBrowseGenre,
+                                onLoadMore = viewModel::loadMoreBrowse,
+                                onRetry = viewModel::retryBrowse,
+                                onCatalogLoadMore = viewModel::loadMoreCatalog,
+                                onCatalogRetry = viewModel::retryCatalogPage,
                                 onMedia = openMedia,
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
@@ -465,6 +474,8 @@ private fun MobileHomeScreen(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
+    onLoadMore: (String) -> Unit,
+    onRetry: (String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
@@ -478,7 +489,7 @@ private fun MobileHomeScreen(
             item { EmptyProviders(Modifier.padding(horizontal = 24.dp), onAddSource) }
         }
         items(state.sections, key = CatalogSection::id) { section ->
-            CatalogRow(section, onMedia, restoreMediaKey, onFocusRestored)
+            CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
         }
     }
 }
@@ -524,6 +535,8 @@ private fun MobileHero(
 private fun CatalogRow(
     section: CatalogSection,
     onMedia: (MediaPreview) -> Unit,
+    onLoadMore: (String) -> Unit,
+    onRetry: (String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
@@ -540,7 +553,7 @@ private fun CatalogRow(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        if (section.items.isNotEmpty()) {
+        if (section.items.isNotEmpty() || section.supportsSkip) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -551,6 +564,20 @@ private fun CatalogRow(
                         onMedia = onMedia,
                         modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
                     )
+                }
+                if (section.supportsSkip && (section.hasMore || section.loadingMore || section.loadMoreError != null)) {
+                    item(key = "catalog-action") {
+                        OutlinedButton(
+                            onClick = {
+                                if (section.loadMoreError != null) onRetry(section.id) else onLoadMore(section.id)
+                            },
+                            enabled = !section.loadingMore,
+                            modifier = Modifier.sizeIn(minWidth = 132.dp, minHeight = 56.dp),
+                        ) {
+                            if (section.loadingMore) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            else Text(stringResource(if (section.loadMoreError != null) R.string.retry else R.string.load_more))
+                        }
+                    }
                 }
             }
         }
@@ -610,8 +637,11 @@ private fun MediaGrid(
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    section: CatalogSection? = null,
+    onLoadMore: (String) -> Unit = {},
+    onRetry: (String) -> Unit = {},
 ) {
-    if (media.isEmpty()) {
+    if (media.isEmpty() && section?.supportsSkip != true) {
         EmptyProviders(Modifier.padding(24.dp))
         return
     }
@@ -629,6 +659,18 @@ private fun MediaGrid(
                     .fillMaxWidth()
                     .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
             )
+        }
+        if (section?.supportsSkip == true && (section.hasMore || section.loadingMore || section.loadMoreError != null)) {
+            item(key = "catalog-action") {
+                OutlinedButton(
+                    onClick = { if (section.loadMoreError != null) onRetry(section.id) else onLoadMore(section.id) },
+                    enabled = !section.loadingMore,
+                    modifier = Modifier.sizeIn(minWidth = 132.dp, minHeight = 56.dp),
+                ) {
+                    if (section.loadingMore) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Text(stringResource(if (section.loadMoreError != null) R.string.retry else R.string.load_more))
+                }
+            }
         }
     }
 }
@@ -654,13 +696,19 @@ private fun LibraryScreen(
 private fun SearchScreen(
     state: AppUiState,
     onSearch: (String) -> Unit,
+    onBrowseType: (String) -> Unit,
+    onBrowseCatalog: (String) -> Unit,
+    onBrowseGenre: (String?) -> Unit,
+    onLoadMore: () -> Unit,
+    onRetry: () -> Unit,
+    onCatalogLoadMore: (String) -> Unit,
+    onCatalogRetry: (String) -> Unit,
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(query) { onSearch(query) }
-    val matches = if (query.isBlank()) state.allMedia else state.searchResults
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
             value = query,
@@ -670,16 +718,72 @@ private fun SearchScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(20.dp),
         )
-        if (state.searching) LinearProgressIndicator(Modifier.fillMaxWidth())
-        Box(Modifier.weight(1f)) {
-            if (query.isNotBlank() && !state.searching && matches.isEmpty()) {
-                Text(
-                    stringResource(R.string.search_no_results),
-                    modifier = Modifier.padding(24.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                MediaGrid(matches, onMedia, restoreMediaKey, onFocusRestored)
+        if (state.searching || state.browse.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (query.isBlank()) {
+            val browse = state.browse
+            val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
+            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(browse.targets.map { it.catalog.type }.distinct(), key = { it }) { type ->
+                    FilterChip(
+                        selected = browse.selectedType == type,
+                        onClick = { onBrowseType(type) },
+                        label = { Text(type.replaceFirstChar(Char::uppercase)) },
+                    )
+                }
+            }
+            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(browse.targets.filter { it.catalog.type == browse.selectedType }, key = { it.id }) { target ->
+                    FilterChip(
+                        selected = browse.selectedCatalogId == target.id,
+                        onClick = { onBrowseCatalog(target.id) },
+                        label = { Text(target.catalog.name) },
+                        enabled = target.unavailableReason == null,
+                    )
+                }
+            }
+            selectedTarget?.genres?.takeIf(List<String>::isNotEmpty)?.let { genres ->
+                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        FilterChip(
+                            selected = browse.selectedGenre == null,
+                            onClick = { onBrowseGenre(null) },
+                            label = { Text(stringResource(R.string.all_genres)) },
+                        )
+                    }
+                    items(genres, key = { it }) { genre ->
+                        FilterChip(
+                            selected = browse.selectedGenre == genre,
+                            onClick = { onBrowseGenre(genre) },
+                            label = { Text(genre) },
+                        )
+                    }
+                }
+            }
+            val result = browse.result
+            Box(Modifier.weight(1f)) {
+                when {
+                    result?.errorMessage != null -> Text(result.errorMessage, modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.error)
+                    result != null -> MediaGrid(
+                        result.items,
+                        onMedia,
+                        restoreMediaKey,
+                        onFocusRestored,
+                        section = result,
+                        onLoadMore = { onLoadMore() },
+                        onRetry = { onRetry() },
+                    )
+                    else -> EmptyProviders(Modifier.padding(24.dp))
+                }
+            }
+        } else if (state.searching) {
+            Box(Modifier.weight(1f))
+        } else if (state.searchSections.isEmpty()) {
+            Text(stringResource(R.string.search_no_results), modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                items(state.searchSections, key = CatalogSection::id) { section ->
+                    CatalogRow(section, onMedia, onCatalogLoadMore, onCatalogRetry, restoreMediaKey, onFocusRestored)
+                }
             }
         }
     }

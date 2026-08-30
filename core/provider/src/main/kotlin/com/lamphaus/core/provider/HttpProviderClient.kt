@@ -222,8 +222,8 @@ class HttpProviderClient(
         val name = root.string("name") ?: throw ProviderProtocolException("Missing name")
         val resources = root.array("resources").orEmpty().mapNotNull { item ->
             when (item) {
-                is JsonPrimitive -> item.contentOrNull?.let(::ProviderResource)
-                is JsonObject -> item.string("name")?.let { resourceName ->
+                is JsonPrimitive -> item.contentOrNull?.trim()?.takeIf(String::isNotBlank)?.let(::ProviderResource)
+                is JsonObject -> item.string("name")?.trim()?.takeIf(String::isNotBlank)?.let { resourceName ->
                     ProviderResource(
                         name = resourceName,
                         types = item.optionalStrings("types"),
@@ -235,62 +235,74 @@ class HttpProviderClient(
         }
         val catalogs = root.array("catalogs").orEmpty().mapNotNull { item ->
             (item as? JsonObject)?.let { catalog ->
-                val type = catalog.string("type") ?: return@let null
-                val catalogId = catalog.string("id") ?: return@let null
+                val type = catalog.string("type")?.trim()?.takeIf(String::isNotBlank) ?: return@let null
+                val catalogId = catalog.string("id")?.trim()?.takeIf(String::isNotBlank) ?: return@let null
                 val extraDefinitions = catalog.array("extra").orEmpty()
-                val extras = buildSet {
-                    addAll(catalog.stringsOrSingle("extraSupported"))
-                    addAll(catalog.stringsOrSingle("extraRequired"))
-                    extraDefinitions.forEach { extra ->
-                        when (extra) {
-                            is JsonObject -> extra.string("name")?.let(::add)
-                            is JsonPrimitive -> extra.contentOrNull?.let(::add)
-                            else -> Unit
-                        }
+                val extraWireNames = linkedMapOf<String, String>()
+                fun addExtraName(rawName: String?) {
+                    val name = rawName?.trim()?.takeIf(String::isNotBlank) ?: return
+                    extraWireNames.putIfAbsent(name.canonicalExtraName(), name)
+                }
+                catalog.stringsOrSingle("extraSupported").forEach(::addExtraName)
+                catalog.stringsOrSingle("extraRequired").forEach(::addExtraName)
+                extraDefinitions.forEach { extra ->
+                    when (extra) {
+                        is JsonObject -> addExtraName(extra.string("name"))
+                        is JsonPrimitive -> addExtraName(extra.contentOrNull)
+                        else -> Unit
                     }
                 }
+                val extras = extraWireNames.values.toSet()
                 val requiredExtras = buildSet {
-                    addAll(catalog.stringsOrSingle("extraRequired"))
+                    catalog.stringsOrSingle("extraRequired").forEach { addExtraName(it); add(extraWireNames[it.canonicalExtraName()] ?: it) }
                     extraDefinitions.forEach { extra ->
-                        if ((extra as? JsonObject)?.boolean("isRequired") == true) {
-                            extra.string("name")?.let(::add)
+                        val definition = extra as? JsonObject ?: return@forEach
+                        if (definition.boolean("isRequired") == true) {
+                            val rawName = definition.string("name")
+                            rawName?.let { add(extraWireNames[it.trim().canonicalExtraName()] ?: it.trim()) }
                         }
                     }
                 }
                 val extraOptions = buildMap {
                     extraDefinitions.forEach { extra ->
                         val definition = extra as? JsonObject ?: return@forEach
-                        val name = definition.string("name") ?: return@forEach
-                        definition.strings("options").takeIf(List<String>::isNotEmpty)?.let { put(name, it) }
+                        val rawName = definition.string("name") ?: return@forEach
+                        val wireName = extraWireNames[rawName.trim().canonicalExtraName()] ?: rawName.trim()
+                        definition.stringsOrSingle("options").takeIf(List<String>::isNotEmpty)?.let { put(wireName, it) }
                     }
-                    catalog.strings("genres").takeIf(List<String>::isNotEmpty)?.let { genres ->
-                        putIfAbsent("genre", genres)
+                    catalog.stringsOrSingle("genres").takeIf(List<String>::isNotEmpty)?.let { genres ->
+                        val wireName = extraWireNames["genre"] ?: "genre"
+                        putIfAbsent(wireName, genres)
                     }
                 }
                 val extraDefaults = buildMap {
                     extraDefinitions.forEach { extra ->
                         val definition = extra as? JsonObject ?: return@forEach
-                        val name = definition.string("name") ?: return@forEach
-                        definition.string("default")?.let { put(name, it) }
+                        val rawName = definition.string("name") ?: return@forEach
+                        val default = definition.string("default")?.trim()?.takeIf(String::isNotBlank) ?: return@forEach
+                        val wireName = extraWireNames[rawName.trim().canonicalExtraName()] ?: rawName.trim()
+                        put(wireName, default)
                     }
                 }
                 val extraOptionsLimits = buildMap {
                     extraDefinitions.forEach { extra ->
                         val definition = extra as? JsonObject ?: return@forEach
-                        val name = definition.string("name") ?: return@forEach
-                        definition.int("optionsLimit")?.let { put(name, it) }
+                        val rawName = definition.string("name") ?: return@forEach
+                        val wireName = extraWireNames[rawName.trim().canonicalExtraName()] ?: rawName.trim()
+                        definition.int("optionsLimit")?.takeIf { it > 0 }?.let { put(wireName, it) }
                     }
                 }
                 ProviderCatalog(
                     type = type,
                     id = catalogId,
-                    name = catalog.string("name") ?: catalogId,
+                    name = catalog.string("name")?.trim()?.takeIf(String::isNotBlank) ?: catalogId,
                     extras = extras,
                     requiredExtras = requiredExtras,
+                    extraWireNames = extraWireNames,
                     extraOptions = extraOptions,
                     extraDefaults = extraDefaults,
                     extraOptionsLimits = extraOptionsLimits,
-                    pageSize = catalog.int("pageSize"),
+                    pageSize = catalog.int("pageSize")?.takeIf { it > 0 },
                     showInHome = catalog.boolean("showInHome") ?: true,
                     posterShape = catalog.string("posterShape"),
                 )
@@ -323,6 +335,11 @@ class HttpProviderClient(
     ): MediaPreview? {
         val itemId = string("id") ?: return null
         val rawType = string("type") ?: fallbackType
+        val releaseYear = firstString("releaseInfo", "year", "released")
+            ?.take(4)
+            ?.toIntOrNull()
+            ?: int("year")
+        val appExtras = obj("app_extras")
         return MediaPreview(
             id = itemId,
             type = rawType.toMediaType(),
@@ -332,9 +349,10 @@ class HttpProviderClient(
             backgroundUrl = firstString("background", "backdrop", "backdropUrl") ?: string("landscapePoster"),
             logoUrl = firstString("logo", "logoUrl") ?: obj("logo")?.string("url"),
             description = firstString("description", "overview"),
-            releaseYear = (string("releaseInfo") ?: string("year"))?.take(4)?.toIntOrNull() ?: int("year"),
+            releaseYear = releaseYear,
             genres = stringsOrSingle("genres").ifEmpty { stringsOrSingle("genre") },
-            contentRating = firstString("contentRating", "content_rating", "certification"),
+            contentRating = firstString("contentRating", "content_rating", "certification")
+                ?: appExtras?.firstString("certification"),
             rating = ratingValue(),
             providerIds = setOf(providerId),
             posterShape = string("posterShape") ?: catalogPosterShape,
@@ -350,8 +368,8 @@ class HttpProviderClient(
                     id = episodeId,
                     title = video.string("title") ?: video.string("name") ?: "Episode",
                     season = video.int("season"),
-                    episode = video.int("episode"),
-                    overview = video.string("overview"),
+                    episode = video.int("episode") ?: video.int("number"),
+                    overview = video.string("overview") ?: video.string("description"),
                     thumbnailUrl = video.string("thumbnail"),
                     releasedAtEpochMillis = video.long("released") ?: video.string("released")?.toEpochMillisOrNull(),
                     streams = video.array("streams").orEmpty().mapNotNull { stream ->
@@ -360,11 +378,16 @@ class HttpProviderClient(
                 )
             }
         }
+        val appExtras = obj("app_extras")
+        val cast = people("cast").ifEmpty { appExtras?.people("cast").orEmpty() }
+        val directors = people("director", "directors", "writer", "writers").ifEmpty {
+            appExtras?.people("directors", "writers").orEmpty()
+        }
         return MediaDetail(
             preview = preview,
             runtimeMinutes = string("runtime")?.toRuntimeMinutes(),
-            cast = strings("cast"),
-            directors = strings("director").ifEmpty { strings("directors") },
+            cast = cast,
+            directors = directors,
             episodes = videos,
             embeddedStreams = array("streams").orEmpty().mapNotNull { stream ->
                 (stream as? JsonObject)?.toStream(providerId)
@@ -395,13 +418,8 @@ class HttpProviderClient(
             rarFiles.isEmpty() && zipFiles.isEmpty() && sevenZipFiles.isEmpty() && tgzFiles.isEmpty() && tarFiles.isEmpty()
         ) return null
         val hints = obj("behaviorHints")
-        val proxyHeaders = hints?.obj("proxyHeaders")
-        val headers = proxyHeaders?.obj("request")?.entries?.mapNotNull { (key, value) ->
-            value.jsonPrimitive.contentOrNull?.let { key to it }
-        }?.toMap().orEmpty()
-        val subtitles = array("subtitles").orEmpty().mapNotNull { (it as? JsonObject)?.toSubtitle() }
         val tags = stringsOrSingle("tag").ifEmpty { stringsOrSingle("tags") }
-        val filename = string("filename") ?: hints?.string("filename")
+        val filename = firstString("filename") ?: hints?.firstString("filename")
         return StreamCandidate(
             providerId = providerId,
             name = string("name") ?: "Source",
@@ -422,16 +440,21 @@ class HttpProviderClient(
             tarFiles = tarFiles,
             fileMustInclude = string("fileMustInclude"),
             filename = filename,
-            videoHash = hints?.string("videoHash"),
-            videoSize = hints?.long("videoSize"),
+            videoHash = firstString("videoHash") ?: hints?.firstString("videoHash"),
+            videoSize = long("videoSize") ?: hints?.long("videoSize"),
+            bingeGroup = hints?.firstString("bingeGroup"),
+            mimeType = firstString("mimeType", "mime", "contentType"),
+            quality = firstString("quality", "videoQuality")
+                ?: tags.firstNotNullOfOrNull { it.qualityHint() }
+                ?: listOfNotNull(string("name"), string("title"), string("description"), filename)
+                    .firstNotNullOfOrNull { it.qualityHint() },
             tags = tags,
-            headers = headers,
-            subtitles = subtitles,
+            headers = sanitizeHeaders(hints?.obj("proxyHeaders")?.obj("request")),
+            subtitles = array("subtitles").orEmpty().mapNotNull { (it as? JsonObject)?.toSubtitle() },
             notWebReady = hints?.boolean("notWebReady") == true,
             countryWhitelist = hints?.strings("countryWhitelist").orEmpty(),
         )
     }
-
     private fun JsonObject.toSubtitle(): SubtitleTrack? {
         val url = string("url") ?: return null
         return SubtitleTrack(
@@ -439,11 +462,10 @@ class HttpProviderClient(
             language = string("lang") ?: string("language") ?: "und",
             url = url,
             format = string("format") ?: string("ext"),
-            headers = obj("behaviorHints")?.obj("proxyHeaders")?.obj("request")?.entries?.mapNotNull { (key, value) ->
-                value.jsonPrimitive.contentOrNull?.let { key to it }
-            }?.toMap().orEmpty(),
+            headers = sanitizeHeaders(obj("behaviorHints")?.obj("proxyHeaders")?.obj("request")),
         )
     }
+
 
     private fun CatalogQuery.extras(): Map<String, String> = buildMap {
         putAll(extras)
@@ -454,22 +476,43 @@ class HttpProviderClient(
 
     private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
     private fun JsonObject.firstString(vararg keys: String): String? =
-        keys.firstNotNullOfOrNull { key -> string(key)?.takeIf(String::isNotBlank) }
-    private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.intOrNull
-    private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
-    private fun JsonObject.double(key: String): Double? = this[key]?.jsonPrimitive?.doubleOrNull
-    private fun JsonObject.boolean(key: String): Boolean? = this[key]?.jsonPrimitive?.booleanOrNull
+        keys.firstNotNullOfOrNull { key -> string(key)?.trim()?.takeIf(String::isNotBlank) }
+    private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.contentOrNull?.trim()?.toIntOrNull()
+    private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.contentOrNull?.trim()?.toLongOrNull()
+    private fun JsonObject.double(key: String): Double? = this[key]?.jsonPrimitive?.contentOrNull?.trim()?.toDoubleOrNull()
+    private fun JsonObject.boolean(key: String): Boolean? = when (val value = this[key]?.jsonPrimitive?.contentOrNull?.trim()?.lowercase()) {
+        "true", "1" -> true
+        "false", "0" -> false
+        else -> null
+    }
     private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
     private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
     private fun JsonObject.strings(key: String): List<String> = array(key).orEmpty().mapNotNull {
-        (it as? JsonPrimitive)?.contentOrNull
+        (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotBlank)
     }
     private fun JsonObject.stringsOrSingle(key: String): List<String> = when (val value = this[key]) {
-        is JsonArray -> value.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
-        is JsonPrimitive -> value.contentOrNull?.let(::listOf).orEmpty()
+        is JsonArray -> value.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotBlank) }
+        is JsonPrimitive -> value.contentOrNull?.trim()?.takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
         else -> emptyList()
     }
     private fun JsonObject.optionalStrings(key: String): Set<String>? = if (containsKey(key)) strings(key).toSet() else null
+    private fun JsonObject.people(vararg keys: String): List<String> =
+        keys.flatMap { key -> peopleValue(this[key]) }.distinct()
+    private fun peopleValue(value: JsonElement?): List<String> = when (value) {
+        is JsonPrimitive -> value.contentOrNull?.trim()?.takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
+        is JsonArray -> value.flatMap(::peopleValue)
+        is JsonObject -> listOfNotNull(value.firstString("name", "person", "value"))
+        else -> emptyList()
+    }
+    private fun sanitizeHeaders(headers: JsonObject?): Map<String, String> = headers?.entries
+        ?.mapNotNull { (rawKey, rawValue) ->
+            val key = rawKey.trim()
+            val value = (rawValue as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            if (key.isBlank() || value.isBlank() || key.equals("Range", ignoreCase = true)) null else key to value
+        }
+        ?.toMap()
+        .orEmpty()
+    private fun String.canonicalExtraName(): String = trim().lowercase()
     private fun JsonObject.ratingValue(): Double? {
         val value = double("imdbRating")
             ?: double("imdb_rating")
@@ -484,11 +527,12 @@ class HttpProviderClient(
     }
     private fun JsonObject.streamFiles(key: String): List<StreamFile> = array(key).orEmpty().mapNotNull { item ->
         when (item) {
-            is JsonPrimitive -> item.contentOrNull?.let(::StreamFile)
+            is JsonPrimitive -> item.contentOrNull?.trim()?.takeIf(String::isNotBlank)?.let(::StreamFile)
             is JsonObject -> item.string("url")?.let { StreamFile(it, item.long("bytes")) }
             else -> null
         }
     }
+
     private fun String.toMediaType(): MediaType = when (lowercase()) {
         "movie" -> MediaType.MOVIE
         "series" -> MediaType.SERIES

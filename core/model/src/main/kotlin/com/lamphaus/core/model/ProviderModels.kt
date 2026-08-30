@@ -31,6 +31,8 @@ data class ProviderCatalog(
     val name: String,
     val extras: Set<String> = emptySet(),
     val requiredExtras: Set<String> = emptySet(),
+    /** Canonical extra name to the spelling declared by the provider. */
+    val extraWireNames: Map<String, String> = emptyMap(),
     val extraOptions: Map<String, List<String>> = emptyMap(),
     val extraDefaults: Map<String, String> = emptyMap(),
     val extraOptionsLimits: Map<String, Int> = emptyMap(),

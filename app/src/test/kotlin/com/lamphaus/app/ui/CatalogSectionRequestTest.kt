@@ -106,6 +106,24 @@ class CatalogSectionRequestTest {
         assertEquals("featured", request.query.catalogId)
     }
 
+    @Test
+    fun `custom wire spelling is preserved for search and genre extras`() {
+        val catalog = ProviderCatalog(
+            type = "movie",
+            id = "filtered",
+            name = "Filtered",
+            extras = setOf("Search", "genre", "skip"),
+            extraWireNames = mapOf("search" to "Search", "genre" to "genre"),
+        )
+
+        val request = catalog.request(search = "term", genre = "Drama", skip = 50)
+
+        assertEquals(null, request.search)
+        assertEquals("term", request.extras["Search"])
+        assertEquals("Drama", request.genre)
+        assertEquals(50, request.skip)
+    }
+
     private fun genreCatalog(type: String) = ProviderCatalog(
         type = type,
         id = "top",

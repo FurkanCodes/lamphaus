@@ -1,5 +1,6 @@
 package com.lamphaus.app.ui
 
+import com.lamphaus.core.model.MediaPreview
 internal data class CatalogProviderFingerprint(
     val id: String,
     val manifestUrl: String,
@@ -26,6 +27,53 @@ internal class CatalogRefreshGate {
     fun reset() {
         lastFingerprint = null
     }
+}
+
+internal fun firstCatalogPage(
+    section: CatalogSection,
+    rawItems: List<MediaPreview>,
+    visibleItems: List<MediaPreview> = rawItems,
+): CatalogSection {
+    val uniqueRawItems = rawItems.distinctBy(MediaPreview::stableKey)
+    val effectiveStep = if (uniqueRawItems.isNotEmpty() && uniqueRawItems.size < section.skipStep) {
+        uniqueRawItems.size
+    } else {
+        section.skipStep
+    }
+    return section.copy(
+        items = visibleItems.distinctBy(MediaPreview::stableKey),
+        errorMessage = null,
+        nextSkip = if (section.supportsSkip) effectiveStep else 0,
+        skipStep = effectiveStep,
+        hasMore = section.supportsSkip && uniqueRawItems.isNotEmpty(),
+        loadingMore = false,
+        loadMoreError = null,
+    )
+}
+
+internal fun mergeCatalogPage(
+    section: CatalogSection,
+    rawItems: List<MediaPreview>?,
+    visibleItems: List<MediaPreview> = rawItems.orEmpty(),
+    errorMessage: String? = null,
+): CatalogSection {
+    if (errorMessage != null) {
+        return section.copy(loadingMore = false, loadMoreError = errorMessage)
+    }
+    val uniqueIncoming = rawItems.orEmpty().distinctBy(MediaPreview::stableKey)
+    val existingKeys = section.items.mapTo(mutableSetOf(), MediaPreview::stableKey)
+    val appendedVisible = visibleItems
+        .distinctBy(MediaPreview::stableKey)
+        .filterNot { it.stableKey in existingKeys }
+    val terminal = uniqueIncoming.isEmpty() || uniqueIncoming.all { it.stableKey in existingKeys }
+    return section.copy(
+        items = section.items + appendedVisible,
+        errorMessage = null,
+        nextSkip = if (section.supportsSkip) section.nextSkip + section.skipStep else section.nextSkip,
+        hasMore = section.hasMore && !terminal,
+        loadingMore = false,
+        loadMoreError = null,
+    )
 }
 
 internal fun mergeCatalogRefresh(

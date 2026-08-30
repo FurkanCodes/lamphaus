@@ -107,9 +107,10 @@ class AppViewModel(
     private var cloudSyncUserId: String? = null
     private var defaultCatalogJob: Job? = null
     private var searchJob: Job? = null
+    private var browseJob: Job? = null
+    private val pageJobs = mutableMapOf<String, Job>()
     private var detailJob: Job? = null
     private var sourceJob: Job? = null
-
     init {
         viewModelScope.launch {
             combine(
@@ -385,7 +386,8 @@ class AppViewModel(
         searchJob?.cancel()
         val queryText = input.trim()
         if (queryText.isBlank()) {
-            mutableState.update { it.copy(searchResults = emptyList(), searching = false) }
+            mutableState.update { it.copy(searchSections = emptyList(), searching = false) }
+            ensureBrowseTargets()
             return
         }
         searchJob = viewModelScope.launch {
@@ -393,35 +395,270 @@ class AppViewModel(
             mutableState.update { it.copy(searching = true) }
             val enabledProviders = state.value.providers
                 .filter(ProviderSubscription::enabled)
-                .sortedBy(ProviderSubscription::sortOrder)
+                .sortedWith(compareBy<ProviderSubscription> { it.sortOrder }.thenBy { it.id })
             val searchableCatalogs = coroutineScope {
                 enabledProviders.map { subscription ->
                     async {
                         val manifest = (container.providerClient.manifest(subscription.manifestUrl) as? ProviderResult.Success)?.value
                         manifest?.catalogs
-                            ?.filter { "search" in it.extras && it.requiredExtras.all { extra -> extra == "search" } }
+                            ?.filter { it.supportsExtra("search") }
                             .orEmpty()
                             .map { subscription to it }
                     }
                 }.awaitAll().flatten()
             }
-            val results = coroutineScope {
+            val sections = coroutineScope {
                 searchableCatalogs.map { (subscription, catalog) ->
                     async {
-                        container.providerClient.catalog(
-                            subscription.manifestUrl,
-                            subscription.id,
-                            CatalogQuery(catalog.type, catalog.id, search = queryText, posterShape = catalog.posterShape),
+                        val query = catalog.request(search = queryText)
+                        val section = CatalogSection(
+                            id = "search:${canonicalCatalogRequestIdentity(subscription.id, query)}",
+                            providerId = subscription.id,
+                            title = catalog.name,
+                            providerName = subscription.displayName,
+                            items = emptyList(),
+                            baseQuery = query,
+                            supportsSkip = catalog.supportsSkip(),
+                            skipStep = catalog.initialSkipStep(),
+                            hasMore = catalog.supportsSkip(),
                         )
+                        val missingRequired = catalog.requiredExtras.filterNot { required ->
+                            required.canonicalExtraName() == "search" ||
+                                catalog.extraDefaults.keys.any { key ->
+                                    key.canonicalExtraName() == required.canonicalExtraName()
+                                }
+                        }
+                        if (missingRequired.isNotEmpty()) {
+                            section.copy(
+                                errorMessage = "Unavailable: ${missingRequired.sorted().joinToString(", ")} is required.",
+                                hasMore = false,
+                            )
+                        } else {
+                            when (val result = container.providerClient.catalog(
+                                subscription.manifestUrl,
+                                subscription.id,
+                                query,
+                            )) {
+                                is ProviderResult.Success -> firstCatalogPage(
+                                    section,
+                                    result.value,
+                                    filterForProfile(result.value),
+                                )
+                                is ProviderResult.Failure -> section.copy(errorMessage = result.safeMessage, hasMore = false)
+                            }
+                        }
                     }
                 }.awaitAll()
-            }.flatMap { (it as? ProviderResult.Success)?.value.orEmpty() }
+            }
             mutableState.update {
                 it.copy(
-                    searchResults = filterForProfile(results).distinctBy(MediaPreview::stableKey),
+                    searchSections = sections,
                     searching = false,
                 )
             }
+        }
+    }
+
+    fun selectBrowseType(type: String) {
+        val target = state.value.browse.targets.firstOrNull { it.catalog.type == type } ?: return
+        selectBrowseTarget(target, genre = null)
+    }
+
+    fun selectBrowseCatalog(catalogId: String) {
+        val target = state.value.browse.targets.firstOrNull {
+            it.id == catalogId || it.catalog.id == catalogId
+        } ?: return
+        selectBrowseTarget(target, genre = null)
+    }
+
+    fun selectBrowseGenre(genre: String?) {
+        val browse = state.value.browse
+        val target = browse.targets.firstOrNull { it.id == browse.selectedCatalogId } ?: return
+        selectBrowseTarget(target, genre)
+    }
+
+    fun loadMoreBrowse() {
+        state.value.browse.result?.let { loadMoreCatalog(it.id) }
+    }
+
+    fun retryBrowse() {
+        state.value.browse.result?.let { retryCatalogPage(it.id) }
+    }
+
+    fun loadMoreCatalog(sectionId: String) {
+        val current = findCatalogSection(state.value, sectionId) ?: return
+        if (!current.supportsSkip || !current.hasMore || current.loadingMore) return
+        val provider = state.value.providers.firstOrNull { it.id == current.providerId && it.enabled } ?: return
+        val request = current.baseQuery.copy(skip = current.nextSkip)
+        setCatalogSection(sectionId) { section ->
+            if (section.baseQuery != current.baseQuery) section else section.copy(loadingMore = true, loadMoreError = null)
+        }
+        val job = viewModelScope.launch {
+            val result = container.providerClient.catalog(provider.manifestUrl, provider.id, request)
+            val latest = findCatalogSection(state.value, sectionId) ?: return@launch
+            if (latest.baseQuery != current.baseQuery || latest.nextSkip != current.nextSkip) return@launch
+            val updated = when (result) {
+                is ProviderResult.Success -> mergeCatalogPage(
+                    latest,
+                    result.value,
+                    filterForProfile(result.value),
+                )
+                is ProviderResult.Failure -> mergeCatalogPage(latest, null, errorMessage = result.safeMessage)
+            }
+            setCatalogSection(sectionId) { section ->
+                if (section.baseQuery == current.baseQuery && section.loadingMore) updated else section
+            }
+        }
+        pageJobs[sectionId]?.cancel()
+        pageJobs[sectionId] = job
+    }
+
+    fun retryCatalogPage(sectionId: String) = loadMoreCatalog(sectionId)
+
+    private fun ensureBrowseTargets() {
+        if (state.value.browse.targets.isNotEmpty() || browseJob?.isActive == true) return
+        browseJob = viewModelScope.launch {
+            val providers = state.value.providers
+                .filter(ProviderSubscription::enabled)
+                .sortedWith(compareBy<ProviderSubscription> { it.sortOrder }.thenBy { it.id })
+            val targets = coroutineScope {
+                providers.map { subscription ->
+                    async {
+                        val manifest = (container.providerClient.manifest(subscription.manifestUrl) as? ProviderResult.Success)?.value
+                        manifest?.catalogs
+                            ?.filterNot { catalog ->
+                                catalog.requiredExtras.isNotEmpty() &&
+                                    catalog.requiredExtras.all { it.canonicalExtraName() == "search" }
+                            }
+                            .orEmpty()
+                            .map { catalog ->
+                                val missing = catalog.requiredExtras.filterNot { required ->
+                                    catalog.extraDefaults.keys.any { key -> key.canonicalExtraName() == required.canonicalExtraName() }
+                                }
+                                CatalogBrowseTarget(
+                                    providerId = subscription.id,
+                                    providerName = subscription.displayName,
+                                    manifestUrl = subscription.manifestUrl,
+                                    catalog = catalog,
+                                    unavailableReason = missing.takeIf(List<String>::isNotEmpty)?.let {
+                                        "Unavailable: ${it.sorted().joinToString(", ")} is required."
+                                    },
+                                )
+                            }
+                    }
+                }.awaitAll().flatten()
+            }
+            val selected = targets.firstOrNull { it.unavailableReason == null } ?: targets.firstOrNull()
+            mutableState.update { current ->
+                val selectedType = current.browse.selectedType?.takeIf { type -> targets.any { it.catalog.type == type } }
+                    ?: selected?.catalog?.type
+                val selectedTarget = current.browse.selectedCatalogId?.let { id -> targets.firstOrNull { it.id == id } }
+                    ?: targets.firstOrNull { it.catalog.type == selectedType }
+                current.copy(
+                    browse = current.browse.copy(
+                        targets = targets,
+                        selectedType = selectedType,
+                        selectedCatalogId = selectedTarget?.id,
+                        selectorError = null,
+                    ),
+                )
+            }
+            val selectedToLoad = state.value.browse.selectedCatalogId?.let { id ->
+                targets.firstOrNull { it.id == id }
+            } ?: selected
+            selectedToLoad?.let { loadBrowseTarget(it, state.value.browse.selectedGenre) }
+        }
+    }
+
+    private fun selectBrowseTarget(target: CatalogBrowseTarget, genre: String?) {
+        browseJob?.cancel()
+        browseJob = viewModelScope.launch {
+            mutableState.update {
+                it.copy(
+                    browse = it.browse.copy(
+                        selectedType = target.catalog.type,
+                        selectedCatalogId = target.id,
+                        selectedGenre = genre,
+                        result = null,
+                        loading = true,
+                        selectorError = null,
+                    ),
+                )
+            }
+            loadBrowseTarget(target, genre)
+        }
+    }
+
+    private suspend fun loadBrowseTarget(target: CatalogBrowseTarget, genre: String?) {
+        if (target.unavailableReason != null) {
+            mutableState.update {
+                it.copy(
+                    browse = it.browse.copy(
+                        result = CatalogSection(
+                            id = "browse:${target.id}",
+                            providerId = target.providerId,
+                            title = target.catalog.name,
+                            providerName = target.providerName,
+                            items = emptyList(),
+                            errorMessage = target.unavailableReason,
+                        ),
+                        loading = false,
+                        selectorError = target.unavailableReason,
+                    ),
+                )
+            }
+            return
+        }
+        val query = target.catalog.request(genre = genre)
+        val section = CatalogSection(
+            id = "browse:${canonicalCatalogRequestIdentity(target.providerId, query)}",
+            providerId = target.providerId,
+            title = target.catalog.name,
+            providerName = target.providerName,
+            items = emptyList(),
+            baseQuery = query,
+            supportsSkip = target.catalog.supportsSkip(),
+            skipStep = target.catalog.initialSkipStep(),
+            hasMore = target.catalog.supportsSkip(),
+        )
+        mutableState.update { it.copy(browse = it.browse.copy(result = section, loading = true, selectorError = null)) }
+        when (val result = container.providerClient.catalog(target.manifestUrl, target.providerId, query)) {
+            is ProviderResult.Success -> mutableState.update {
+                it.copy(
+                    browse = it.browse.copy(
+                        result = firstCatalogPage(section, result.value, filterForProfile(result.value)),
+                        loading = false,
+                    ),
+                )
+            }
+            is ProviderResult.Failure -> mutableState.update {
+                it.copy(
+                    browse = it.browse.copy(
+                        result = section.copy(errorMessage = result.safeMessage, hasMore = false),
+                        loading = false,
+                        selectorError = result.safeMessage,
+                    ),
+                )
+            }
+        }
+    }
+    private fun findCatalogSection(current: AppUiState, sectionId: String): CatalogSection? =
+        current.sections.firstOrNull { it.id == sectionId }
+            ?: current.searchSections.firstOrNull { it.id == sectionId }
+            ?: current.browse.result?.takeIf { it.id == sectionId }
+
+    private fun setCatalogSection(sectionId: String, transform: (CatalogSection) -> CatalogSection) {
+        mutableState.update { current ->
+            val home = current.sections.map { section -> if (section.id == sectionId) transform(section) else section }
+            val search = current.searchSections.map { section -> if (section.id == sectionId) transform(section) else section }
+            val browse = current.browse.result?.let { section ->
+                if (section.id == sectionId) transform(section) else section
+            }
+            current.copy(
+                sections = home,
+                searchSections = search,
+                browse = current.browse.copy(result = browse),
+            )
         }
     }
 
@@ -429,6 +666,7 @@ class AppViewModel(
         val current = state.value.providers.firstOrNull { it.id == providerId } ?: return@launch
         if (current.sortOrder < 0) {
             showMessage("The Lamphaus catalog is always available.")
+
             return@launch
         }
         container.libraryRepository.setProviderEnabled(providerId, enabled)
@@ -1245,31 +1483,36 @@ class AppViewModel(
                                             when (plan) {
                                                 is CatalogHomePlan.Request -> {
                                                     val query = plan.query
-                                                    val id = "${subscription.id}:${query.type}:${query.catalogId}:${query.genre.orEmpty()}"
+                                                    val id = "home:${canonicalCatalogRequestIdentity(subscription.id, query)}"
+                                                    val section = CatalogSection(
+                                                        id = id,
+                                                        providerId = subscription.id,
+                                                        title = plan.title,
+                                                        providerName = subscription.displayName,
+                                                        items = emptyList(),
+                                                        baseQuery = query,
+                                                        supportsSkip = catalog.supportsSkip(),
+                                                        skipStep = catalog.initialSkipStep(),
+                                                        hasMore = catalog.supportsSkip(),
+                                                    )
                                                     when (val result = container.providerClient.catalog(
                                                         subscription.manifestUrl,
                                                         subscription.id,
                                                         query,
                                                     )) {
-                                                        is ProviderResult.Success -> CatalogSection(
-                                                            id = id,
-                                                            providerId = subscription.id,
-                                                            title = plan.title,
-                                                            providerName = subscription.displayName,
-                                                            items = filterForProfile(
+                                                        is ProviderResult.Success -> firstCatalogPage(
+                                                            section,
+                                                            result.value,
+                                                            filterForProfile(
                                                                 result.value,
                                                                 current.activeProfile?.let { profile ->
                                                                     profile.kind == ProfileKind.CHILD && profile.hideUnrated
                                                                 } == true,
                                                             ),
                                                         )
-                                                        is ProviderResult.Failure -> CatalogSection(
-                                                            id = id,
-                                                            providerId = subscription.id,
-                                                            title = plan.title,
-                                                            providerName = subscription.displayName,
-                                                            items = emptyList(),
+                                                        is ProviderResult.Failure -> section.copy(
                                                             errorMessage = result.safeMessage,
+                                                            hasMore = false,
                                                         )
                                                     }
                                                 }

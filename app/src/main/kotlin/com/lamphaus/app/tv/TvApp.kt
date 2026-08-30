@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
@@ -551,11 +552,13 @@ private fun TvSignedIn(
                         state = state,
                         onMedia = openMedia,
                         onFocused = { lastFocusedMedia = it },
-                        initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
                         onAddSource = {
                             destination = TvDestination.SETTINGS
                             focusDestination = TvDestination.SETTINGS
                         },
+                        onLoadMore = viewModel::loadMoreCatalog,
+                        onRetry = viewModel::retryCatalogPage,
+                        initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
                         restoreMediaKey = pendingMediaKey,
                         onFocusRestored = { pendingMediaKey = null },
                     )
@@ -574,6 +577,13 @@ private fun TvSignedIn(
                         initialSearch = initialSearch.orEmpty(),
                         state = state,
                         onSearch = viewModel::searchContent,
+                        onBrowseType = viewModel::selectBrowseType,
+                        onBrowseCatalog = viewModel::selectBrowseCatalog,
+                        onBrowseGenre = viewModel::selectBrowseGenre,
+                        onLoadMore = viewModel::loadMoreBrowse,
+                        onRetry = viewModel::retryBrowse,
+                        onCatalogLoadMore = viewModel::loadMoreCatalog,
+                        onCatalogRetry = viewModel::retryCatalogPage,
                         onMedia = openMedia,
                         onFocused = { lastFocusedMedia = it },
                         initialFocusRequester = contentFocus.getValue(TvDestination.SEARCH),
@@ -620,6 +630,8 @@ private fun TvHome(
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
+    onLoadMore: (String) -> Unit,
+    onRetry: (String) -> Unit,
     initialFocusRequester: FocusRequester,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
@@ -717,6 +729,8 @@ private fun TvHome(
                 section = section,
                 onMedia = onMedia,
                 onFocused = { focusedCandidate = it; onFocused(it) },
+                onLoadMore = { onLoadMore(section.id) },
+                onRetry = { onRetry(section.id) },
                 restoreMediaKey = restoreMediaKey,
                 onFocusRestored = onFocusRestored,
             )
@@ -998,6 +1012,8 @@ private fun TvCatalogRow(
     section: CatalogSection,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
+    onLoadMore: () -> Unit,
+    onRetry: () -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
@@ -1018,7 +1034,7 @@ private fun TvCatalogRow(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        if (section.items.isNotEmpty()) {
+        if (section.items.isNotEmpty() || section.hasMore || section.loadMoreError != null) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                 contentPadding = PaddingValues(
@@ -1037,6 +1053,15 @@ private fun TvCatalogRow(
                         revealLabelOnFocus = true,
                     )
                 }
+                if (section.loadMoreError != null || section.hasMore) {
+                    item("catalog-action") {
+                        TvAction(
+                            label = stringResource(if (section.loadMoreError != null) R.string.retry else R.string.load_more),
+                            icon = Icons.Outlined.Refresh,
+                            onClick = if (section.loadMoreError != null) onRetry else onLoadMore,
+                        )
+                    }
+                }
             }
         }
     }
@@ -1051,6 +1076,9 @@ private fun TvMediaGrid(
     initialFocusRequester: FocusRequester,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    section: CatalogSection? = null,
+    onLoadMore: () -> Unit = {},
+    onRetry: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize()) {
         Text(
@@ -1064,7 +1092,7 @@ private fun TvMediaGrid(
                 .semantics { heading() },
             style = MaterialTheme.typography.headlineSmall,
         )
-        if (media.isEmpty()) {
+        if (media.isEmpty() && section?.loadMoreError == null && section?.hasMore != true) {
             Column(
                 modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1099,6 +1127,15 @@ private fun TvMediaGrid(
                         compactLandscape = true,
                     )
                 }
+                if (section?.loadMoreError != null || section?.hasMore == true) {
+                    item("catalog-action") {
+                        TvAction(
+                            label = stringResource(if (section?.loadMoreError != null) R.string.retry else R.string.load_more),
+                            icon = Icons.Outlined.Refresh,
+                            onClick = if (section?.loadMoreError != null) onRetry else onLoadMore,
+                        )
+                    }
+                }
             }
         }
     }
@@ -1109,6 +1146,13 @@ private fun TvSearch(
     initialSearch: String,
     state: AppUiState,
     onSearch: (String) -> Unit,
+    onBrowseType: (String) -> Unit,
+    onBrowseCatalog: (String) -> Unit,
+    onBrowseGenre: (String?) -> Unit,
+    onLoadMore: () -> Unit,
+    onRetry: () -> Unit,
+    onCatalogLoadMore: (String) -> Unit,
+    onCatalogRetry: (String) -> Unit,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
     initialFocusRequester: FocusRequester,
@@ -1118,7 +1162,6 @@ private fun TvSearch(
     var query by rememberSaveable { mutableStateOf(initialSearch) }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(query) { onSearch(query) }
-    val matches = if (query.isBlank()) state.allMedia else state.searchResults
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1137,29 +1180,94 @@ private fun TvSearch(
                 .height(60.dp)
                 .focusRequester(initialFocusRequester),
         )
-        Spacer(Modifier.height(32.dp))
-        if (matches.isEmpty()) {
+        Spacer(Modifier.height(24.dp))
+        if (query.isBlank()) {
+            val browse = state.browse
+            val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(browse.targets.map { it.catalog.type }.distinct(), key = { it }) { type ->
+                    TvFilterChip(
+                        label = type.replaceFirstChar(Char::uppercase),
+                        selected = browse.selectedType == type,
+                        onClick = { onBrowseType(type) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(browse.targets.filter { it.catalog.type == browse.selectedType }, key = { it.id }) { target ->
+                    TvFilterChip(
+                        label = target.catalog.name,
+                        selected = browse.selectedCatalogId == target.id,
+                        onClick = { onBrowseCatalog(target.id) },
+                    )
+                }
+            }
+            selectedTarget?.genres?.takeIf(List<String>::isNotEmpty)?.let { genres ->
+                Spacer(Modifier.height(12.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item {
+                        TvFilterChip(
+                            label = stringResource(R.string.all_genres),
+                            selected = browse.selectedGenre == null,
+                            onClick = { onBrowseGenre(null) },
+                        )
+                    }
+                    items(genres, key = { it }) { genre ->
+                        TvFilterChip(
+                            label = genre,
+                            selected = browse.selectedGenre == genre,
+                            onClick = { onBrowseGenre(genre) },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            val result = browse.result
+            when {
+                result?.errorMessage != null -> Text(result.errorMessage, color = MaterialTheme.colorScheme.error)
+                result != null -> TvMediaGrid(
+                    title = result.title,
+                    media = result.items,
+                    onMedia = onMedia,
+                    onFocused = onFocused,
+                    initialFocusRequester = initialFocusRequester,
+                    restoreMediaKey = restoreMediaKey,
+                    onFocusRestored = onFocusRestored,
+                    section = result,
+                    onLoadMore = onLoadMore,
+                    onRetry = onRetry,
+                )
+                else -> {
+                    TvEmptyMark()
+                    Text(stringResource(R.string.install_first_addon), style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        } else if (state.searching) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        } else if (state.searchSections.isEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 TvEmptyMark()
                 Text(
-                    stringResource(R.string.nothing_here),
+                    stringResource(R.string.search_no_results),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
         } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.rowSpacing),
                 contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
             ) {
-                items(matches, key = MediaPreview::stableKey) { media ->
-                    TvMediaCard(
-                        media = media,
-                        onClick = { onMedia(media) },
-                        onFocused = { onFocused(media) },
-                        modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
-                        showLabel = true,
-                        revealLabelOnFocus = true,
+                items(state.searchSections, key = CatalogSection::id) { section ->
+                    TvCatalogRow(
+                        section = section,
+                        onMedia = onMedia,
+                        onFocused = onFocused,
+                        onLoadMore = { onCatalogLoadMore(section.id) },
+                        onRetry = { onCatalogRetry(section.id) },
+                        restoreMediaKey = restoreMediaKey,
+                        onFocusRestored = onFocusRestored,
                     )
                 }
             }

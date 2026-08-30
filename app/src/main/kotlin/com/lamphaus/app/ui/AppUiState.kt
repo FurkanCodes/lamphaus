@@ -20,6 +20,7 @@ import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.Episode
+import com.lamphaus.core.model.CatalogQuery
 
 data class ArtworkEditorState(
     val media: MediaPreview,
@@ -59,6 +60,23 @@ data class CatalogSection(
     val providerName: String,
     val items: List<MediaPreview>,
     val errorMessage: String? = null,
+    val baseQuery: CatalogQuery = CatalogQuery("", ""),
+    val supportsSkip: Boolean = false,
+    val skipStep: Int = 100,
+    val nextSkip: Int = 0,
+    val hasMore: Boolean = false,
+    val loadingMore: Boolean = false,
+    val loadMoreError: String? = null,
+)
+
+data class CatalogBrowseState(
+    val targets: List<CatalogBrowseTarget> = emptyList(),
+    val selectedType: String? = null,
+    val selectedCatalogId: String? = null,
+    val selectedGenre: String? = null,
+    val result: CatalogSection? = null,
+    val loading: Boolean = false,
+    val selectorError: String? = null,
 )
 
 data class SourcePickerState(
@@ -85,7 +103,8 @@ data class AppUiState(
     val activeProfileId: String? = null,
     val providers: List<ProviderSubscription> = emptyList(),
     val sections: List<CatalogSection> = emptyList(),
-    val searchResults: List<MediaPreview> = emptyList(),
+    val searchSections: List<CatalogSection> = emptyList(),
+    val browse: CatalogBrowseState = CatalogBrowseState(),
     val library: List<LibraryEntry> = emptyList(),
     val progress: List<WatchProgress> = emptyList(),
     val selectedDetail: MediaDetail? = null,
