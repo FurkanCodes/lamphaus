@@ -1,11 +1,13 @@
 package com.lamphaus.app.mobile
 
 import android.os.Bundle
+import android.os.SystemClock
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -14,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.lamphaus.app.BuildConfig
+import com.lamphaus.app.R
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.isTelevision
 import com.lamphaus.app.ui.AppViewModel
@@ -26,6 +29,8 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.launch
 import androidx.credentials.exceptions.NoCredentialException
+private const val BACK_PRESS_EXIT_WINDOW_MILLIS = 2_000L
+
 
 class MobileActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels {
@@ -43,6 +48,19 @@ class MobileActivity : ComponentActivity() {
             finish()
             return
         }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            private var lastBackPressedAt = 0L
+
+            override fun handleOnBackPressed() {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastBackPressedAt <= BACK_PRESS_EXIT_WINDOW_MILLIS) {
+                    finish()
+                } else {
+                    lastBackPressedAt = now
+                    viewModel.reportMessage(getString(R.string.press_back_again_to_exit))
+                }
+            }
+        })
         handleIncomingIntent(intent)
         setContent {
             MobileApp(

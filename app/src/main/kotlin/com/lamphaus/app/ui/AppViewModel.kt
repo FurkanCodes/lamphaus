@@ -67,6 +67,10 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 
 private val DEVICE_BINDING_BACKOFF_MILLIS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
+private const val ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE =
+    "Artwork keys aren't configured. Add a provider key in Settings > Artwork."
+private const val ARTWORK_KEYS_NOT_CONFIGURED_EDITOR_ERROR =
+    "Artwork keys aren't configured. Add a provider key in Settings > Artwork to load artwork."
 
 internal fun deviceBindingBackoffMillis(attempt: Int): Long =
     DEVICE_BINDING_BACKOFF_MILLIS[attempt.coerceIn(0, DEVICE_BINDING_BACKOFF_MILLIS.lastIndex)]
@@ -594,28 +598,44 @@ class AppViewModel(
     }
 
     fun openArtworkEditor(media: MediaPreview) {
-        val existing = state.value.artworkOverrides.firstOrNull { it.mediaKey == media.stableKey }
-        val resolvedMedia = ArtworkResolver(
-            state.value.artworkOverrides.associateBy { it.mediaKey },
-        ).resolve(media).media
-        mutableState.update {
-            it.copy(
-                artworkEditor = ArtworkEditorState(
-                    media = resolvedMedia,
-                    selectedPoster = existing?.poster,
-                    selectedBackdrop = existing?.backdrop,
-                    selectedLogo = existing?.logo,
-                ),
-            )
-        }
-        val userId = (state.value.account as? AccountState.SignedIn)?.userId
+        val current = state.value
+        val userId = (current.account as? AccountState.SignedIn)?.userId
         if (userId == null) {
-            mutableState.update { state ->
-                state.copy(artworkEditor = state.artworkEditor?.copy(loading = false, error = "Sign in to edit artwork."))
-            }
+            showMessage("Sign in to edit artwork.")
             return
         }
+        val existing = current.artworkOverrides.firstOrNull { it.mediaKey == media.stableKey }
+        val resolvedMedia = ArtworkResolver(
+            current.artworkOverrides.associateBy { it.mediaKey },
+        ).resolve(media).media
         viewModelScope.launch {
+            val providerStatuses = if (current.artworkProviders.isNotEmpty()) {
+                current.artworkProviders
+            } else {
+                val result = container.cloudSyncGateway.artworkProviderStatuses(userId)
+                when {
+                    result.isSuccess -> result.getOrNull()
+                    result.exceptionOrNull() is CloudNotConfiguredException -> {
+                        showMessage(ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE)
+                        return@launch
+                    }
+                    else -> null
+                }
+            }
+            if (providerStatuses != null && providerStatuses.none { it.configured }) {
+                showMessage(ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE)
+                return@launch
+            }
+            mutableState.update {
+                it.copy(
+                    artworkEditor = ArtworkEditorState(
+                        media = resolvedMedia,
+                        selectedPoster = existing?.poster,
+                        selectedBackdrop = existing?.backdrop,
+                        selectedLogo = existing?.logo,
+                    ),
+                )
+            }
             val result = container.cloudSyncGateway.artworkCandidates(
                 userId = userId,
                 mediaKey = media.stableKey,
@@ -645,20 +665,20 @@ class AppViewModel(
                             ),
                             lastArtworkLookupFailures = failures,
                         )
-                },
+                    },
                     onFailure = { error ->
                         val keysMissing = error is ArtworkKeysNotConfiguredException ||
                             error is CloudNotConfiguredException
                         state.copy(
                             message = if (keysMissing) {
-                                "Artwork keys aren't configured. Add a provider key in Settings > Artwork."
+                                ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE
                             } else {
                                 state.message
                             },
                             artworkEditor = editor.copy(
                                 loading = false,
                                 error = if (keysMissing) {
-                                    "Artwork keys aren't configured. Add a provider key in Settings > Artwork to load artwork."
+                                    ARTWORK_KEYS_NOT_CONFIGURED_EDITOR_ERROR
                                 } else {
                                     "Artwork lookup failed. Try again."
                                 },

@@ -22,6 +22,7 @@
     <string name="install_addon_explanation">Add a compatible HTTPS manifest or add-on catalog to load content.</string>
     <string name="install_addon">Install add-on</string>
     <string name="back">Back</string>
+    <string name="press_back_again_to_exit">Press back again to exit.</string>
     <string name="play">Play</string>
     <string name="in_library">In Library</string>
     <string name="add_to_library">Add to Library</string>

@@ -201,7 +201,7 @@ fun TvApp(
                                 horizontal = TvLayoutTokens.screenHorizontalPadding,
                                 vertical = TvLayoutTokens.screenBottomPadding,
                             ),
-                        contentAlignment = Alignment.TopEnd,
+                        contentAlignment = Alignment.BottomCenter,
                     ) {
                         Text(
                             text = message,

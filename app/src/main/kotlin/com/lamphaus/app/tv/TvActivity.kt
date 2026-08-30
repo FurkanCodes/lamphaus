@@ -3,11 +3,14 @@ package com.lamphaus.app.tv
 import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
-import androidx.core.net.toUri
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.core.net.toUri
 import com.google.android.gms.cast.tv.CastReceiverContext
+import com.lamphaus.app.R
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.isTelevision
@@ -15,6 +18,8 @@ import com.lamphaus.app.mobile.MobileActivity
 import com.lamphaus.app.player.PlayerActivity
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.isSafeExternalUri
+
+private const val BACK_PRESS_EXIT_WINDOW_MILLIS = 2_000L
 
 class TvActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels {
@@ -31,6 +36,19 @@ class TvActivity : ComponentActivity() {
             finish()
             return
         }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            private var lastBackPressedAt = 0L
+
+            override fun handleOnBackPressed() {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastBackPressedAt <= BACK_PRESS_EXIT_WINDOW_MILLIS) {
+                    finish()
+                } else {
+                    lastBackPressedAt = now
+                    viewModel.reportMessage(getString(R.string.press_back_again_to_exit))
+                }
+            }
+        })
         setContent {
             TvApp(
                 viewModel = viewModel,
