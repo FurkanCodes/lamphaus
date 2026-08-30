@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -128,6 +129,9 @@ import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
+import com.lamphaus.app.ui.SpoilerBlurLayer
+import com.lamphaus.app.ui.SpoilerContent
+import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
@@ -136,7 +140,9 @@ import com.lamphaus.core.model.ArtworkProviderResult
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -475,6 +481,7 @@ private fun TvSignedIn(
             detail = state.selectedDetail,
             inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
             watchedEpisodeIds = watchedEpisodeIds,
+            spoilerProtection = state.spoilerProtection,
             onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
             onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
             onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
@@ -1217,7 +1224,7 @@ private fun TvSourcePickerScreen(
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item("all") {
-                        TvSourceFilterChip(
+                        TvFilterChip(
                             label = stringResource(R.string.all_sources),
                             selected = picker.selectedProviderId == null,
                             onClick = { onProvider(null) },
@@ -1225,7 +1232,7 @@ private fun TvSourcePickerScreen(
                         )
                     }
                     items(picker.providerIds, key = { it }) { providerId ->
-                        TvSourceFilterChip(
+                        TvFilterChip(
                             label = picker.providerLabels[providerId] ?: providerId,
                             selected = picker.selectedProviderId == providerId,
                             onClick = { onProvider(providerId) },
@@ -1326,7 +1333,7 @@ private fun TvSourcePickerScreen(
 }
 
 @Composable
-private fun TvSourceFilterChip(
+private fun TvFilterChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
@@ -1346,6 +1353,30 @@ private fun TvSourceFilterChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+@Composable
+internal fun TvSeasonChips(
+    seasonNumbers: List<Int>,
+    selectedSeason: Int?,
+    onSeasonSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyRow(
+        modifier = modifier,
+        contentPadding = PaddingValues(
+            start = TvLayoutTokens.screenHorizontalPadding,
+            end = TvLayoutTokens.screenHorizontalPadding,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(seasonNumbers, key = { it }) { season ->
+            TvFilterChip(
+                label = stringResource(R.string.season_format, season),
+                selected = selectedSeason == season,
+                onClick = { onSeasonSelected(season) },
+            )
+        }
     }
 }
 
@@ -1436,24 +1467,14 @@ private fun TvSourceMediaSummary(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        description?.takeIf(String::isNotBlank)?.let {
-            Spacer(Modifier.height(14.dp))
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 5,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
-
 @Composable
 private fun TvDetailScreen(
     detail: MediaDetail?,
     inLibrary: Boolean,
     watchedEpisodeIds: Set<String>,
+    spoilerProtection: SpoilerProtectionSettings,
     onPlay: (Episode?) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
@@ -1465,8 +1486,6 @@ private fun TvDetailScreen(
     }
     val playFocus = remember(detail.preview.stableKey) { FocusRequester() }
     val libraryFocus = remember(detail.preview.stableKey) { FocusRequester() }
-    // Latest action button that held focus — metadata reading surfaces return
-    // here when focus re-approaches them from below.
     var lastActionFocus by remember(detail.preview.stableKey) { mutableStateOf<FocusRequester?>(null) }
     val reducedMotion = rememberReducedMotion()
     val libraryPulse = remember(detail.preview.stableKey) { Animatable(1f) }
@@ -1474,18 +1493,32 @@ private fun TvDetailScreen(
     LaunchedEffect(detail.preview.stableKey) { playFocus.requestFocus() }
     LaunchedEffect(inLibrary) {
         if (inLibrary && !previousLibraryState && !reducedMotion) {
-            libraryPulse.animateTo(
-                1.04f,
-                tween(TvMotionTokens.confirmationPulseDurationMillis),
-            )
-            libraryPulse.animateTo(
-                1f,
-                tween(TvMotionTokens.confirmationPulseDurationMillis),
-            )
+            libraryPulse.animateTo(1.04f, tween(TvMotionTokens.confirmationPulseDurationMillis))
+            libraryPulse.animateTo(1f, tween(TvMotionTokens.confirmationPulseDurationMillis))
         } else {
             libraryPulse.snapTo(1f)
         }
         previousLibraryState = inLibrary
+    }
+    val seasonNumbers = detail.episodes
+        .asSequence()
+        .mapNotNull { it.season }
+        .distinct()
+        .sorted()
+        .toList()
+    val showSeasonChips = detail.preview.type == MediaType.SERIES && seasonNumbers.size > 1
+    var selectedSeason by remember(detail.preview.stableKey, seasonNumbers) {
+        mutableStateOf(seasonNumbers.firstOrNull())
+    }
+    val visibleEpisodes = if (showSeasonChips && selectedSeason != null) {
+        detail.episodes.filter { it.season == selectedSeason }
+    } else {
+        detail.episodes
+    }
+    LaunchedEffect(detail.preview.stableKey, seasonNumbers) {
+        if (selectedSeason == null || selectedSeason !in seasonNumbers) {
+            selectedSeason = seasonNumbers.firstOrNull()
+        }
     }
     Box(Modifier.fillMaxSize()) {
         MediaArtwork(
@@ -1545,9 +1578,9 @@ private fun TvDetailScreen(
                     }
                     detail.preview.description
                         ?.takeIf(String::isNotBlank)
-                        ?.let {
+                        ?.let { overview ->
                             TvExpandableText(
-                                text = it,
+                                text = overview,
                                 collapsedLines = 2,
                                 returnFocusProvider = { lastActionFocus },
                             )
@@ -1606,10 +1639,20 @@ private fun TvDetailScreen(
                         modifier = Modifier.padding(
                             start = TvLayoutTokens.screenHorizontalPadding,
                             end = TvLayoutTokens.screenHorizontalPadding,
-                            bottom = 16.dp,
+                            bottom = if (showSeasonChips) 12.dp else 16.dp,
                         ),
                         style = MaterialTheme.typography.titleMedium,
                     )
+                }
+                if (showSeasonChips) {
+                    item("season-filters") {
+                        TvSeasonChips(
+                            seasonNumbers = seasonNumbers,
+                            selectedSeason = selectedSeason,
+                            onSeasonSelected = { selectedSeason = it },
+                            modifier = Modifier.padding(bottom = 16.dp),
+                        )
+                    }
                 }
                 item("episodes") {
                     LazyRow(
@@ -1619,10 +1662,11 @@ private fun TvDetailScreen(
                         ),
                         horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                     ) {
-                        items(detail.episodes, key = Episode::id) { episode ->
+                        items(visibleEpisodes, key = Episode::id) { episode ->
                             TvEpisodeCard(
                                 episode = episode,
                                 watched = episode.id in watchedEpisodeIds,
+                                spoilerProtection = spoilerProtection,
                                 fallbackArtworkUrl = detail.preview.backgroundUrl ?: detail.preview.posterUrl,
                                 onClick = { onPlay(episode) },
                             )
@@ -1676,14 +1720,14 @@ private fun TvArtworkEditorScreen(
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item {
-                        TvSourceFilterChip(
+                        TvFilterChip(
                             label = stringResource(R.string.artwork_all_sources),
                             selected = editor.providerFilter == null,
                             onClick = { onProviderSelected(null) },
                         )
                     }
                     items(editor.availableProviders, key = { it.value }) { provider ->
-                        TvSourceFilterChip(
+                        TvFilterChip(
                             label = provider.value,
                             selected = editor.providerFilter == provider,
                             onClick = { onProviderSelected(provider) },
@@ -1936,21 +1980,29 @@ private fun TvArtworkProviderMessages(results: List<ArtworkProviderResult>) {
 
 
 @Composable
-private fun TvEpisodeCard(
+internal fun TvEpisodeCard(
     episode: Episode,
     watched: Boolean,
+    spoilerProtection: SpoilerProtectionSettings,
     fallbackArtworkUrl: String?,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val artworkUrl = episode.thumbnailUrl ?: fallbackArtworkUrl
     val number = episode.numberParts()
+    val artworkHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched)
+    val synopsisHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched)
+    val hiddenAny = artworkHidden || synopsisHidden
     val watchedDescription = if (watched) stringResource(R.string.watched) else ""
     TvFocusableSurface(
         onClick = onClick,
         modifier = Modifier
+            .then(modifier)
             .width(TvLayoutTokens.landscapeCardWidth)
             .height(TvLayoutTokens.landscapeCardHeight)
-            .semantics { stateDescription = watchedDescription },
+            .semantics {
+                stateDescription = watchedDescription
+            },
         containerColor = TvSurfaceTokens.elevated,
         focusedContainerColor = Color.Transparent,
     ) { focused ->
@@ -1959,12 +2011,23 @@ private fun TvEpisodeCard(
                 .fillMaxSize()
                 .background(TvSurfaceTokens.elevated),
         ) {
-            if (!artworkUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = artworkUrl,
-                    contentDescription = null,
+            if (!artworkUrl.isNullOrBlank() || artworkHidden) {
+                SpoilerBlurLayer(
+                    hidden = artworkHidden,
+                    veilColor = TvSurfaceTokens.elevated,
+                    semanticLabel = stringResource(R.string.spoiler_hidden),
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
+                    veilContent = { TvSpoilerBadge() },
+                    content = {
+                        if (!artworkUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = artworkUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                    },
                 )
             }
             SelectionCheckmark(
@@ -1992,12 +2055,12 @@ private fun TvEpisodeCard(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                footerColor.copy(alpha = 0.90f),
-                                footerColor,
+                                footerColor.copy(alpha = if (focused) 0.52f else 0.90f),
+                                footerColor.copy(alpha = if (focused) 0.68f else 1f),
                             ),
                         ),
                     )
-                    .padding(start = 16.dp, top = 28.dp, end = 16.dp, bottom = 12.dp),
+                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (number.isPresent) {
@@ -2029,21 +2092,54 @@ private fun TvEpisodeCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                episode.overview
-                    ?.takeIf(String::isNotBlank)
-                    ?.let { overview ->
-                        AnimatedVisibility(visible = focused) {
-                            Text(
-                                text = overview,
-                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                if (hiddenAny) {
+                    AnimatedVisibility(visible = focused) {
+                        Text(
+                            text = stringResource(
+                                if (synopsisHidden) R.string.synopsis_hidden else R.string.spoiler_hidden,
+                            ),
+                            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                        )
                     }
+                } else {
+                    episode.overview
+                        ?.takeIf(String::isNotBlank)
+                        ?.let { overview ->
+                            AnimatedVisibility(visible = focused) {
+                                Text(
+                                    text = overview,
+                                    color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun TvSpoilerBadge() {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        TvIcon(
+            icon = Icons.Outlined.Visibility,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.spoiler_hidden),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 
@@ -2054,6 +2150,7 @@ private enum class TvSettingsSection(
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     SOURCES(R.string.addons, Icons.Outlined.Add),
     APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
+    SPOILERS(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ARTWORK(R.string.artwork, Icons.Outlined.Palette),
     ABOUT(R.string.about, Icons.Outlined.Info),
 }
@@ -2105,6 +2202,7 @@ private fun TvSettings(
                 TvSettingsSection.PROFILES -> TvProfilesSettings(state, viewModel)
                 TvSettingsSection.SOURCES -> TvSourcesSettings(state, viewModel)
                 TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
+                TvSettingsSection.SPOILERS -> TvSpoilerSettings(state, viewModel)
                 TvSettingsSection.ARTWORK -> TvArtworkSettings(state, viewModel)
                 TvSettingsSection.ABOUT -> TvAboutSettings()
             }
@@ -2216,6 +2314,50 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 description = stringResource(R.string.ken_burns_effect_description),
                 checked = state.kenBurnsEnabled,
                 onCheckedChange = viewModel::setKenBurnsEnabled,
+            )
+        }
+    }
+}
+@Composable
+private fun TvSpoilerSettings(state: AppUiState, viewModel: AppViewModel) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
+    ) {
+        item {
+            Text(stringResource(R.string.spoiler_protection), style = MaterialTheme.typography.headlineSmall)
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.protect_spoilers),
+                description = stringResource(R.string.spoiler_protection_description),
+                checked = state.spoilerProtection.enabled,
+                onCheckedChange = {
+                    viewModel.setSpoilerProtection(state.spoilerProtection.copy(enabled = it))
+                },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.blur_episode_artwork),
+                description = stringResource(R.string.blur_episode_artwork_description),
+                checked = state.spoilerProtection.blurEpisodeArtwork,
+                enabled = state.spoilerProtection.enabled,
+                onCheckedChange = {
+                    viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeArtwork = it))
+                },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.blur_episode_synopsis),
+                description = stringResource(R.string.blur_episode_synopsis_description),
+                checked = state.spoilerProtection.blurEpisodeSynopsis,
+                enabled = state.spoilerProtection.enabled,
+                onCheckedChange = {
+                    viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeSynopsis = it))
+                },
             )
         }
     }

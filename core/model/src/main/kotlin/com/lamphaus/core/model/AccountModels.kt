@@ -100,3 +100,10 @@ data class DiagnosticsConsent(
     val updatedAtEpochMillis: Long = 0,
 )
 
+@Serializable
+data class SpoilerProtectionSettings(
+    val enabled: Boolean = true,
+    val blurEpisodeArtwork: Boolean = true,
+    val blurEpisodeSynopsis: Boolean = true,
+)
+

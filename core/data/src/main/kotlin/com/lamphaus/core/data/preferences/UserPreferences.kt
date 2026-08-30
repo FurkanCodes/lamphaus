@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lamphaus.core.model.DiagnosticsConsent
+import com.lamphaus.core.model.SpoilerProtectionSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -23,6 +24,7 @@ data class UserSettings(
     val kenBurnsEnabled: Boolean = true,
     val localOnlyArtworkKeys: Boolean = false,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
+    val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val updatedAtEpochMillis: Long = 0,
 )
 
@@ -38,6 +40,7 @@ data class SyncedSettings(
     val dynamicColor: Boolean = true,
     val kenBurnsEnabled: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
+    val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val updatedAtEpochMillis: Long = 0,
 )
 
@@ -47,11 +50,17 @@ class UserPreferences(private val context: Context) {
             activeProfileId = values[ACTIVE_PROFILE],
             theme = values[THEME]?.let { runCatching { ThemePreference.valueOf(it) }.getOrNull() }
                 ?: ThemePreference.SYSTEM,
+            dynamicColor = values[DYNAMIC_COLOR] ?: true,
             kenBurnsEnabled = values[KEN_BURNS_ENABLED] ?: true,
             localOnlyArtworkKeys = values[LOCAL_ONLY_ARTWORK_KEYS] ?: false,
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
+            ),
+            spoilerProtection = SpoilerProtectionSettings(
+                enabled = values[SPOILER_PROTECTION_ENABLED] ?: true,
+                blurEpisodeArtwork = values[SPOILER_BLUR_EPISODE_ARTWORK] ?: true,
+                blurEpisodeSynopsis = values[SPOILER_BLUR_EPISODE_SYNOPSIS] ?: true,
             ),
             updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
@@ -110,6 +119,15 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    suspend fun setSpoilerProtection(settings: SpoilerProtectionSettings) {
+        context.dataStore.edit {
+            it[SPOILER_PROTECTION_ENABLED] = settings.enabled
+            it[SPOILER_BLUR_EPISODE_ARTWORK] = settings.blurEpisodeArtwork
+            it[SPOILER_BLUR_EPISODE_SYNOPSIS] = settings.blurEpisodeSynopsis
+            it[SETTINGS_UPDATED] = System.currentTimeMillis()
+        }
+    }
+
     /**
      * Adopts an inbound cloud row that won last-writer-wins locally. The row's
      * timestamp becomes the local one so older echoes keep losing.
@@ -121,6 +139,9 @@ class UserPreferences(private val context: Context) {
             it[KEN_BURNS_ENABLED] = remote.kenBurnsEnabled
             it[CRASH_REPORTS] = remote.diagnostics.crashReports
             it[PERFORMANCE] = remote.diagnostics.performanceMetrics
+            it[SPOILER_PROTECTION_ENABLED] = remote.spoilerProtection.enabled
+            it[SPOILER_BLUR_EPISODE_ARTWORK] = remote.spoilerProtection.blurEpisodeArtwork
+            it[SPOILER_BLUR_EPISODE_SYNOPSIS] = remote.spoilerProtection.blurEpisodeSynopsis
             it[SETTINGS_UPDATED] = remote.updatedAtEpochMillis
         }
     }
@@ -137,6 +158,9 @@ class UserPreferences(private val context: Context) {
             it.remove(KEN_BURNS_ENABLED)
             it.remove(CRASH_REPORTS)
             it.remove(PERFORMANCE)
+            it.remove(SPOILER_PROTECTION_ENABLED)
+            it.remove(SPOILER_BLUR_EPISODE_ARTWORK)
+            it.remove(SPOILER_BLUR_EPISODE_SYNOPSIS)
             it.remove(SETTINGS_UPDATED)
         }
     }
@@ -150,6 +174,9 @@ class UserPreferences(private val context: Context) {
         val CRASH_REPORTS = booleanPreferencesKey("crash_reports")
         val LOCAL_ONLY_ARTWORK_KEYS = booleanPreferencesKey("local_only_artwork_keys")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
+        val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")
+        val SPOILER_BLUR_EPISODE_ARTWORK = booleanPreferencesKey("spoiler_blur_episode_artwork")
+        val SPOILER_BLUR_EPISODE_SYNOPSIS = booleanPreferencesKey("spoiler_blur_episode_synopsis")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }

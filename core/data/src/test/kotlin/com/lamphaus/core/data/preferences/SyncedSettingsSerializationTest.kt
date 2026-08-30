@@ -1,6 +1,7 @@
 package com.lamphaus.core.data.preferences
 
 import com.lamphaus.core.model.DiagnosticsConsent
+import com.lamphaus.core.model.SpoilerProtectionSettings
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -32,18 +33,23 @@ class SyncedSettingsSerializationTest {
             dynamicColor = false,
             kenBurnsEnabled = false,
             diagnostics = DiagnosticsConsent(crashReports = true, updatedAtEpochMillis = 42),
+            spoilerProtection = SpoilerProtectionSettings(
+                enabled = false,
+                blurEpisodeArtwork = false,
+                blurEpisodeSynopsis = true,
+            ),
         )
 
         assertEquals(settings, json.decodeFromString<SyncedSettings>(json.encodeToString(settings)))
     }
 
     @Test
-    fun `older payload defaults ken burns to enabled`() {
+    fun `older payload defaults spoiler protection to enabled`() {
         val decoded = json.decodeFromString<SyncedSettings>(
-            """{"theme":"LIGHT","dynamicColor":false}""",
+            """{"theme":"LIGHT","dynamicColor":false,"kenBurnsEnabled":false}""",
         )
 
-        assertEquals(true, decoded.kenBurnsEnabled)
+        assertEquals(SpoilerProtectionSettings(), decoded.spoilerProtection)
     }
 
     @Test

@@ -54,6 +54,15 @@
     <string name="device_colors_requirement">Available on Android 12 and newer</string>
     <string name="ken_burns_effect">Animate TV hero artwork</string>
     <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
+    <string name="spoiler_protection">Spoiler protection</string>
+    <string name="spoiler_protection_description">Blur unwatched episode artwork and synopses.</string>
+    <string name="protect_spoilers">Protect spoilers</string>
+    <string name="blur_episode_artwork">Blur episode artwork</string>
+    <string name="blur_episode_artwork_description">Hide thumbnails for episodes you have not completed.</string>
+    <string name="blur_episode_synopsis">Blur episode synopses</string>
+    <string name="blur_episode_synopsis_description">Hide summaries for episodes you have not completed.</string>
+    <string name="spoiler_hidden">Spoiler hidden</string>
+    <string name="synopsis_hidden">Synopsis hidden</string>
     <string name="artwork">Artwork</string>
     <string name="artwork_settings_description">Connect providers to choose where posters, backdrops, and logos come from.</string>
     <string name="local_only_artwork_keys">Keep artwork keys on this device</string>

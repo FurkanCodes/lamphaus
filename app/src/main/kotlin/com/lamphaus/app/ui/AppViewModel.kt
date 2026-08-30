@@ -11,6 +11,7 @@ import com.lamphaus.core.data.cloud.CloudNotConfiguredException
 import com.lamphaus.core.data.cloud.ArtworkKeysNotConfiguredException
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.data.preferences.ThemePreference
+import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
 import com.lamphaus.core.model.ArtworkOverride
@@ -118,15 +119,16 @@ class AppViewModel(
                 container.preferences.settings,
             ) { account, profiles, providers, settings ->
                 Snapshot(
-                    account,
-                    profiles,
-                    providers,
-                    settings.activeProfileId,
-                    settings.theme,
-                    settings.dynamicColor,
-                    settings.kenBurnsEnabled,
-                    settings.localOnlyArtworkKeys,
-                    settings.diagnostics,
+                    account = account,
+                    profiles = profiles,
+                    providers = providers,
+                    activeProfileId = settings.activeProfileId,
+                    theme = settings.theme,
+                    dynamicColor = settings.dynamicColor,
+                    kenBurnsEnabled = settings.kenBurnsEnabled,
+                    localOnlyArtworkKeys = settings.localOnlyArtworkKeys,
+                    diagnostics = settings.diagnostics,
+                    spoilerProtection = settings.spoilerProtection,
                 )
             }.collectLatest { snapshot ->
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
@@ -156,12 +158,12 @@ class AppViewModel(
                             current.lastArtworkLookupFailures
                         },
                         artworkProviderCatalogError = if (accountChanged || nextUserId == null) null else current.artworkProviderCatalogError,
-                        activeProfileId = activeId,
                         theme = snapshot.theme,
                         dynamicColor = snapshot.dynamicColor,
                         kenBurnsEnabled = snapshot.kenBurnsEnabled,
                         localOnlyArtworkKeys = snapshot.localOnlyArtworkKeys,
                         diagnostics = snapshot.diagnostics,
+                        spoilerProtection = snapshot.spoilerProtection,
                         initialContentLoading = if (accountChanged || nextUserId == null) {
                             true
                         } else {
@@ -1094,6 +1096,13 @@ class AppViewModel(
         pushSyncedSettings()
     }
 
+    fun setSpoilerProtection(settings: SpoilerProtectionSettings) = viewModelScope.launch {
+        container.preferences.setSpoilerProtection(settings)
+        pushSyncedSettings()
+    }
+
+
+
     fun dismissMessage() = mutableState.update { it.copy(message = null) }
 
     private suspend fun loadSubtitles(
@@ -1397,10 +1406,6 @@ class AppViewModel(
             return
         }
         cloudProviders.forEach { container.libraryRepository.saveProvider(it) }
-        val cloudIds = cloudProviders.map(ProviderSubscription::id).toSet()
-        localSyncableProviders()
-            .filter { it.id !in cloudIds }
-            .forEach { container.libraryRepository.removeProvider(it.id) }
     }
 
     /** Real installed add-ons only: the built-in catalog and debug sources never sync. */
@@ -1419,8 +1424,15 @@ class AppViewModel(
             val local = container.preferences.current()
             when {
                 remote == null -> container.cloudSyncGateway.saveSettings(
-                    userId,
-                    SyncedSettings(local.theme, local.dynamicColor, local.kenBurnsEnabled, local.diagnostics, local.updatedAtEpochMillis),
+                    userId = userId,
+                    settings = SyncedSettings(
+                        theme = local.theme,
+                        dynamicColor = local.dynamicColor,
+                        kenBurnsEnabled = local.kenBurnsEnabled,
+                        diagnostics = local.diagnostics,
+                        spoilerProtection = local.spoilerProtection,
+                        updatedAtEpochMillis = local.updatedAtEpochMillis,
+                    ),
                 ).onFailure { error -> CloudLog.w("settings.seed failed — staying local", error) }
 
                 remote.updatedAtEpochMillis > local.updatedAtEpochMillis ->
@@ -1434,8 +1446,15 @@ class AppViewModel(
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         val local = container.preferences.current()
         container.cloudSyncGateway.saveSettings(
-            userId,
-            SyncedSettings(local.theme, local.dynamicColor, local.kenBurnsEnabled, local.diagnostics, local.updatedAtEpochMillis),
+            userId = userId,
+            settings = SyncedSettings(
+                theme = local.theme,
+                dynamicColor = local.dynamicColor,
+                kenBurnsEnabled = local.kenBurnsEnabled,
+                diagnostics = local.diagnostics,
+                spoilerProtection = local.spoilerProtection,
+                updatedAtEpochMillis = local.updatedAtEpochMillis,
+            ),
         ).onFailure { error -> CloudLog.w("settings.push failed — converges next session", error) }
     }
 
@@ -1495,6 +1514,7 @@ class AppViewModel(
         }
     }
 
+
     /**
      * Live library+progress channels for every cloud-backed profile. Follows
      * profile creation/removal mid-session — capturing the list once at
@@ -1532,7 +1552,6 @@ class AppViewModel(
         message?.contains("network", ignoreCase = true) == true -> "Check your connection and try again."
         else -> "Sign-in could not be completed. Try again."
     }
-
     private data class Snapshot(
         val account: AccountState,
         val profiles: List<Profile>,
@@ -1543,6 +1562,7 @@ class AppViewModel(
         val kenBurnsEnabled: Boolean,
         val localOnlyArtworkKeys: Boolean,
         val diagnostics: DiagnosticsConsent,
+        val spoilerProtection: SpoilerProtectionSettings,
     )
 
     companion object {

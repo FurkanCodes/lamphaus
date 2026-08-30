@@ -8,6 +8,7 @@ import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.DiagnosticsConsent
+import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
@@ -105,6 +106,7 @@ data class AppUiState(
     val kenBurnsEnabled: Boolean = true,
     val localOnlyArtworkKeys: Boolean = false,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
+    val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val pairedDevices: List<PairedDevice> = emptyList(),
     val initialContentLoading: Boolean = true,
     val refreshing: Boolean = false,
@@ -126,6 +128,7 @@ data class AppUiState(
         kenBurnsEnabled = kenBurnsEnabled,
         localOnlyArtworkKeys = localOnlyArtworkKeys,
         diagnostics = diagnostics,
+        spoilerProtection = spoilerProtection,
         initialContentLoading = false,
     )
 }

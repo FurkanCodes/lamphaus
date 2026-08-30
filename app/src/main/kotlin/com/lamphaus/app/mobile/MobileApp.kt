@@ -49,6 +49,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.AlertDialog
@@ -110,18 +111,17 @@ import com.lamphaus.app.ui.artworkImageUrl
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.ArtworkEditorState
 import coil3.compose.AsyncImage
-import com.lamphaus.app.R
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.SelectionCheckmark
-import com.lamphaus.app.ui.mediaFocusRestore
-import com.lamphaus.app.ui.metadataPresentation
-import com.lamphaus.app.ui.numberParts
-import com.lamphaus.app.ui.sourcePresentation
-import com.lamphaus.app.ui.sourceItemKey
+import com.lamphaus.app.ui.SpoilerBlurLayer
+import com.lamphaus.app.ui.SpoilerContent
+import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.ArtworkAsset
@@ -133,9 +133,15 @@ import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PlaybackRequest
-import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.ProfileKind
-
+import com.lamphaus.core.model.SpoilerProtectionSettings
+import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.app.R
+import com.lamphaus.app.ui.mediaFocusRestore
+import com.lamphaus.app.ui.metadataPresentation
+import com.lamphaus.app.ui.numberParts
+import com.lamphaus.app.ui.sourcePresentation
+import com.lamphaus.app.ui.sourceItemKey
 private enum class MobileDestination(
     @StringRes val labelRes: Int,
     val selectedIcon: ImageVector,
@@ -323,6 +329,13 @@ private fun MobileSignedInApp(
             .toSet()
     }
 
+    val completedMovieKeys = remember(state.progress) {
+        state.progress.asSequence()
+            .filter { it.completed }
+            .map { it.mediaKey }
+            .toSet()
+    }
+
     when {
         state.sourcePicker != null -> {
             BackHandler { viewModel.closeSourcePicker() }
@@ -353,6 +366,7 @@ private fun MobileSignedInApp(
                 expanded = widthSizeClass == WindowWidthSizeClass.Expanded,
                 inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
                 watchedEpisodeIds = watchedEpisodeIds,
+                spoilerProtection = state.spoilerProtection,
                 onBack = viewModel::clearDetail,
                 onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
                 onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
@@ -694,13 +708,14 @@ private fun EmptyProviders(modifier: Modifier = Modifier, onAddSource: (() -> Un
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
 private fun MobileDetailScreen(
     detail: MediaDetail?,
     expanded: Boolean,
     inLibrary: Boolean,
     watchedEpisodeIds: Set<String>,
+    spoilerProtection: SpoilerProtectionSettings,
     onBack: () -> Unit,
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
     onLibrary: () -> Unit,
@@ -711,6 +726,7 @@ private fun MobileDetailScreen(
     val resolvedPreview = remember(detail.preview, artworkResolver) {
         artworkResolver.resolve(detail.preview).media
     }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -742,8 +758,16 @@ private fun MobileDetailScreen(
                 )
                 detail.preview.description
                     ?.takeIf(String::isNotBlank)
-                    ?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ?.let { overview ->
+                        Text(
+                            text = overview,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Button(onClick = { onPlay(null) }) {
                         Icon(Icons.Outlined.PlayArrow, null)
                         Spacer(Modifier.width(8.dp))
@@ -772,27 +796,67 @@ private fun MobileDetailScreen(
                         value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
                     )
                 }
+            }
         }
-    }
         if (expanded) {
             Row(Modifier.fillMaxSize().padding(padding)) {
-                MediaArtwork(detail.preview, Modifier.fillMaxHeight().weight(0.44f), preferBackdrop = true)
+                MediaArtwork(
+                    detail.preview,
+                    Modifier.fillMaxHeight().weight(0.44f),
+                    preferBackdrop = true,
+                )
                 LazyColumn(Modifier.weight(0.56f)) {
                     item { info() }
                     items(detail.episodes, key = { it.id }) { episode ->
-                        EpisodeRow(episode, episode.id in watchedEpisodeIds, onPlay)
+                        EpisodeRow(
+                            episode = episode,
+                            watched = episode.id in watchedEpisodeIds,
+                            spoilerProtection = spoilerProtection,
+                            onPlay = onPlay,
+                        )
                     }
                 }
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                item { MediaArtwork(detail.preview, Modifier.fillMaxWidth().height(300.dp), preferBackdrop = true) }
+                item {
+                    MediaArtwork(
+                        detail.preview,
+                        Modifier.fillMaxWidth().height(300.dp),
+                        preferBackdrop = true,
+                    )
+                }
                 item { info() }
                 items(detail.episodes, key = { it.id }) { episode ->
-                    EpisodeRow(episode, episode.id in watchedEpisodeIds, onPlay)
+                    EpisodeRow(
+                        episode = episode,
+                        watched = episode.id in watchedEpisodeIds,
+                        spoilerProtection = spoilerProtection,
+                        onPlay = onPlay,
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MobileSpoilerBadge() {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+    ) {
+        androidx.compose.material3.Icon(
+            imageVector = Icons.Outlined.Visibility,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.spoiler_hidden),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+        )
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1105,12 +1169,15 @@ private fun MobileDetailMetadataSection(@StringRes labelRes: Int, value: String)
 private fun plainPersonName(value: String): String =
     HtmlCompat.fromHtml(value, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
 @Composable
-private fun EpisodeRow(
+internal fun EpisodeRow(
     episode: com.lamphaus.core.model.Episode,
     watched: Boolean,
+    spoilerProtection: SpoilerProtectionSettings,
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
 ) {
     val number = episode.numberParts()
+    val artworkHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched)
+    val synopsisHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched)
     val watchedDescription = if (watched) stringResource(R.string.watched) else ""
     ListItem(
         modifier = Modifier.semantics {
@@ -1124,11 +1191,20 @@ private fun EpisodeRow(
                         .height(48.dp),
                 ) {
                     if (!episode.thumbnailUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = episode.thumbnailUrl,
-                            contentDescription = episode.title,
-                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
-                            contentScale = ContentScale.Crop,
+                        SpoilerBlurLayer(
+                            hidden = artworkHidden,
+                            veilColor = MaterialTheme.colorScheme.surface,
+                            semanticLabel = stringResource(R.string.spoiler_hidden),
+                            modifier = Modifier.fillMaxSize(),
+                            veilContent = { MobileSpoilerBadge() },
+                            content = {
+                                AsyncImage(
+                                    model = episode.thumbnailUrl,
+                                    contentDescription = episode.title,
+                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            },
                         )
                     }
                     SelectionCheckmark(
@@ -1143,7 +1219,17 @@ private fun EpisodeRow(
             }
         },
         headlineContent = { Text(episode.title) },
-        supportingContent = { episode.overview?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
+        supportingContent = {
+            Column {
+                if (synopsisHidden) {
+                    Text(stringResource(R.string.synopsis_hidden))
+                } else {
+                    episode.overview?.let {
+                        Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        },
         overlineContent = {
             when {
                 number.season != null && number.episode != null ->
@@ -1479,6 +1565,63 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                     },
                 )
             }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SettingsHeading(stringResource(R.string.spoiler_protection))
+                    Text(
+                        stringResource(R.string.spoiler_protection_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.protect_spoilers)) },
+                    supportingContent = { Text(stringResource(R.string.spoiler_protection_description)) },
+                    leadingContent = { Icon(Icons.Outlined.Visibility, null) },
+                    trailingContent = {
+                        Switch(
+                            checked = state.spoilerProtection.enabled,
+                            onCheckedChange = {
+                                viewModel.setSpoilerProtection(state.spoilerProtection.copy(enabled = it))
+                            },
+                        )
+                    },
+                )
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.blur_episode_artwork)) },
+                    supportingContent = { Text(stringResource(R.string.blur_episode_artwork_description)) },
+                    trailingContent = {
+                        Switch(
+                            checked = state.spoilerProtection.blurEpisodeArtwork,
+                            enabled = state.spoilerProtection.enabled,
+                            onCheckedChange = {
+                                viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeArtwork = it))
+                            },
+                        )
+                    },
+                )
+            }
+            item {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.blur_episode_synopsis)) },
+                    supportingContent = { Text(stringResource(R.string.blur_episode_synopsis_description)) },
+                    trailingContent = {
+                        Switch(
+                            checked = state.spoilerProtection.blurEpisodeSynopsis,
+                            enabled = state.spoilerProtection.enabled,
+                            onCheckedChange = {
+                                viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeSynopsis = it))
+                            },
+                        )
+                    },
+                )
+            }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item { SettingsHeading(stringResource(R.string.artwork)) }
             item {
                 Text(
