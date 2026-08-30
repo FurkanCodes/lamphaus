@@ -2568,7 +2568,17 @@ private fun TvSettingsToggleRow(
             .fillMaxWidth()
             .heightIn(min = 72.dp)
             .semantics { toggleableState = ToggleableState(checked) },
-    ) {
+    ) { focused ->
+        val primaryColor = if (focused) {
+            TvFocusTokens.focusedContent
+        } else {
+            MaterialTheme.colorScheme.onBackground
+        }
+        val secondaryColor = if (focused) {
+            TvFocusTokens.focusedContent.copy(alpha = 0.76f)
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2579,11 +2589,11 @@ private fun TvSettingsToggleRow(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(title, style = MaterialTheme.typography.titleSmall, color = primaryColor)
                 Text(
                     description,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = secondaryColor,
                 )
             }
             Switch(

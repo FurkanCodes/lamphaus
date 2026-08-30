@@ -20,6 +20,7 @@ Mobile supports light and dark schemes plus Android dynamic color. TV uses the f
 | Muted ink | `#505563` | `#C4C6CF` |
 
 Components consume semantic color roles, never raw values. Normal text must reach 4.5:1 contrast and large text/focus boundaries 3:1.
+- Focused TV surfaces use the focused content color for every title, supporting label, icon, and control label against the pale focused container. Settings toggles must match source-card focus treatment; never leave default dark-theme text colors on a focused surface.
 
 ## Typography
 
