@@ -113,7 +113,17 @@ class AppViewModel(
                 container.libraryRepository.providers(),
                 container.preferences.settings,
             ) { account, profiles, providers, settings ->
-                Snapshot(account, profiles, providers, settings.activeProfileId, settings.theme, settings.dynamicColor, settings.kenBurnsEnabled, settings.diagnostics)
+                Snapshot(
+                    account,
+                    profiles,
+                    providers,
+                    settings.activeProfileId,
+                    settings.theme,
+                    settings.dynamicColor,
+                    settings.kenBurnsEnabled,
+                    settings.localOnlyArtworkKeys,
+                    settings.diagnostics,
+                )
             }.collectLatest { snapshot ->
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
                     ?: snapshot.profiles.firstOrNull()?.id
@@ -146,6 +156,7 @@ class AppViewModel(
                         theme = snapshot.theme,
                         dynamicColor = snapshot.dynamicColor,
                         kenBurnsEnabled = snapshot.kenBurnsEnabled,
+                        localOnlyArtworkKeys = snapshot.localOnlyArtworkKeys,
                         diagnostics = snapshot.diagnostics,
                         initialContentLoading = if (accountChanged || nextUserId == null) {
                             true
@@ -502,6 +513,10 @@ class AppViewModel(
     }
     fun refreshArtworkKeyStatus() = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        refreshArtworkKeyStatus(userId)
+    }
+
+    private suspend fun refreshArtworkKeyStatus(userId: String) {
         mutableState.update { it.copy(artworkKeyStatusLoading = true) }
         val result = container.cloudSyncGateway.artworkProviderStatuses(userId)
         mutableState.update { current ->
@@ -636,13 +651,17 @@ class AppViewModel(
                             error is CloudNotConfiguredException
                         state.copy(
                             message = if (keysMissing) {
-                                "Please add artwork keys from Settings > Artwork."
+                                "Artwork keys aren't configured. Add a provider key in Settings > Artwork."
                             } else {
                                 state.message
                             },
                             artworkEditor = editor.copy(
                                 loading = false,
-                                error = if (keysMissing) null else "Artwork lookup failed. Try again.",
+                                error = if (keysMissing) {
+                                    "Artwork keys aren't configured. Add a provider key in Settings > Artwork to load artwork."
+                                } else {
+                                    "Artwork lookup failed. Try again."
+                                },
                             ),
                         )
                     },
@@ -1007,6 +1026,45 @@ class AppViewModel(
     fun setKenBurnsEnabled(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setKenBurnsEnabled(enabled)
         pushSyncedSettings()
+    }
+
+    fun changeArtworkKeyStorageMode(enabled: Boolean) = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId
+        if (userId == null) {
+            showMessage("Sign in before changing artwork key storage.")
+            return@launch
+        }
+        if (state.value.artworkStorageModeChanging) return@launch
+
+        mutableState.update { it.copy(artworkStorageModeChanging = true) }
+        val result = container.artworkStorageModeGateway.changeLocalOnlyMode(userId, enabled)
+        result.fold(
+            onSuccess = {
+                mutableState.update { current ->
+                    current.copy(
+                        artworkStorageModeChanging = false,
+                        artworkProviders = current.artworkProviders.map { it.copy(configured = false) },
+                        lastArtworkLookupFailures = emptyMap(),
+                    )
+                }
+                refreshArtworkKeyStatus(userId)
+                showMessage(
+                    if (enabled) {
+                        "Local-only artwork keys enabled. Add your keys on this device."
+                    } else {
+                        "Local-only artwork keys disabled. Add keys for cloud artwork lookups."
+                    },
+                )
+            },
+            onFailure = {
+                mutableState.update {
+                    it.copy(
+                        artworkStorageModeChanging = false,
+                        message = "Could not switch artwork key storage. Some keys may already have been deleted; check your provider settings and try again.",
+                    )
+                }
+            },
+        )
     }
 
     fun setDiagnostics(consent: DiagnosticsConsent) = viewModelScope.launch {
@@ -1463,6 +1521,7 @@ class AppViewModel(
         val theme: ThemePreference,
         val dynamicColor: Boolean,
         val kenBurnsEnabled: Boolean,
+        val localOnlyArtworkKeys: Boolean,
         val diagnostics: DiagnosticsConsent,
     )
 

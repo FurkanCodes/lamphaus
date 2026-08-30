@@ -229,6 +229,17 @@ class SupabaseCloudSyncGateway(
         }
     }
 
+    override suspend fun clearArtworkKeys(userId: String): Result<Unit> =
+        CloudLog.tracedResult("artwork.clear") {
+            sessionRecovery.withAuthRetry {
+                supabase.functions.buildEdgeFunction(FUNCTION_DELETE_ARTWORK_CONFIG)
+                    .invoke(json.encodeToString(ArtworkKeysClear())) {
+                        contentType(ContentType.Application.Json)
+                    }
+                    .bodyOrThrow()
+                Unit
+            }
+        }
     override suspend fun artworkCandidates(
         userId: String,
         mediaKey: String,
@@ -506,6 +517,12 @@ internal data class ArtworkKeyUpsert(
 @Serializable
 internal data class ArtworkKeyDelete(
     @SerialName("provider") val provider: String,
+)
+
+@Serializable
+internal data class ArtworkKeysClear(
+    @EncodeDefault
+    @SerialName("all") val all: Boolean = true,
 )
 
 @Serializable

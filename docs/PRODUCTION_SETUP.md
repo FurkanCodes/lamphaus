@@ -34,9 +34,67 @@ Set via `supabase secrets set`:
 | Secret | Purpose |
 |---|---|
 | `SERVICE_ROLE_JWT` | Legacy-format service-role **JWT**. Required because GoTrue admin endpoints reject the new opaque `sb_secret_*` key that the platform injects as `SUPABASE_SERVICE_ROLE_KEY`. Used by `claim-pairing-session` (preferred) and `delete-account`. |
-| `PROVIDER_CONFIG_KEY` | Base64 AES-256 key for provider-config encryption (`v1.<iv>.<ct>`, AAD-bound to user+provider id). Rotating it makes previously saved configs undecryptable by design — treat like a root credential. |
+| `PROVIDER_CONFIG_ACTIVE_KEY_ID` | Active lowercase key ID, matching one entry in `PROVIDER_CONFIG_KEYRING`. New provider ciphertext is written as `v2.<key_id>.<iv>.<ciphertext>`. |
+| `PROVIDER_CONFIG_KEYRING` | JSON object mapping lowercase key IDs to base64-encoded 32-byte AES-256 keys. Keep the active key and any retired keys here until rotation is verified. |
+| `PROVIDER_CONFIG_KEY` | Temporary legacy base64 AES-256 key for decrypting existing `v1.<iv>.<ciphertext>` rows. Keep it until the rotation tool proves that no v1 rows remain, then remove it. |
+
+`PROVIDER_CONFIG_KEYRING` and `PROVIDER_CONFIG_ACTIVE_KEY_ID` are required by all four provider-config Edge Functions. Never pass any secret as a command-line argument or commit it to source control.
 
 `verify_jwt=true` on all functions except `create-pairing-session` and `exchange-device-grant` (unauthenticated by design — rate-limited, single-use codes server-side).
+
+### Provider-config key rotation
+
+The codec keeps provider credentials encrypted in `public.provider_configs.encrypted_config`. The database stores ciphertext only; a database-only compromise does not reveal API keys. An Edge Function runtime or keyring compromise can decrypt user credentials because outbound provider calls require the original value. Hashing is not an option: provider APIs require the original API key for authorization.
+
+
+Run this sequence for every rotation:
+
+1. Generate a new 32-byte key and encode it as base64:
+
+   ```bash
+   NEW_KEY="$(openssl rand -base64 32)"
+   ```
+
+2. Add the new key to `PROVIDER_CONFIG_KEYRING`, set `PROVIDER_CONFIG_ACTIVE_KEY_ID` to its lowercase ID, and retain the old key plus `PROVIDER_CONFIG_KEY`:
+
+   ```bash
+   supabase secrets set \
+     PROVIDER_CONFIG_KEYRING='{"k1":"<retired-key-base64>","k2":"'"$NEW_KEY"'"}' \
+     PROVIDER_CONFIG_ACTIVE_KEY_ID=k2 \
+     PROVIDER_CONFIG_KEY='<legacy-v1-key-base64>'
+   ```
+
+3. Deploy all four codec consumers while the old key remains available:
+
+   ```bash
+   for function in save-provider-config list-provider-configs save-artwork-config resolve-artwork; do
+     supabase functions deploy "$function"
+   done
+   ```
+
+4. With `SUPABASE_URL`, `SERVICE_ROLE_JWT`, `PROVIDER_CONFIG_ACTIVE_KEY_ID`, `PROVIDER_CONFIG_KEYRING`, and `PROVIDER_CONFIG_KEY` supplied through the process environment, run a dry-run first:
+
+   ```bash
+   deno run --allow-env --allow-net supabase/scripts/rotate-provider-configs.ts
+   ```
+
+   Confirm the output reports ciphertext totals by version/key ID, reports the expected rows requiring rotation, performs zero PATCH requests, and contains no plaintext/API keys.
+
+5. Apply the rotation:
+
+   ```bash
+   deno run --allow-env --allow-net supabase/scripts/rotate-provider-configs.ts --apply
+   ```
+
+   The tool re-encrypts unchanged JSON, PATCHes only `encrypted_config` for each exact `(user_id, provider_id)` row, continues after row-local failures, and exits nonzero if any row fails. A successful apply verifies that every row is `v2.<active-key-id>.*`.
+
+6. Run a second dry-run and confirm zero rows require rotation. Query only ciphertext prefixes and key IDs, never decrypted configs. Remove retired keyring entries and the legacy `PROVIDER_CONFIG_KEY` only after that verification, then redeploy the four functions.
+
+### Local-only artwork keys
+
+Users can enable **Keep artwork keys on this device** in Artwork settings. In this mode, keys are encrypted with Android Keystore-backed storage and artwork lookups call TMDB and Fanart.tv directly from the device. The keys are not uploaded to Lamphaus, stored in Supabase, or included in synced settings.
+
+This is a separate trust boundary: the device and its Android Keystore protect the local keys, while the provider receives the key and lookup request. Cloud artwork resolution does not use these local keys. Both directions are destructive: enabling local-only mode permanently deletes every cloud `artwork.*` key and any stale local artwork keys, while disabling it permanently deletes every device-local artwork key and leaves cloud storage empty. Keys cannot be recovered, and no credential migration occurs; users must re-enter keys in the destination mode.
 
 ### 4. Client build credentials
 

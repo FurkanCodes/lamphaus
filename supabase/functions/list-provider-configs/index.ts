@@ -1,11 +1,10 @@
+import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
+
 // list-provider-configs — returns the caller's provider configs, decrypted.
 //
-// Self-contained by choice: the platform's remote bundler only sees this
-// function's own directory, so helpers live inline instead of /_shared.
-//
 // Authenticated (verify_jwt=true); RLS keeps the table deny-all, service
-// role fetches rows scoped to the caller's user_id. AAD binding means a
-// row only decrypts for its own user_id + provider_id.
+// role fetches rows scoped to the caller's user_id. The shared codec accepts
+// legacy v1 and versioned v2 ciphertext without rotating rows on reads.
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -39,49 +38,11 @@ async function requireUser(
   return typeof user?.id === "string" ? user : null;
 }
 
-// ────────────────────────── AES-256-GCM codec ──────────────────────────
-
-const decoder = new TextDecoder();
-
-const b64Decode = (text: string): Uint8Array =>
-  Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
-
-let keyPromise: Promise<CryptoKey> | null = null;
-
-function encryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get("PROVIDER_CONFIG_KEY");
-  if (!secret) return Promise.reject(new Error("PROVIDER_CONFIG_KEY not set"));
-  keyPromise ??= crypto.subtle.importKey(
-    "raw",
-    bufferSource(b64Decode(secret)),
-    "AES-GCM",
-    false,
-    ["encrypt", "decrypt"],
-  );
-  return keyPromise;
-}
-
-async function decryptConfig(
-  userId: string,
-  providerId: string,
-  blob: string,
-): Promise<unknown> {
-  const [version, ivText, ciphertextText] = blob.split(".");
-  if (version !== "v1" || !ivText || !ciphertextText) {
-    throw new Error(`unsupported_blob_format:${version ?? "empty"}`);
-  }
-  const plaintext = await crypto.subtle.decrypt(
-    {
-      name: "AES-GCM",
-      iv: bufferSource(b64Decode(ivText)),
-      additionalData: bufferSource(new TextEncoder().encode(`${userId}:${providerId}`)),
-    },
-    await encryptionKey(),
-    bufferSource(b64Decode(ciphertextText)),
-  );
-  return JSON.parse(decoder.decode(plaintext));
-}
+const providerConfigCrypto = createProviderConfigCrypto({
+  activeKeyId: Deno.env.get("PROVIDER_CONFIG_ACTIVE_KEY_ID") ?? "",
+  encodedKeys: Deno.env.get("PROVIDER_CONFIG_KEYRING") ?? "",
+  legacyEncodedKey: Deno.env.get("PROVIDER_CONFIG_KEY"),
+});
 
 const isArtworkProviderId = (value: unknown): value is string =>
   typeof value === "string" && value.toLowerCase().startsWith("artwork.");
@@ -108,18 +69,27 @@ Deno.serve(async (req) => {
     const configs = [];
     for (const row of rows) {
       if (isArtworkProviderId(row.provider_id)) continue;
-      configs.push({
-        provider_id: row.provider_id,
-        display_name: row.display_name,
-        enabled: row.enabled,
-        sort_order: row.sort_order,
-        updated_at_epoch_millis: row.updated_at_epoch_millis,
-        config: await decryptConfig(user.id, row.provider_id, row.encrypted_config),
-      });
+      try {
+        const decrypted = await providerConfigCrypto.decrypt(
+          user.id,
+          row.provider_id,
+          row.encrypted_config,
+        );
+        configs.push({
+          provider_id: row.provider_id,
+          display_name: row.display_name,
+          enabled: row.enabled,
+          sort_order: row.sort_order,
+          updated_at_epoch_millis: row.updated_at_epoch_millis,
+          config: decrypted.config,
+        });
+      } catch (error) {
+        console.error("decrypt failed", row.provider_id, error instanceof Error ? error.message : "unknown");
+        throw error;
+      }
     }
     return json({ configs });
-  } catch (error) {
-    console.error("decrypt failed", error instanceof Error ? error.name : "unknown");
+  } catch {
     return json({ error: "decrypt_failed" }, 500);
   }
 });

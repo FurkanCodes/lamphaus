@@ -213,7 +213,7 @@ For a normal new adapter, the deployment sequence is:
 4. Set `enabled = true` in a follow-up migration if the result is correct.
 5. Verify `supabase functions list` and the provider status response.
 
-Never place API keys in migrations, source code, logs, or the Android build. User keys are encrypted by `save-artwork-config` under the stable namespace `artwork.<id>`.
+Never place API keys in migrations, source code, logs, or the Android build. User keys are encrypted by `save-artwork-config` under the stable namespace `artwork.<id>`; see the [production provider-config key rotation runbook](PRODUCTION_SETUP.md#provider-config-key-rotation) for secret handling and rotation.
 
 ## 7. Verify the end-to-end path
 

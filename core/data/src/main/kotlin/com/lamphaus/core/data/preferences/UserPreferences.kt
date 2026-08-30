@@ -21,6 +21,7 @@ data class UserSettings(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
     val kenBurnsEnabled: Boolean = true,
+    val localOnlyArtworkKeys: Boolean = false,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val updatedAtEpochMillis: Long = 0,
 )
@@ -46,8 +47,8 @@ class UserPreferences(private val context: Context) {
             activeProfileId = values[ACTIVE_PROFILE],
             theme = values[THEME]?.let { runCatching { ThemePreference.valueOf(it) }.getOrNull() }
                 ?: ThemePreference.SYSTEM,
-            dynamicColor = values[DYNAMIC_COLOR] ?: true,
             kenBurnsEnabled = values[KEN_BURNS_ENABLED] ?: true,
+            localOnlyArtworkKeys = values[LOCAL_ONLY_ARTWORK_KEYS] ?: false,
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -93,6 +94,13 @@ class UserPreferences(private val context: Context) {
             it[SETTINGS_UPDATED] = System.currentTimeMillis()
         }
     }
+
+    suspend fun setLocalOnlyArtworkKeys(enabled: Boolean) {
+        context.dataStore.edit {
+            it[LOCAL_ONLY_ARTWORK_KEYS] = enabled
+        }
+    }
+
 
     suspend fun setDiagnostics(consent: DiagnosticsConsent) {
         context.dataStore.edit {
@@ -140,6 +148,7 @@ class UserPreferences(private val context: Context) {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val KEN_BURNS_ENABLED = booleanPreferencesKey("ken_burns_enabled")
         val CRASH_REPORTS = booleanPreferencesKey("crash_reports")
+        val LOCAL_ONLY_ARTWORK_KEYS = booleanPreferencesKey("local_only_artwork_keys")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }

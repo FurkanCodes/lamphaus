@@ -92,6 +92,7 @@ data class AppUiState(
     val artworkEditor: ArtworkEditorState? = null,
     val artworkProviders: List<ArtworkProviderStatus> = emptyList(),
     val artworkKeyStatusLoading: Boolean = false,
+    val artworkStorageModeChanging: Boolean = false,
     val lastArtworkLookupFailures: Map<ArtworkProviderId, Long> = emptyMap(),
     val artworkProviderCatalogError: String? = null,
     val sourcePicker: SourcePickerState? = null,
@@ -102,6 +103,7 @@ data class AppUiState(
     val theme: ThemePreference = ThemePreference.SYSTEM,
     val dynamicColor: Boolean = true,
     val kenBurnsEnabled: Boolean = true,
+    val localOnlyArtworkKeys: Boolean = false,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val pairedDevices: List<PairedDevice> = emptyList(),
     val initialContentLoading: Boolean = true,
@@ -122,6 +124,7 @@ data class AppUiState(
         theme = theme,
         dynamicColor = dynamicColor,
         kenBurnsEnabled = kenBurnsEnabled,
+        localOnlyArtworkKeys = localOnlyArtworkKeys,
         diagnostics = diagnostics,
         initialContentLoading = false,
     )

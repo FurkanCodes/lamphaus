@@ -1,19 +1,15 @@
-// provider-config crypto parity test (plan M5).
-//
-// Proves the EXACT codec the edge functions use is interoperable AES-GCM:
-//   1. known-answer vectors from the GCM spec (McGrew-Viega, AES-256 cases)
-//      — any compliant implementation (Deno ring, Node BoringSSL, JVM
-//      javax.crypto) must produce these bytes;
-//   2. roundtrip through the deployed wire format "v1.<iv>.<ciphertext>";
-//   3. AAD binding: another user's identity must fail decryption;
-//   4. tampered ciphertext must fail.
-//
-// Run: node supabase/tests/provider_config_crypto.test.ts
-//  or: deno test supabase/tests/provider_config_crypto.test.ts
+import {
+  createProviderConfigCrypto,
+  type DecryptedProviderConfig,
+} from "../functions/_shared/provider_config_crypto.ts";
 
 const hexDecode = (hex: string): Uint8Array =>
   new Uint8Array((hex.match(/../g) ?? []).map((byte) => parseInt(byte, 16)));
-const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
+const bufferSource = (bytes: Uint8Array): BufferSource =>
+  bytes as unknown as BufferSource;
+const b64Encode = (bytes: Uint8Array): string =>
+  btoa(String.fromCharCode(...bytes));
+const encoder = new TextEncoder();
 
 async function aesGcm(
   keyBytes: Uint8Array,
@@ -21,50 +17,109 @@ async function aesGcm(
   plaintext: Uint8Array,
   additionalData?: Uint8Array,
 ): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey("raw", bufferSource(keyBytes), "AES-GCM", false, ["encrypt"]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    bufferSource(keyBytes),
+    "AES-GCM",
+    false,
+    ["encrypt"],
+  );
   const sealed = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: bufferSource(iv), additionalData: additionalData && bufferSource(additionalData) },
+    {
+      name: "AES-GCM",
+      iv: bufferSource(iv),
+      additionalData: additionalData && bufferSource(additionalData),
+    },
     key,
     bufferSource(plaintext),
   );
-  // WebCrypto appends the 16-byte tag to the ciphertext; spec vectors list them apart.
   return new Uint8Array(sealed);
 }
 
-function assertEqual(actual: Uint8Array, expected: Uint8Array, label: string): void {
+function assertEqual(
+  actual: Uint8Array,
+  expected: Uint8Array,
+  label: string,
+): void {
   const a = [...actual].map((b) => b.toString(16).padStart(2, "0")).join("");
   const e = [...expected].map((b) => b.toString(16).padStart(2, "0")).join("");
-  if (a !== e) throw new Error(`${label}\n  expected ${e}\n  actual   ${a}`);
+  if (a !== e) throw new Error(`${label}: expected ${e}, actual ${a}`);
 }
 
-async function expectThrows(label: string, block: () => Promise<unknown>): Promise<void> {
+function assert(condition: boolean, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+async function expectThrows(
+  label: string,
+  block: () => Promise<unknown>,
+): Promise<void> {
   try {
     await block();
   } catch {
     console.log(`  ✓ ${label}`);
     return;
   }
-  throw new Error(`${label}: expected rejection, got success`);
+  throw new Error(`${label}: expected rejection`);
 }
 
-// ──────────────────── 1. known-answer vectors (spec) ────────────────────
+function expectThrowsSync(label: string, block: () => unknown): void {
+  try {
+    block();
+  } catch {
+    console.log(`  ✓ ${label}`);
+    return;
+  }
+  throw new Error(`${label}: expected rejection`);
+}
 
-// Test Case 14: K = IV = 0, P = 16 zero bytes
-{
-  const sealed = await aesGcm(
-    hexDecode("0000000000000000000000000000000000000000000000000000000000000000"),
+function keyBytes(seed: number): Uint8Array {
+  return Uint8Array.from({ length: 32 }, (_, index) => (seed + index) & 0xff);
+}
+
+function keyring(active: Uint8Array, old: Uint8Array): string {
+  return JSON.stringify({ k1: b64Encode(old), k2: b64Encode(active) });
+}
+
+async function legacyBlob(
+  key: Uint8Array,
+  userId: string,
+  providerId: string,
+  plaintext: string,
+): Promise<string> {
+  const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 1);
+  const ciphertext = await aesGcm(
+    key,
+    iv,
+    encoder.encode(plaintext),
+    encoder.encode(`${userId}:${providerId}`),
+  );
+  return `v1.${b64Encode(iv)}.${b64Encode(ciphertext)}`;
+}
+
+Deno.test("retains AES-256-GCM known-answer vectors", async () => {
+  const sealed14 = await aesGcm(
+    hexDecode(
+      "0000000000000000000000000000000000000000000000000000000000000000",
+    ),
     hexDecode("000000000000000000000000"),
     hexDecode("00000000000000000000000000000000"),
   );
-  assertEqual(sealed.slice(0, -16), hexDecode("cea7403d4d606b6e074ec5d3baf39d18"), "TC14 ciphertext");
-  assertEqual(sealed.slice(-16), hexDecode("d0d1c8a799996bf0265b98b5d48ab919"), "TC14 tag");
-  console.log("  ✓ GCM spec TC14 (AES-256) known-answer");
-}
+  assertEqual(
+    sealed14.slice(0, -16),
+    hexDecode("cea7403d4d606b6e074ec5d3baf39d18"),
+    "TC14 ciphertext",
+  );
+  assertEqual(
+    sealed14.slice(-16),
+    hexDecode("d0d1c8a799996bf0265b98b5d48ab919"),
+    "TC14 tag",
+  );
 
-// Test Case 16: real-world shape — 60-byte plaintext + 20-byte AAD
-{
-  const sealed = await aesGcm(
-    hexDecode("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308"),
+  const sealed16 = await aesGcm(
+    hexDecode(
+      "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+    ),
     hexDecode("cafebabefacedbaddecaf888"),
     hexDecode(
       "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a72" +
@@ -72,78 +127,170 @@ async function expectThrows(label: string, block: () => Promise<unknown>): Promi
     ),
     hexDecode("feedfacedeadbeeffeedfacedeadbeefabaddad2"),
   );
-  assertEqual(sealed.slice(-16), hexDecode("76fc6ece0f4e1768cddf8853bb2d551b"), "TC16 tag");
-  console.log("  ✓ GCM spec TC16 (AES-256 + AAD) known-answer");
-}
-
-// ──────────────── 2–4. the deployed wire format itself ─────────────────
-
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-const b64Encode = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
-const b64Decode = (text: string): Uint8Array =>
-  Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-
-async function importKey(secretBase64: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey("raw", bufferSource(b64Decode(secretBase64)), "AES-GCM", false, [
-    "encrypt",
-    "decrypt",
-  ]);
-}
-
-async function encryptConfig(
-  key: CryptoKey,
-  userId: string,
-  providerId: string,
-  config: unknown,
-): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: bufferSource(iv), additionalData: bufferSource(encoder.encode(`${userId}:${providerId}`)) },
-    key,
-    bufferSource(encoder.encode(JSON.stringify(config))),
+  assertEqual(
+    sealed16.slice(-16),
+    hexDecode("76fc6ece0f4e1768cddf8853bb2d551b"),
+    "TC16 tag",
   );
-  return `v1.${b64Encode(iv)}.${b64Encode(new Uint8Array(ciphertext))}`;
-}
+});
 
-async function decryptConfig(
-  key: CryptoKey,
-  userId: string,
-  providerId: string,
-  blob: string,
-): Promise<unknown> {
-  const [version, ivText, ciphertextText] = blob.split(".");
-  if (version !== "v1" || !ivText || !ciphertextText) throw new Error("bad_format");
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: bufferSource(b64Decode(ivText)), additionalData: bufferSource(encoder.encode(`${userId}:${providerId}`)) },
-    key,
-    bufferSource(b64Decode(ciphertextText)),
+Deno.test("encrypts v2 and decrypts with active or retired key metadata", async () => {
+  const active = keyBytes(32);
+  const old = keyBytes(64);
+  const legacy = keyBytes(96);
+  const codec = createProviderConfigCrypto({
+    activeKeyId: "k2",
+    encodedKeys: keyring(active, old),
+    legacyEncodedKey: b64Encode(legacy),
+  });
+  const config = { api_key: "fixture-secret" };
+  const blob = await codec.encrypt("user-a", "artwork.fixture_art", config);
+  assert(blob.startsWith("v2.k2."), "new ciphertext must use active v2 key");
+  const recovered = await codec.decrypt("user-a", "artwork.fixture_art", blob);
+  assert(
+    JSON.stringify(recovered.config) === JSON.stringify(config),
+    "v2 roundtrip mismatch",
   );
-  return JSON.parse(decoder.decode(plaintext));
-}
+  assert(
+    recovered.keyId === "k2" && !recovered.needsRotation,
+    "active v2 metadata mismatch",
+  );
 
-{
-  const secret = b64Encode(crypto.getRandomValues(new Uint8Array(32)));
-  const key = await importKey(secret);
-  const config = { url: "https://example.tld/manifest.json", token: "s3cret", timeoutMs: 5000 };
-  const blob = await encryptConfig(key, "user-a", "artwork.tmdb", config);
-  if (!blob.startsWith("v1.")) throw new Error("wire format missing version prefix");
-  const roundtrip = await decryptConfig(key, "user-a", "artwork.tmdb", blob);
-  if (JSON.stringify(roundtrip) !== JSON.stringify(config)) throw new Error("roundtrip mismatch");
-  console.log("  ✓ wire-format roundtrip v1.<iv>.<ct>");
+  const oldCodec = createProviderConfigCrypto({
+    activeKeyId: "k1",
+    encodedKeys: keyring(active, old),
+    legacyEncodedKey: b64Encode(legacy),
+  });
+  const oldBlob = await oldCodec.encrypt(
+    "user-a",
+    "artwork.fixture_art",
+    config,
+  );
+  const oldResult = await codec.decrypt(
+    "user-a",
+    "artwork.fixture_art",
+    oldBlob,
+  );
+  assert(
+    oldResult.keyId === "k1" && oldResult.needsRotation,
+    "retired v2 metadata mismatch",
+  );
+});
 
-  await expectThrows("AAD binding: different user rejected", () =>
-    decryptConfig(key, "user-b", "artwork.tmdb", blob));
-  await expectThrows("AAD binding: fixture provider rejected", () =>
-    decryptConfig(key, "user-a", "artwork.fixture_art", blob));
+Deno.test("decrypts legacy v1 and marks it for rotation", async () => {
+  const active = keyBytes(32);
+  const legacy = keyBytes(96);
+  const codec = createProviderConfigCrypto({
+    activeKeyId: "k2",
+    encodedKeys: { k2: b64Encode(active) },
+    legacyEncodedKey: b64Encode(legacy),
+  });
+  const blob = await legacyBlob(
+    legacy,
+    "user-a",
+    "artwork.fixture_art",
+    JSON.stringify({ api_key: "fixture-secret" }),
+  );
+  const result: DecryptedProviderConfig = await codec.decrypt(
+    "user-a",
+    "artwork.fixture_art",
+    blob,
+  );
+  assert(
+    JSON.stringify(result.config) ===
+      JSON.stringify({ api_key: "fixture-secret" }),
+    "legacy JSON mismatch",
+  );
+  assert(
+    result.keyId === "legacy" && result.needsRotation,
+    "legacy metadata mismatch",
+  );
+});
 
+Deno.test("rejects malformed configuration and authenticated tampering", async () => {
+  const active = keyBytes(32);
+  const codec = createProviderConfigCrypto({
+    activeKeyId: "k2",
+    encodedKeys: { k2: b64Encode(active) },
+  });
+  const blob = await codec.encrypt("user-a", "artwork.fixture_art", {
+    api_key: "fixture-secret",
+  });
+
+  await expectThrows(
+    "AAD binding: different user rejected",
+    () => codec.decrypt("user-b", "artwork.fixture_art", blob),
+  );
+  await expectThrows(
+    "AAD binding: different provider rejected",
+    () => codec.decrypt("user-a", "artwork.tmdb", blob),
+  );
   const parts = blob.split(".");
-  parts[2] = b64Encode(
-    b64Decode(parts[2]).map((b, i) => i === 0 ? b ^ 1 : b) as Uint8Array,
+  const ciphertext = Uint8Array.from(
+    atob(parts[3]),
+    (character) => character.charCodeAt(0),
   );
-  await expectThrows("tampered ciphertext rejected", () =>
-    decryptConfig(key, "user-a", "artwork.tmdb", parts.join(".")));
+  ciphertext[0] ^= 1;
+  parts[3] = b64Encode(ciphertext);
+  await expectThrows(
+    "tampered ciphertext rejected",
+    () => codec.decrypt("user-a", "artwork.fixture_art", parts.join(".")),
+  );
+  await expectThrows(
+    "unknown v2 key ID rejected",
+    () =>
+      codec.decrypt(
+        "user-a",
+        "artwork.fixture_art",
+        blob.replace("v2.k2.", "v2.k3."),
+      ),
+  );
+  await expectThrows("malformed JSON rejected", async () => {
+    const malformed = await legacyBlob(
+      active,
+      "user-a",
+      "artwork.fixture_art",
+      "not-json",
+    );
+    return codec.decrypt("user-a", "artwork.fixture_art", malformed);
+  });
 
-  console.log("provider_config_crypto: ALL PASSED");
-}
+  expectThrowsSync(
+    "missing active key rejected",
+    () => createProviderConfigCrypto({ activeKeyId: "k2", encodedKeys: {} }),
+  );
+  expectThrowsSync(
+    "malformed active key ID rejected",
+    () => createProviderConfigCrypto({ activeKeyId: "K2", encodedKeys: {} }),
+  );
+  expectThrowsSync(
+    "malformed keyring JSON rejected",
+    () => createProviderConfigCrypto({ activeKeyId: "k2", encodedKeys: "[]" }),
+  );
+  expectThrowsSync(
+    "duplicate key ID rejected",
+    () =>
+      createProviderConfigCrypto({
+        activeKeyId: "k2",
+        encodedKeys: `{"k2":"${b64Encode(active)}","k2":"${
+          b64Encode(active)
+        }"}`,
+      }),
+  );
+  expectThrowsSync(
+    "malformed key base64 rejected",
+    () =>
+      createProviderConfigCrypto({
+        activeKeyId: "k2",
+        encodedKeys: { k2: "%%%" },
+      }),
+  );
+  expectThrowsSync(
+    "wrong key length rejected",
+    () =>
+      createProviderConfigCrypto({
+        activeKeyId: "k2",
+        encodedKeys: { k2: b64Encode(new Uint8Array(16)) },
+      }),
+  );
+});

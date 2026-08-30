@@ -128,6 +128,7 @@ internal fun TvEditableTextField(
     placeholder: String,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     onImeAction: () -> Unit = {},
@@ -162,6 +163,7 @@ internal fun TvEditableTextField(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
+        enabled = enabled,
         readOnly = !editing,
         singleLine = true,
         textStyle = MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.onSurface),

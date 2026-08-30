@@ -1,3 +1,5 @@
+import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
+
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_JWT") ??
@@ -27,37 +29,11 @@ async function requireUser(req: Request): Promise<{ id: string } | null> {
   return typeof user?.id === "string" ? user : null;
 }
 
-const encoder = new TextEncoder();
-let encryptionKeyPromise: Promise<CryptoKey> | null = null;
-const b64Encode = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
-const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
-
-function encryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get("PROVIDER_CONFIG_KEY");
-  if (!secret) return Promise.reject(new Error("encryption_key_unavailable"));
-  encryptionKeyPromise ??= crypto.subtle.importKey(
-    "raw",
-    bufferSource(Uint8Array.from(atob(secret), (character) => character.charCodeAt(0))),
-    "AES-GCM",
-    false,
-    ["encrypt"],
-  );
-  return encryptionKeyPromise;
-}
-
-async function encryptConfig(userId: string, provider: string, apiKey: string): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    {
-      name: "AES-GCM",
-      iv: bufferSource(iv),
-      additionalData: bufferSource(encoder.encode(`${userId}:artwork.${provider}`)),
-    },
-    await encryptionKey(),
-    bufferSource(encoder.encode(JSON.stringify({ api_key: apiKey }))),
-  );
-  return `v1.${b64Encode(iv)}.${b64Encode(new Uint8Array(ciphertext))}`;
-}
+const providerConfigCrypto = createProviderConfigCrypto({
+  activeKeyId: Deno.env.get("PROVIDER_CONFIG_ACTIVE_KEY_ID") ?? "",
+  encodedKeys: Deno.env.get("PROVIDER_CONFIG_KEYRING") ?? "",
+  legacyEncodedKey: Deno.env.get("PROVIDER_CONFIG_KEY"),
+});
 
 async function catalogProvider(provider: string): Promise<boolean> {
   const query = new URLSearchParams({ select: "id,enabled", id: `eq.${provider}`, limit: "1" });
@@ -93,9 +69,13 @@ Deno.serve(async (req) => {
 
   let encryptedConfig: string;
   try {
-    encryptedConfig = await encryptConfig(user.id, provider, apiKey);
+    encryptedConfig = await providerConfigCrypto.encrypt(
+      user.id,
+      `artwork.${provider}`,
+      { api_key: apiKey },
+    );
   } catch (error) {
-    console.error("artwork config encryption failed", error instanceof Error ? error.name : "unknown");
+    console.error("artwork config encryption failed", provider, error instanceof Error ? error.message : "unknown");
     return json({ error: "encrypt_failed" }, 500);
   }
   const response = await fetch(`${SB_URL}/rest/v1/provider_configs`, {

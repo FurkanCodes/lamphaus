@@ -1,15 +1,13 @@
-// save-provider-config — upserts one provider config, encrypted (plan D4/F5).
-//
-// Self-contained by choice: the platform's remote bundler only sees this
-// function's own directory, so helpers live inline instead of /_shared.
+import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
+
+// save-provider-config — upserts one provider config, encrypted.
 //
 // Authenticated (verify_jwt=true). RLS keeps provider_configs deny-all, so
 // access travels through service role here, scoped to the caller's user_id.
 //
-// Wire format of encrypted_config:  "v1.<base64(iv)>.<base64(ciphertext)>"
-//   - AES-256-GCM, 12-byte random IV per save
-//   - AAD binds ciphertext to "<user_id>:<provider_id>", so copying a blob
-//     to another row or user fails decryption instead of silently working.
+// The shared codec writes v2.<key_id>.<base64(iv)>.<base64(ciphertext)>.
+// AES-256-GCM uses a fresh 12-byte IV per save, and AAD binds ciphertext to
+// "<user_id>:<provider_id>" so copying a blob to another row or user fails.
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -44,47 +42,11 @@ async function requireUser(
   return typeof user?.id === "string" ? user : null;
 }
 
-// ────────────────────────── AES-256-GCM codec ──────────────────────────
-
-const encoder = new TextEncoder();
-
-const b64Encode = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
-const b64Decode = (text: string): Uint8Array =>
-  Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-const bufferSource = (bytes: Uint8Array): BufferSource => bytes as unknown as BufferSource;
-
-let keyPromise: Promise<CryptoKey> | null = null;
-
-function encryptionKey(): Promise<CryptoKey> {
-  const secret = Deno.env.get("PROVIDER_CONFIG_KEY");
-  if (!secret) return Promise.reject(new Error("PROVIDER_CONFIG_KEY not set"));
-  keyPromise ??= crypto.subtle.importKey(
-    "raw",
-    bufferSource(b64Decode(secret)),
-    "AES-GCM",
-    false,
-    ["encrypt", "decrypt"],
-  );
-  return keyPromise;
-}
-
-function aad(userId: string, providerId: string): BufferSource {
-  return bufferSource(encoder.encode(`${userId}:${providerId}`));
-}
-
-export async function encryptConfig(
-  userId: string,
-  providerId: string,
-  config: unknown,
-): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: bufferSource(iv), additionalData: aad(userId, providerId) },
-    await encryptionKey(),
-    bufferSource(encoder.encode(JSON.stringify(config))),
-  );
-  return `v1.${b64Encode(iv)}.${b64Encode(new Uint8Array(ciphertext))}`;
-}
+const providerConfigCrypto = createProviderConfigCrypto({
+  activeKeyId: Deno.env.get("PROVIDER_CONFIG_ACTIVE_KEY_ID") ?? "",
+  encodedKeys: Deno.env.get("PROVIDER_CONFIG_KEYRING") ?? "",
+  legacyEncodedKey: Deno.env.get("PROVIDER_CONFIG_KEY"),
+});
 
 // ─────────────────────────────── handler ───────────────────────────────
 
@@ -106,9 +68,9 @@ Deno.serve(async (req) => {
 
   let encrypted: string;
   try {
-    encrypted = await encryptConfig(user.id, providerId, body.config);
+    encrypted = await providerConfigCrypto.encrypt(user.id, providerId, body.config);
   } catch (error) {
-    console.error("encrypt failed", error instanceof Error ? error.name : "unknown");
+    console.error("encrypt failed", providerId, error instanceof Error ? error.message : "unknown");
     return json({ error: "encrypt_failed" }, 500);
   }
 
