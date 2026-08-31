@@ -145,6 +145,7 @@ import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
+import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
@@ -531,7 +532,7 @@ private fun MobileHomeScreen(
         val mediaByKey = allMedia.associateBy(MediaPreview::stableKey)
         state.progress
             .asSequence()
-            .filter { !it.completed && it.fraction in 0.01f..0.98f }
+            .filter { it.isResumable() }
             .sortedByDescending { it.updatedAtEpochMillis }
             .mapNotNull { progress ->
                 mediaByKey[progress.mediaKey]?.let { media -> media to progress.fraction }
