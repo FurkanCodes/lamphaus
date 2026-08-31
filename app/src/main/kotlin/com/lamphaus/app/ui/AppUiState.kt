@@ -59,6 +59,7 @@ data class CatalogSection(
     val title: String,
     val providerName: String,
     val items: List<MediaPreview>,
+    val initialLoading: Boolean = false,
     val errorMessage: String? = null,
     val baseQuery: CatalogQuery = CatalogQuery("", ""),
     val supportsSkip: Boolean = false,
@@ -98,7 +99,8 @@ data class SourcePickerState(
 }
 
 data class HomeCatalogBatchState(
-    val totalSectionCount: Int = 0,
+    val consumedTargetCount: Int = 0,
+    val hasMore: Boolean = false,
     val loadingMore: Boolean = false,
     val loadMoreFailed: Boolean = false,
 )

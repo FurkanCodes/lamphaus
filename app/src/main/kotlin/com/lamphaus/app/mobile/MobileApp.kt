@@ -101,6 +101,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
@@ -115,6 +116,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 import androidx.core.text.HtmlCompat
@@ -133,6 +136,7 @@ import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
+import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
@@ -224,11 +228,7 @@ fun MobileApp(
                             onEmailLink = onEmailLink,
                             onDevelopmentSession = viewModel::openDevelopmentSession,
                         )
-                        is AccountState.SignedIn -> if (state.initialContentLoading) {
-                            LoadingScreen()
-                        } else {
-                            MobileSignedInApp(state, viewModel, widthSizeClass)
-                        }
+                        is AccountState.SignedIn -> MobileSignedInApp(state, viewModel, widthSizeClass)
                     }
                 }
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
@@ -501,20 +501,20 @@ private fun MobileHomeScreen(
     LaunchedEffect(
         listState,
         state.sections.size,
-        state.homeCatalogBatch.totalSectionCount,
+        state.homeCatalogBatch.hasMore,
         state.homeCatalogBatch.loadingMore,
         state.homeCatalogBatch.loadMoreFailed,
     ) {
         snapshotFlow {
             listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to
                 listState.layoutInfo.totalItemsCount
-        }.distinctUntilChanged().collect { (lastVisibleIndex, totalListItems) ->
+        }.distinctUntilChanged().collectLatest { (lastVisibleIndex, totalListItems) ->
+            delay(HOME_CATALOG_SCROLL_SETTLE_MILLIS)
             if (
-                lastVisibleIndex != null &&
                 shouldPrefetchHomeCatalogBatch(
                     lastVisibleIndex = lastVisibleIndex,
                     totalListItems = totalListItems,
-                    hasMore = state.sections.size < state.homeCatalogBatch.totalSectionCount,
+                    hasMore = state.homeCatalogBatch.hasMore,
                     loading = state.homeCatalogBatch.loadingMore,
                     failed = state.homeCatalogBatch.loadMoreFailed,
                 )
@@ -528,23 +528,42 @@ private fun MobileHomeScreen(
         contentPadding = PaddingValues(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        if (feature != null) item(key = "feature") { MobileHero(feature, onMedia, restoreMediaKey, onFocusRestored) }
-        if (state.providers.isEmpty() && state.sections.isEmpty()) {
+        if (feature != null) {
+            item(key = "feature") { MobileHero(feature, onMedia, restoreMediaKey, onFocusRestored) }
+        } else if (
+            state.initialContentLoading ||
+            state.homeCatalogBatch.loadingMore ||
+            state.sections.any(CatalogSection::initialLoading)
+        ) {
+            // Keep the hero slot present while the first catalog window loads,
+            // so the big card never disappears during progressive loading.
+            item(key = "feature") { MobileHeroLoadingSkeleton() }
+        }
+        if (
+            !state.initialContentLoading &&
+            !state.homeCatalogBatch.loadingMore &&
+            !state.homeCatalogBatch.loadMoreFailed &&
+            !state.homeCatalogBatch.hasMore &&
+            state.providers.isEmpty() &&
+            state.sections.isEmpty()
+        ) {
             item { EmptyProviders(Modifier.padding(horizontal = 24.dp), onAddSource) }
         }
         items(state.sections, key = CatalogSection::id) { section ->
             CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
         }
         when {
-            state.homeCatalogBatch.loadingMore -> item(key = "home-catalog-loading") {
-                MobileHomeCatalogLoadingSkeleton()
-            }
             state.homeCatalogBatch.loadMoreFailed -> item(key = "home-catalog-retry") {
                 OutlinedButton(
                     onClick = onRetryHome,
                     modifier = Modifier.padding(horizontal = 24.dp),
                 ) {
                     Text(stringResource(R.string.retry))
+                }
+            }
+            state.homeCatalogBatch.loadingMore && state.sections.none(CatalogSection::initialLoading) -> {
+                item(key = "home-catalog-loading") {
+                    MobileHomeCatalogLoadingSkeleton()
                 }
             }
         }
@@ -598,46 +617,54 @@ private fun MobileHomeCatalogLoadingSkeleton() {
                             .background(skeletonColor.copy(alpha = pulse * 0.8f)),
                     )
                 }
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    userScrollEnabled = false,
-                ) {
-                    items(4) {
-                        Column(
-                            modifier = Modifier
-                                .width(138.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
-                                .padding(bottom = 10.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(2f / 3f)
-                                    .background(skeletonColor),
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 10.dp)
-                                    .fillMaxWidth(0.82f)
-                                    .height(14.dp)
-                                    .clip(RoundedCornerShape(5.dp))
-                                    .background(skeletonColor.copy(alpha = pulse * 0.8f)),
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 10.dp)
-                                    .fillMaxWidth(0.54f)
-                                    .height(11.dp)
-                                    .clip(RoundedCornerShape(5.dp))
-                                    .background(skeletonColor.copy(alpha = pulse * 0.65f)),
-                            )
-                        }
-                    }
-                }
+                MobileCatalogItemsLoadingSkeleton(skeletonColor, pulse)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileCatalogItemsLoadingSkeleton(
+    skeletonColor: Color,
+    pulse: Float,
+) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        userScrollEnabled = false,
+    ) {
+        items(4) {
+            Column(
+                modifier = Modifier
+                    .width(138.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
+                    .padding(bottom = 10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(2f / 3f)
+                        .background(skeletonColor),
+                )
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 10.dp)
+                        .fillMaxWidth(0.82f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(skeletonColor.copy(alpha = pulse * 0.8f)),
+                )
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 10.dp)
+                        .fillMaxWidth(0.54f)
+                        .height(11.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(skeletonColor.copy(alpha = pulse * 0.65f)),
+                )
             }
         }
     }
@@ -681,6 +708,27 @@ private fun MobileHero(
 }
 
 @Composable
+private fun MobileHeroLoadingSkeleton() {
+    val pulse by rememberInfiniteTransition(label = "hero loading").animateFloat(
+        initialValue = 0.58f,
+        targetValue = 0.78f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "skeleton pulse",
+    )
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(310.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse)),
+    )
+}
+
+@Composable
 private fun CatalogRow(
     section: CatalogSection,
     onMedia: (MediaPreview) -> Unit,
@@ -702,7 +750,21 @@ private fun CatalogRow(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        if (section.items.isNotEmpty() || section.supportsSkip) {
+        if (section.initialLoading && section.items.isEmpty()) {
+            val pulse by rememberInfiniteTransition(label = "catalog row loading").animateFloat(
+                initialValue = 0.58f,
+                targetValue = 0.78f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(900),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "skeleton pulse",
+            )
+            MobileCatalogItemsLoadingSkeleton(
+                skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse),
+                pulse = pulse,
+            )
+        } else if (section.items.isNotEmpty() || section.supportsSkip) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
