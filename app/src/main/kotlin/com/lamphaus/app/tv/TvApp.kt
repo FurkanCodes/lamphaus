@@ -1160,6 +1160,12 @@ private fun TvCatalogRow(
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
         )
+        Text(
+            text = section.providerName,
+            modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.64f),
+        )
         section.errorMessage?.let {
             Text(
                 text = it,

@@ -698,7 +698,7 @@ class AppViewModel(
     fun toggleProvider(providerId: String, enabled: Boolean) = viewModelScope.launch {
         val current = state.value.providers.firstOrNull { it.id == providerId } ?: return@launch
         if (current.sortOrder < 0) {
-            showMessage("The Lamphaus catalog is always available.")
+            showMessage("The Cinemeta catalog is always available.")
 
             return@launch
         }
@@ -714,7 +714,7 @@ class AppViewModel(
     fun removeProvider(providerId: String) = viewModelScope.launch {
         val current = state.value.providers.firstOrNull { it.id == providerId } ?: return@launch
         if (current.sortOrder < 0) {
-            showMessage("The Lamphaus catalog cannot be removed.")
+            showMessage("The Cinemeta catalog cannot be removed.")
             return@launch
         }
         val userId = (state.value.account as? AccountState.SignedIn)?.userId
@@ -1885,7 +1885,7 @@ class AppViewModel(
                 is ProviderResult.Failure -> {
                     defaultCatalogJob = null
                     refreshCatalogs(force = true)
-                    showMessage("The Lamphaus catalog is temporarily unavailable.")
+                    showMessage("The Cinemeta catalog is temporarily unavailable.")
                 }
             }
         }
@@ -2083,7 +2083,7 @@ class AppViewModel(
     companion object {
         private const val MAX_DISCOVERED_PROVIDERS = 50
         private const val DEFAULT_CATALOG_SORT_ORDER = -100
-        private const val DEFAULT_CATALOG_DISPLAY_NAME = "Lamphaus Catalog"
+        private const val DEFAULT_CATALOG_DISPLAY_NAME = "Cinemeta"
 
         private const val DEFAULT_CATALOG_PROVIDER_ID = CINEMETA_PROVIDER_ID
         private const val DEFAULT_CATALOG_MANIFEST = "https://v3-cinemeta.strem.io/manifest.json"
