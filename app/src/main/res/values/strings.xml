@@ -128,6 +128,8 @@
     <string name="about">About</string>
     <string name="about_lamphaus_body">Your library, compatible content sources, and playback in one calm television experience.</string>
     <string name="media_card_description_rating">%1$s, rated %2$s out of 10</string>
+    <string name="media_card_description_progress">%1$s, %2$d%% watched</string>
+    <string name="hero_carousel_description_touch">%1$s, featured title %2$d of %3$d. Swipe to browse.</string>
     <string name="episodes">Episodes</string>
     <string name="watched">Watched</string>
     <string name="cast">Cast</string>

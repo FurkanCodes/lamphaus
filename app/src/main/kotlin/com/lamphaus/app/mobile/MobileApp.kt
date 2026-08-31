@@ -5,6 +5,7 @@ import android.text.format.DateUtils
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -127,6 +129,12 @@ import com.lamphaus.app.ui.ArtworkEditorState
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ScaffoldDefaults
+import kotlin.math.roundToInt
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.AppUiState
@@ -391,25 +399,41 @@ private fun MobileSignedInApp(
         }
         else -> {
             val compact = widthSizeClass == WindowWidthSizeClass.Compact
+            // Home is content-first: no top app bar, the hero carousel draws
+            // edge-to-edge behind the status bar (settings stay reachable via
+            // an overlay on the hero). Other destinations keep the app bar.
+            val immersiveHome = destination == MobileDestination.HOME
             val content: @Composable () -> Unit = {
                 Scaffold(
                     topBar = {
-                        TopAppBar(
-                            title = { Text(stringResource(destination.labelRes)) },
-                            actions = {
-                                IconButton(onClick = { settingsOpen = true }) {
-                                    Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_and_profiles))
-                                }
-                            },
-                        )
+                        if (!immersiveHome) {
+                            TopAppBar(
+                                title = { Text(stringResource(destination.labelRes)) },
+                                actions = {
+                                    IconButton(onClick = { settingsOpen = true }) {
+                                        Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_and_profiles))
+                                    }
+                                },
+                            )
+                        }
                     },
+                    contentWindowInsets = if (immersiveHome) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
                 ) { padding ->
-                    Box(Modifier.fillMaxSize().padding(padding)) {
+                    Box(
+                        Modifier.fillMaxSize().padding(
+                            if (immersiveHome) {
+                                PaddingValues(bottom = padding.calculateBottomPadding())
+                            } else {
+                                padding
+                            },
+                        ),
+                    ) {
                         when (destination) {
                             MobileDestination.HOME -> MobileHomeScreen(
                                 state = state,
                                 onMedia = openMedia,
                                 onAddSource = { settingsOpen = true },
+                                onSettings = { settingsOpen = true },
                                 onLoadMore = viewModel::loadMoreCatalog,
                                 onRetry = viewModel::retryCatalogPage,
                                 onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
@@ -489,6 +513,7 @@ private fun MobileHomeScreen(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
+    onSettings: () -> Unit,
     onLoadMore: (String) -> Unit,
     onRetry: (String) -> Unit,
     onLoadMoreHome: () -> Unit,
@@ -496,7 +521,23 @@ private fun MobileHomeScreen(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
-    val feature = state.allMedia.firstOrNull()
+    val allMedia = state.allMedia
+    // Same feature selection as the TV home: first five distinct catalog items.
+    val heroItems = remember(allMedia) { allMedia.distinctBy(MediaPreview::stableKey).take(5) }
+    // Progress is synced with the Supabase watch_progress table both ways
+    // (player writes -> Room + cloud; cloud -> Room on sign-in), so this row
+    // follows whatever was last watched on any device.
+    val continueWatching = remember(state.progress, allMedia) {
+        val mediaByKey = allMedia.associateBy(MediaPreview::stableKey)
+        state.progress
+            .asSequence()
+            .filter { !it.completed && it.fraction in 0.01f..0.98f }
+            .sortedByDescending { it.updatedAtEpochMillis }
+            .mapNotNull { progress ->
+                mediaByKey[progress.mediaKey]?.let { media -> media to progress.fraction }
+            }
+            .toList()
+    }
     val listState = rememberLazyListState()
     LaunchedEffect(
         listState,
@@ -528,8 +569,10 @@ private fun MobileHomeScreen(
         contentPadding = PaddingValues(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        if (feature != null) {
-            item(key = "feature") { MobileHero(feature, onMedia, restoreMediaKey, onFocusRestored) }
+        if (heroItems.isNotEmpty()) {
+            item(key = "feature") {
+                MobileHeroCarousel(heroItems, onMedia, onSettings, restoreMediaKey, onFocusRestored)
+            }
         } else if (
             state.initialContentLoading ||
             state.homeCatalogBatch.loadingMore ||
@@ -539,6 +582,11 @@ private fun MobileHomeScreen(
             // so the big card never disappears during progressive loading.
             item(key = "feature") { MobileHeroLoadingSkeleton() }
         }
+        if (continueWatching.isNotEmpty()) {
+            item(key = "continue-watching") {
+                MobileContinueWatchingRow(continueWatching, onMedia)
+            }
+        }
         if (
             !state.initialContentLoading &&
             !state.homeCatalogBatch.loadingMore &&
@@ -547,7 +595,7 @@ private fun MobileHomeScreen(
             state.providers.isEmpty() &&
             state.sections.isEmpty()
         ) {
-            item { EmptyProviders(Modifier.padding(horizontal = 24.dp), onAddSource) }
+            item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
         }
         items(state.sections, key = CatalogSection::id) { section ->
             CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
@@ -592,14 +640,14 @@ private fun MobileHomeCatalogLoadingSkeleton() {
     ) {
         Text(
             text = stringResource(R.string.loading_more_rows),
-            modifier = Modifier.padding(horizontal = 20.dp),
+            modifier = Modifier.padding(horizontal = 16.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         repeat(2) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Box(
@@ -629,80 +677,179 @@ private fun MobileCatalogItemsLoadingSkeleton(
     pulse: Float,
 ) {
     LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         userScrollEnabled = false,
     ) {
         items(4) {
-            Column(
+            Box(
                 modifier = Modifier
                     .width(138.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
-                    .padding(bottom = 10.dp),
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(skeletonColor),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MobileHeroCarousel(
+    items: List<MediaPreview>,
+    onMedia: (MediaPreview) -> Unit,
+    onSettings: () -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
+    val pagerState = rememberPagerState { items.size }
+    Box(Modifier.fillMaxWidth().height(400.dp)) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            val media = items[page]
+            val pageDescription = stringResource(
+                R.string.hero_carousel_description_touch, media.name, page + 1, items.size,
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
+                    .clickable(role = Role.Button) { onMedia(media) }
+                    .semantics { contentDescription = pageDescription },
             ) {
+                MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
+                // Top scrim keeps status-bar icons legible on any artwork; the
+                // bottom scrim carries the title block like the TV hero.
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(2f / 3f)
-                        .background(skeletonColor),
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colorStops = arrayOf(
+                                    0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
+                                    0.16f to Color.Transparent,
+                                    0.55f to Color.Transparent,
+                                    1f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.88f),
+                                ),
+                            ),
+                        ),
                 )
-                Spacer(Modifier.height(10.dp))
+                Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp, vertical = 20.dp)) {
+                    Text(media.name, style = MaterialTheme.typography.headlineSmall, color = Color.White)
+                    MobileMetadataLine(
+                        presentation = media.metadataPresentation(maxGenres = 1),
+                        includeGenres = true,
+                        color = Color.White.copy(alpha = 0.88f),
+                    )
+                    media.description?.takeIf { it.isNotBlank() }?.let { description ->
+                        Text(
+                            description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.76f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        // Manual paging only: nothing auto-advances while the user is reading.
+        Row(
+            Modifier.align(Alignment.BottomEnd).padding(horizontal = 20.dp, vertical = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            repeat(items.size) { index ->
+                val active = index == pagerState.currentPage
+                val width by animateDpAsState(targetValue = if (active) 18.dp else 6.dp, label = "hero indicator")
                 Box(
-                    modifier = Modifier
-                        .padding(horizontal = 10.dp)
-                        .fillMaxWidth(0.82f)
-                        .height(14.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(skeletonColor.copy(alpha = pulse * 0.8f)),
+                    Modifier
+                        .size(width, 6.dp)
+                        .clip(CircleShape)
+                        .background(if (active) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.45f)),
                 )
-                Spacer(Modifier.height(6.dp))
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 10.dp)
-                        .fillMaxWidth(0.54f)
-                        .height(11.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(skeletonColor.copy(alpha = pulse * 0.65f)),
-                )
+            }
+        }
+        IconButton(
+            onClick = onSettings,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+        ) {
+            Icon(
+                Icons.Outlined.Settings,
+                contentDescription = stringResource(R.string.settings_and_profiles),
+                tint = Color.White,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MobileContinueWatchingRow(
+    items: List<Pair<MediaPreview, Float>>,
+    onMedia: (MediaPreview) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = stringResource(R.string.continue_watching),
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .semantics { heading() },
+            style = MaterialTheme.typography.titleMedium,
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(items, key = { it.first.stableKey }) { (media, progress) ->
+                MobileContinueWatchingCard(media, progress, onMedia)
             }
         }
     }
 }
 
 @Composable
-private fun MobileHero(
+private fun MobileContinueWatchingCard(
     media: MediaPreview,
+    progress: Float,
     onMedia: (MediaPreview) -> Unit,
-    restoreMediaKey: String?,
-    onFocusRestored: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Card(
-        onClick = { onMedia(media) },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(310.dp)
-            .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
-        shape = RoundedCornerShape(16.dp),
+    val percent = (progress.coerceIn(0f, 1f) * 100).roundToInt()
+    val description = stringResource(R.string.media_card_description_progress, media.name, percent)
+    Box(
+        modifier
+            .width(240.dp)
+            .aspectRatio(16f / 9f)
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(role = Role.Button) { onMedia(media) }
+            .semantics { contentDescription = description },
     ) {
-        Box(Modifier.fillMaxSize()) {
-            MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
-            Box(
-                Modifier.fillMaxSize().background(
+        MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
                     Brush.verticalGradient(
-                        listOf(androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.colorScheme.scrim.copy(alpha = 0.82f)),
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
                     ),
                 ),
+        )
+        // Resume beam along the bottom edge, mirroring the TV progress bar.
+        Box(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(4.dp)
+                .background(Color.Black.copy(alpha = 0.44f)),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(progress.coerceIn(0f, 1f))
+                    .height(4.dp)
+                    .background(MaterialTheme.colorScheme.primary),
             )
-            Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
-                Text(media.name, style = MaterialTheme.typography.headlineMedium, color = androidx.compose.ui.graphics.Color.White)
-                MobileMetadataLine(
-                    presentation = media.metadataPresentation(maxGenres = 1),
-                    includeGenres = true,
-                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.88f),
-                )
-            }
         }
     }
 }
@@ -721,9 +868,7 @@ private fun MobileHeroLoadingSkeleton() {
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(310.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .height(400.dp)
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse)),
     )
 }
@@ -738,14 +883,14 @@ private fun CatalogRow(
     onFocusRestored: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
             Text(section.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Text(section.providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         section.errorMessage?.let { error ->
             Text(
                 error,
-                modifier = Modifier.padding(horizontal = 20.dp),
+                modifier = Modifier.padding(horizontal = 16.dp),
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -766,7 +911,7 @@ private fun CatalogRow(
             )
         } else if (section.items.isNotEmpty() || section.supportsSkip) {
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(section.items, key = MediaPreview::stableKey) { media ->
@@ -799,20 +944,37 @@ private fun CatalogRow(
 private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, modifier: Modifier = Modifier) {
     val landscape = media.posterShape.equals("landscape", ignoreCase = true) ||
         (media.posterUrl.isNullOrBlank() && !media.backgroundUrl.isNullOrBlank())
-    Card(
-        onClick = { onMedia(media) },
-        modifier = modifier.width(if (landscape) 220.dp else 138.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    // Artwork carries the emotion: no name or metadata text on the card,
+    // matching the TV design. The name stays available to TalkBack, and the
+    // rating appears as a small neutral overlay per the design system.
+    val ratingText = media.metadataPresentation().ratingText
+    val cardDescription = ratingText
+        ?.let { stringResource(R.string.media_card_description_rating, media.name, it) }
+        ?: media.name
+    Box(
+        modifier
+            .width(if (landscape) 220.dp else 138.dp)
+            .aspectRatio(if (landscape) 16f / 9f else 2f / 3f)
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(role = Role.Button) { onMedia(media) }
+            .semantics { contentDescription = cardDescription },
     ) {
-        MediaArtwork(media, Modifier.fillMaxWidth().aspectRatio(if (landscape) 16f / 9f else 2f / 3f))
-        Column(Modifier.padding(10.dp)) {
-            Text(media.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            MobileMetadataLine(
-                presentation = media.metadataPresentation(),
-                includeGenres = false,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        MediaArtwork(media, Modifier.fillMaxSize())
+        ratingText?.let { rating ->
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("★", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text(rating, style = MaterialTheme.typography.labelSmall, color = Color.White)
+            }
         }
     }
 }

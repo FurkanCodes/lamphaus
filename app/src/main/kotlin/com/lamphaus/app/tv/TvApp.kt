@@ -941,6 +941,9 @@ private fun TvContinueWatchingRow(
                     modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
                     showLabel = true,
                     revealLabelOnFocus = true,
+                    // Continue-watching entries read as horizontal resume cards,
+                    // visually distinct from the poster-shaped catalog cards.
+                    compactLandscape = true,
                     watchProgress = progress,
                 )
             }
