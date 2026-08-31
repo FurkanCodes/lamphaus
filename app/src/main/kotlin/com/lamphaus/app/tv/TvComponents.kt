@@ -410,12 +410,13 @@ internal fun TvMediaCard(
     revealLabelOnFocus: Boolean = false,
     compactLandscape: Boolean = false,
     watchProgress: Float? = null,
+    showRating: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val reducedMotion = rememberReducedMotion()
     val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
     val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
-    val ratingText = media.metadataPresentation().ratingText
+    val ratingText = if (showRating) media.metadataPresentation().ratingText else null
     val cardDescription = ratingText?.let {
         stringResource(R.string.media_card_description_rating, media.name, it)
     } ?: media.name

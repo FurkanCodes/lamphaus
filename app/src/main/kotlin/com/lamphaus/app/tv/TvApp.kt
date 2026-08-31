@@ -11,6 +11,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -35,6 +39,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -59,6 +65,8 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -120,6 +128,7 @@ import com.lamphaus.app.ui.ArtworkEditorState
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
+import com.lamphaus.app.ui.CINEMETA_PROVIDER_ID
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.MediaMetadataPresentation
 import com.lamphaus.app.ui.SelectionCheckmark
@@ -133,6 +142,9 @@ import com.lamphaus.app.ui.sourceItemKey
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
+import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
+import com.lamphaus.app.ui.isRenderableHomeCatalogSection
+
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
@@ -147,6 +159,8 @@ import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.distinctUntilChanged
+
 
 @Composable
 fun TvApp(
@@ -558,10 +572,13 @@ private fun TvSignedIn(
                         },
                         onLoadMore = viewModel::loadMoreCatalog,
                         onRetry = viewModel::retryCatalogPage,
+                        onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
+                        onRetryHome = viewModel::retryHomeCatalogSections,
                         initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
                         restoreMediaKey = pendingMediaKey,
                         onFocusRestored = { pendingMediaKey = null },
                     )
+
 
                     TvDestination.DISCOVER -> TvMediaGrid(
                         title = stringResource(R.string.discover),
@@ -632,6 +649,8 @@ private fun TvHome(
     onAddSource: () -> Unit,
     onLoadMore: (String) -> Unit,
     onRetry: (String) -> Unit,
+    onLoadMoreHome: () -> Unit,
+    onRetryHome: () -> Unit,
     initialFocusRequester: FocusRequester,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
@@ -657,6 +676,35 @@ private fun TvHome(
             featured = it
         }
     }
+    val visibleHomeSections = remember(state.sections) {
+        state.sections.filter(CatalogSection::isRenderableHomeCatalogSection)
+    }
+    val listState = rememberLazyListState()
+    LaunchedEffect(
+        listState,
+        state.sections.size,
+        state.homeCatalogBatch.totalSectionCount,
+        state.homeCatalogBatch.loadingMore,
+        state.homeCatalogBatch.loadMoreFailed,
+    ) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to
+                listState.layoutInfo.totalItemsCount
+        }.distinctUntilChanged().collect { (lastVisibleIndex, totalListItems) ->
+            if (
+                lastVisibleIndex != null &&
+                shouldPrefetchHomeCatalogBatch(
+                    lastVisibleIndex = lastVisibleIndex,
+                    totalListItems = totalListItems,
+                    hasMore = state.sections.size < state.homeCatalogBatch.totalSectionCount,
+                    loading = state.homeCatalogBatch.loadingMore,
+                    failed = state.homeCatalogBatch.loadMoreFailed,
+                )
+            ) {
+                onLoadMoreHome()
+            }
+        }
+    }
     val moveCarousel: (Int) -> Unit = { delta ->
         if (heroItems.size > 1) {
             val currentIndex = heroItems.indexOfFirst { it.stableKey == featured?.stableKey }.coerceAtLeast(0)
@@ -667,6 +715,7 @@ private fun TvHome(
         }
     }
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
         verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.rowSpacing),
@@ -724,7 +773,7 @@ private fun TvHome(
                 }
             }
         }
-        items(state.sections, key = CatalogSection::id) { section ->
+        items(visibleHomeSections, key = CatalogSection::id) { section ->
             TvCatalogRow(
                 section = section,
                 onMedia = onMedia,
@@ -734,6 +783,91 @@ private fun TvHome(
                 restoreMediaKey = restoreMediaKey,
                 onFocusRestored = onFocusRestored,
             )
+        }
+        when {
+            state.homeCatalogBatch.loadingMore -> item("home-catalog-loading") {
+                TvHomeCatalogLoadingSkeleton()
+            }
+            state.homeCatalogBatch.loadMoreFailed -> item("home-catalog-retry") {
+                TvAction(
+                    label = stringResource(R.string.retry),
+                    icon = Icons.Outlined.Refresh,
+                    onClick = onRetryHome,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvHomeCatalogLoadingSkeleton() {
+    val loadingDescription = stringResource(R.string.loading_more_rows)
+    val pulse by rememberInfiniteTransition(label = "home catalog loading").animateFloat(
+        initialValue = 0.58f,
+        targetValue = 0.78f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "skeleton pulse",
+    )
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = loadingDescription },
+        verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.rowSpacing),
+    ) {
+        Text(
+            text = stringResource(R.string.loading_more_rows),
+            modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.76f),
+        )
+        repeat(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
+                        .width(220.dp)
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(skeletonColor),
+                )
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
+                    contentPadding = PaddingValues(
+                        start = TvLayoutTokens.screenHorizontalPadding,
+                        end = TvLayoutTokens.screenHorizontalPadding,
+                        bottom = TvLayoutTokens.screenBottomPadding,
+                    ),
+                    userScrollEnabled = false,
+                ) {
+                    items(4) {
+                        Column(
+                            modifier = Modifier.width(TvLayoutTokens.posterWidth),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(TvLayoutTokens.posterWidth)
+                                    .height(TvLayoutTokens.posterHeight)
+                                    .clip(TvShapeTokens.card)
+                                    .background(skeletonColor),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(112.dp)
+                                    .height(14.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(skeletonColor.copy(alpha = pulse * 0.8f)),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1048,6 +1182,7 @@ private fun TvCatalogRow(
                         media = media,
                         onClick = { onMedia(media) },
                         onFocused = { onFocused(media) },
+                        showRating = section.providerId == CINEMETA_PROVIDER_ID,
                         modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
                         showLabel = true,
                         revealLabelOnFocus = true,
@@ -1063,6 +1198,16 @@ private fun TvCatalogRow(
                     }
                 }
             }
+        } else if (section.errorMessage != null) {
+            // Keep at least one focusable element in the row so D-pad focus
+            // traversal can pass through error-only sections instead of dying
+            // when the next row is not composed yet.
+            TvAction(
+                label = stringResource(R.string.retry),
+                icon = Icons.Outlined.Refresh,
+                onClick = onRetry,
+                modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+            )
         }
     }
 }
@@ -1121,6 +1266,7 @@ private fun TvMediaGrid(
                         media = item,
                         onClick = { onMedia(item) },
                         onFocused = { onFocused(item) },
+                        showRating = section?.providerId == CINEMETA_PROVIDER_ID,
                         modifier = (if (index == 0) Modifier.focusRequester(initialFocusRequester) else Modifier)
                             .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
                         showLabel = true,

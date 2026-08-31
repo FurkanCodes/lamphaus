@@ -1,6 +1,48 @@
 package com.lamphaus.app.ui
 
 import com.lamphaus.core.model.MediaPreview
+internal const val HOME_CATALOG_BATCH_SIZE = 50
+internal const val HOME_CATALOG_MAX_CONCURRENCY = 4
+internal const val HOME_CATALOG_PREFETCH_DISTANCE = 5
+
+internal data class HomeCatalogBatchBounds(
+    val fromIndex: Int,
+    val toIndexExclusive: Int,
+)
+
+internal fun nextHomeCatalogBatch(totalCount: Int, loadedCount: Int): HomeCatalogBatchBounds? {
+    val safeTotalCount = totalCount.coerceAtLeast(0)
+    val safeLoadedCount = loadedCount.coerceIn(0, safeTotalCount)
+    if (safeLoadedCount >= safeTotalCount) return null
+    return HomeCatalogBatchBounds(
+        fromIndex = safeLoadedCount,
+        toIndexExclusive = minOf(safeTotalCount, safeLoadedCount + HOME_CATALOG_BATCH_SIZE),
+    )
+}
+
+internal fun shouldPrefetchHomeCatalogBatch(
+    lastVisibleIndex: Int,
+    totalListItems: Int,
+    hasMore: Boolean,
+    loading: Boolean,
+    failed: Boolean,
+): Boolean {
+    if (!hasMore || loading || failed || totalListItems <= 0) return false
+    return lastVisibleIndex >= totalListItems - 1 - HOME_CATALOG_PREFETCH_DISTANCE
+}
+
+internal fun appendHomeCatalogBatch(
+    existing: List<CatalogSection>,
+    incoming: List<CatalogSection>,
+): List<CatalogSection> {
+    val seenIds = existing.mapTo(mutableSetOf(), CatalogSection::id)
+    return existing + incoming.filter { seenIds.add(it.id) }
+}
+internal fun CatalogSection.isRenderableHomeCatalogSection(): Boolean =
+    items.isNotEmpty() || hasMore || errorMessage != null || loadMoreError != null
+
+
+
 internal data class CatalogProviderFingerprint(
     val id: String,
     val manifestUrl: String,
