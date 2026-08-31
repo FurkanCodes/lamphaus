@@ -55,5 +55,9 @@ data class WatchProgressEntity(
     val durationMillis: Long,
     val completed: Boolean,
     val updatedAtEpochMillis: Long,
+    /** Serialized [com.lamphaus.core.model.MediaPreview] snapshot; null for legacy rows. */
+    val previewJson: String? = null,
+    /** Episode label for series entries ("S1 · E4 · Pilot"); null for movies. */
+    val episodeLabel: String? = null,
 )
 

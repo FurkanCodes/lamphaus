@@ -156,9 +156,13 @@ class RoomLibraryRepository(
 
     private fun WatchProgressEntity.toModel() = WatchProgress(
         profileId, mediaKey, videoId, positionMillis, durationMillis, completed, updatedAtEpochMillis,
+        preview = previewJson?.let { serialized -> runCatching { json.decodeFromString<MediaPreview>(serialized) }.getOrNull() },
+        episodeLabel = episodeLabel,
     )
 
     private fun WatchProgress.toEntity() = WatchProgressEntity(
         profileId, mediaKey, videoId, positionMillis, durationMillis, completed, updatedAtEpochMillis,
+        previewJson = preview?.let { json.encodeToString(it) },
+        episodeLabel = episodeLabel,
     )
 }

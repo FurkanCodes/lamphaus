@@ -20,6 +20,8 @@ data class PlaybackRequest(
     val source: PlaybackSource,
     val startPositionMillis: Long = 0,
     val nextEpisode: Episode? = null,
+    /** Catalog item snapshot, persisted with watch progress for Continue Watching. */
+    val preview: MediaPreview? = null,
 )
 
 @Serializable

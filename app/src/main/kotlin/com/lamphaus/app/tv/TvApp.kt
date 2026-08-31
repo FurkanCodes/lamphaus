@@ -159,6 +159,7 @@ import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.core.model.WatchProgress
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collectLatest
@@ -670,7 +671,11 @@ private fun TvHome(
             .filter { it.isResumable() }
             .sortedByDescending { it.updatedAtEpochMillis }
             .mapNotNull { progress ->
-                mediaByKey[progress.mediaKey]?.let { media -> media to progress.fraction }
+                // Catalog rows only cover titles a loaded section lists; the
+                // persisted preview snapshot hydrates everything else.
+                val media = mediaByKey[progress.mediaKey] ?: progress.preview
+                    ?: return@mapNotNull null
+                media to progress
             }
             .toList()
     }
@@ -911,7 +916,7 @@ private fun TvCatalogItemsLoadingSkeleton(
 
 @Composable
 private fun TvContinueWatchingRow(
-    items: List<Pair<MediaPreview, Float>>,
+    items: List<Pair<MediaPreview, WatchProgress>>,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
@@ -935,17 +940,12 @@ private fun TvContinueWatchingRow(
             ),
         ) {
             items(items, key = { it.first.stableKey }) { (media, progress) ->
-                TvMediaCard(
+                TvContinueWatchingCard(
                     media = media,
+                    progress = progress,
                     onClick = { onMedia(media) },
                     onFocused = { onFocused(media) },
                     modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
-                    showLabel = true,
-                    revealLabelOnFocus = true,
-                    // Continue-watching entries read as horizontal resume cards,
-                    // visually distinct from the poster-shaped catalog cards.
-                    compactLandscape = true,
-                    watchProgress = progress,
                 )
             }
         }

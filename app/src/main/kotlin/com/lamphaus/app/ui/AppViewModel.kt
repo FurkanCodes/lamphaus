@@ -152,11 +152,22 @@ class AppViewModel(
                     val previousUserId = (current.account as? AccountState.SignedIn)?.userId
                     val nextUserId = (snapshot.account as? AccountState.SignedIn)?.userId
                     val accountChanged = nextUserId != null && nextUserId != previousUserId
-                    leftAnAccount = nextUserId == null && previousUserId != null
+                    // Loading is the auth flow re-resolving (every task relaunch
+                    // replays Initializing → SignedIn while a live collector
+                    // still holds SignedIn); only an explicit SignedOut means
+                    // the user actually left. Treating Loading as a departure
+                    // wiped freshly-saved local progress on every relaunch.
+                    leftAnAccount = snapshot.account is AccountState.SignedOut && previousUserId != null
                     current.copy(
                         account = snapshot.account,
                         profiles = snapshot.profiles,
                         providers = snapshot.providers,
+                        // Without this the UI state's activeProfileId stayed
+                        // null forever, so the Room progress/library observers
+                        // and per-profile cloud channels never subscribed:
+                        // Continue Watching, Library, resume and re-hydration
+                        // were all dead while the data sat in Room.
+                        activeProfileId = activeId,
                         sections = if (accountChanged || nextUserId == null) emptyList() else current.sections,
                         homeCatalogBatch = if (accountChanged || nextUserId == null) {
                             HomeCatalogBatchState()
@@ -1126,6 +1137,14 @@ class AppViewModel(
                     val videoId = picker.episode?.id ?: picker.media.id
                     val tracks = loadSubtitles(picker.media, videoId, source)
                     val start = state.value.progress.firstOrNull { it.videoId == videoId }?.positionMillis ?: 0
+                    val episode = picker.episode
+                    val episodeLabel = episode?.let { ep ->
+                        listOfNotNull(
+                            ep.season?.let { season -> "S$season" },
+                            ep.episode?.let { number -> "E$number" },
+                            ep.title.takeIf { it.isNotBlank() },
+                        ).joinToString(" · ")
+                    }
                     mutableState.update { current ->
                         if (current.sourcePicker?.media?.stableKey != picker.media.stableKey) current
                         else current.copy(
@@ -1133,8 +1152,9 @@ class AppViewModel(
                                 mediaKey = picker.media.stableKey,
                                 videoId = videoId,
                                 title = picker.media.name,
-                                subtitle = picker.episode?.title,
+                                subtitle = episodeLabel,
                                 artworkUrl = picker.media.backgroundUrl ?: picker.media.posterUrl,
+                                preview = picker.media,
                                 source = PlaybackSource(
                                     uri = resolution.url,
                                     mimeType = source.mimeType ?: resolution.url.inferMimeType(),

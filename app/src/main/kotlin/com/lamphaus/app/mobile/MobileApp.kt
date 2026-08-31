@@ -115,6 +115,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -161,6 +162,7 @@ import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.ProfileKind
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
@@ -535,7 +537,11 @@ private fun MobileHomeScreen(
             .filter { it.isResumable() }
             .sortedByDescending { it.updatedAtEpochMillis }
             .mapNotNull { progress ->
-                mediaByKey[progress.mediaKey]?.let { media -> media to progress.fraction }
+                // Catalog rows only cover titles a loaded section lists; the
+                // persisted preview snapshot hydrates everything else.
+                val media = mediaByKey[progress.mediaKey] ?: progress.preview
+                    ?: return@mapNotNull null
+                media to progress
             }
             .toList()
     }
@@ -788,7 +794,7 @@ private fun MobileHeroCarousel(
 
 @Composable
 private fun MobileContinueWatchingRow(
-    items: List<Pair<MediaPreview, Float>>,
+    items: List<Pair<MediaPreview, WatchProgress>>,
     onMedia: (MediaPreview) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -813,17 +819,27 @@ private fun MobileContinueWatchingRow(
 @Composable
 private fun MobileContinueWatchingCard(
     media: MediaPreview,
-    progress: Float,
+    progress: WatchProgress,
     onMedia: (MediaPreview) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val percent = (progress.coerceIn(0f, 1f) * 100).roundToInt()
-    val description = stringResource(R.string.media_card_description_progress, media.name, percent)
+    val title = progress.episodeLabel ?: media.name
+    val percent = (progress.fraction * 100).roundToInt()
+    val description = stringResource(R.string.media_card_description_progress, title, percent)
+    val remainingMillis = (progress.durationMillis - progress.positionMillis).coerceAtLeast(0)
+    val hours = remainingMillis / 3_600_000
+    val minutes = (remainingMillis % 3_600_000) / 60_000
+    val timeLeft = when {
+        hours > 0 -> "$hours h $minutes min"
+        minutes > 0 -> "$minutes min"
+        else -> null
+    }
     Box(
         modifier
-            .width(240.dp)
+            .width(220.dp)
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(role = Role.Button) { onMedia(media) }
             .semantics { contentDescription = description },
     ) {
@@ -833,22 +849,46 @@ private fun MobileContinueWatchingCard(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)),
+                        0f to Color.Transparent,
+                        0.45f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.78f),
                     ),
                 ),
         )
-        // Resume beam along the bottom edge, mirroring the TV progress bar.
+        timeLeft?.let { left ->
+            Text(
+                text = stringResource(R.string.continue_watching_time_left, left),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.62f))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+            )
+        }
+        Text(
+            text = title,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 8.dp, end = 8.dp, bottom = 15.dp),
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
         Box(
             Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .height(4.dp)
-                .background(Color.Black.copy(alpha = 0.44f)),
+                .height(7.dp)
+                .background(Color.Black.copy(alpha = 0.55f)),
         ) {
             Box(
                 Modifier
-                    .fillMaxWidth(progress.coerceIn(0f, 1f))
-                    .height(4.dp)
+                    .fillMaxWidth(progress.fraction)
+                    .height(7.dp)
                     .background(MaterialTheme.colorScheme.primary),
             )
         }

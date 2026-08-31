@@ -18,11 +18,12 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil3.SingletonImageLoader
 import com.google.common.util.concurrent.ListenableFuture
+import android.util.Log
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.R
@@ -33,15 +34,24 @@ import com.lamphaus.core.player.LamphausPlaybackService
 import com.lamphaus.core.player.PlaybackHeaderRegistry
 import com.lamphaus.core.player.toMediaItem
 import java.net.URI
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class PlayerActivity : ComponentActivity() {
+    private val container by lazy { (application as LamphausApplication).container }
     private val controllerState = mutableStateOf<MediaController?>(null)
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var request: PlaybackRequest? = null
+    private var progressPulseJob: Job? = null
+
+    /** Position of the last progress write; guards against redundant periodic saves. */
+    @Volatile
+    private var lastSavedPositionMillis = -1L
     private val controller: MediaController? get() = controllerState.value
     private val isTelevision by lazy { packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
 
@@ -91,8 +101,14 @@ class PlayerActivity : ComponentActivity() {
                 runCatching { future.get() }.onSuccess { mediaController ->
                     controllerState.value = mediaController
                     mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
+                    mediaController.addListener(object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_ENDED) saveProgress(final = true)
+                        }
+                    })
                     mediaController.prepare()
                     mediaController.play()
+                    startProgressPulse()
                 }
             },
             ContextCompat.getMainExecutor(this),
@@ -135,12 +151,14 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        saveProgress()
+        saveProgress(final = true)
         if ((isTelevision || isFinishing) && !isChangingConfigurations) controller?.pause()
         super.onStop()
     }
 
     override fun onDestroy() {
+        progressPulseJob?.cancel()
+        progressPulseJob = null
         val playback = request
         if (playback != null) {
             PlaybackHeaderRegistry.end(playback.source.uri, playback.source.subtitles.map { it.url })
@@ -151,15 +169,53 @@ class PlayerActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun saveProgress() {
-        val playback = request ?: return
-        val current = controller ?: return
+    /**
+     * Periodically persists playback position while the player is alive. Reads
+     * happen on the main thread (a Media3 requirement); writes are handed to
+     * the application scope so they survive activity teardown. Paused playback
+     * is naturally throttled by the [PROGRESS_SAVE_DELTA_MILLIS] check.
+     */
+    private fun startProgressPulse() {
+        if (progressPulseJob?.isActive == true) return
+        progressPulseJob = container.applicationScope.launch(Dispatchers.Main.immediate) {
+            while (true) {
+                delay(PROGRESS_SAVE_INTERVAL_MILLIS)
+                saveProgress(final = false)
+            }
+        }
+    }
+
+    /**
+     * Persists the current playback position to Room and, for final saves,
+     * to the cloud sync gateway. Runs on the application scope — NOT the
+     * activity lifecycleScope — because when the player is dismissed,
+     * onDestroy cancels lifecycleScope before a launched write can finish,
+     * silently dropping the save.
+     */
+    private fun saveProgress(final: Boolean) {
+        val playback = request ?: run {
+            Log.d(PROGRESS_LOG_TAG, "save skipped: no playback request")
+            return
+        }
+        val current = controller ?: run {
+            Log.d(PROGRESS_LOG_TAG, "save skipped: controller unavailable")
+            return
+        }
         val position = current.currentPosition.coerceAtLeast(0)
         val duration = current.duration.coerceAtLeast(0)
-        if (duration <= 0) return
-        lifecycleScope.launch {
-            val container = (application as LamphausApplication).container
-            val profileId = container.preferences.settings.first().activeProfileId ?: return@launch
+        if (duration <= 0) {
+            Log.d(PROGRESS_LOG_TAG, "save skipped: duration unknown ($duration)")
+            return
+        }
+        // Periodic saves only fire when playback actually advanced, so a paused
+        // or just-started player never produces redundant writes.
+        if (!final && position - lastSavedPositionMillis < PROGRESS_SAVE_DELTA_MILLIS) return
+        lastSavedPositionMillis = position
+        container.applicationScope.launch {
+            val profileId = container.preferences.settings.first().activeProfileId ?: run {
+                Log.d(PROGRESS_LOG_TAG, "save skipped: no active profile")
+                return@launch
+            }
             val progress = WatchProgress(
                 profileId = profileId,
                 mediaKey = playback.mediaKey,
@@ -168,16 +224,33 @@ class PlayerActivity : ComponentActivity() {
                 durationMillis = duration,
                 completed = position.toDouble() / duration >= 0.95,
                 updatedAtEpochMillis = System.currentTimeMillis(),
+                preview = playback.preview,
+                episodeLabel = playback.subtitle?.takeIf { it.isNotBlank() },
             )
             container.libraryRepository.saveProgress(progress)
-            (container.accountGateway.state.value as? AccountState.SignedIn)?.userId?.let {
-                container.cloudSyncGateway.saveProgress(it, progress)
-            }
+            Log.d(
+                PROGRESS_LOG_TAG,
+                "saved locally media=${progress.mediaKey} position=${progress.positionMillis}ms " +
+                    "duration=${progress.durationMillis}ms completed=${progress.completed}",
+            )
+            if (!final) return@launch
+            (container.accountGateway.state.value as? AccountState.SignedIn)?.let { signedIn ->
+                container.cloudSyncGateway.saveProgress(signedIn.userId, progress)
+                    .onSuccess { Log.d(PROGRESS_LOG_TAG, "synced to cloud user=${signedIn.userId}") }
+                    .onFailure { error -> Log.w(PROGRESS_LOG_TAG, "cloud sync failed", error) }
+            } ?: Log.d(PROGRESS_LOG_TAG, "cloud sync skipped: not signed in")
         }
     }
 
     companion object {
+        private const val PROGRESS_LOG_TAG = "Lamphaus.Progress"
         private const val EXTRA_REQUEST = "playback_request"
+
+        /** How often playback position is persisted while the player is open. */
+        private const val PROGRESS_SAVE_INTERVAL_MILLIS = 10_000L
+
+        /** Minimum playback advance between periodic progress writes. */
+        private const val PROGRESS_SAVE_DELTA_MILLIS = 5_000L
         private val JSON = Json { ignoreUnknownKeys = true }
 
         fun intent(context: Context, request: PlaybackRequest): Intent =

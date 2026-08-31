@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -58,6 +59,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -91,6 +93,7 @@ import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.Profile
+import com.lamphaus.core.model.WatchProgress
 
 internal enum class TvDestination(
     @StringRes val labelRes: Int,
@@ -551,6 +554,131 @@ internal fun TvMediaCard(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 color = MaterialTheme.colorScheme.onBackground,
             )
+        }
+    }
+}
+@Composable
+internal fun TvContinueWatchingCard(
+    media: MediaPreview,
+    progress: WatchProgress,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+) {
+    var focused by remember { mutableStateOf(false) }
+    val reducedMotion = rememberReducedMotion()
+    val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
+    val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
+    val title = progress.episodeLabel ?: media.name
+    val percent = (progress.fraction * 100).toInt()
+    val cardDescription = stringResource(R.string.media_card_description_progress, title, percent)
+    val remainingMillis = (progress.durationMillis - progress.positionMillis).coerceAtLeast(0)
+    val hours = remainingMillis / 3_600_000
+    val minutes = (remainingMillis % 3_600_000) / 60_000
+    val timeLeft = when {
+        hours > 0 -> "$hours h $minutes min"
+        minutes > 0 -> "$minutes min"
+        else -> null
+    }
+    val focusProgress by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(TvMotionTokens.focusDurationMillis),
+        label = "continue watching focus",
+    )
+    Box(
+        modifier = modifier
+            .width(TvLayoutTokens.landscapeCardWidth)
+            .height(TvLayoutTokens.landscapeCardHeight)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clickable(role = Role.Button, onClick = onClick)
+            .focusable()
+            .semantics { contentDescription = cardDescription },
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val scale = 1f + ((TvMotionTokens.focusedArtworkScale - 1f) * focusProgress)
+                    scaleX = scale
+                    scaleY = scale
+                    shadowElevation = 7.dp.toPx() * focusProgress
+                    shape = TvShapeTokens.card
+                    ambientShadowColor = ambientHalo
+                    spotShadowColor = ambientHalo
+                }
+                .border(
+                    width = TvFocusTokens.outlineWidth,
+                    color = if (focused) ambientAccent else TvSurfaceTokens.subtleBorder,
+                    shape = TvShapeTokens.card,
+                )
+                .padding(if (focused) TvFocusTokens.outlineWidth else 0.5.dp)
+                .clip(TvShapeTokens.card),
+        ) {
+            MediaArtwork(
+                media = media,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                preferBackdrop = true,
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.45f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.78f),
+                        ),
+                    ),
+            )
+            timeLeft?.let { left ->
+                Text(
+                    text = stringResource(R.string.continue_watching_time_left, left),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(7.dp)
+                        .clip(TvShapeTokens.card)
+                        .background(Color.Black.copy(alpha = 0.62f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                )
+            }
+            Text(
+                text = title,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 10.dp, end = 10.dp, bottom = 18.dp),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(7.dp)
+                    .background(Color.Black.copy(alpha = 0.55f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress.fraction)
+                        .height(7.dp)
+                        .background(TvFocusTokens.beam),
+                ) {
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(3.dp)
+                            .height(7.dp)
+                            .background(Color.White),
+                    )
+                }
+            }
         }
     }
 }
