@@ -1,71 +1,66 @@
 package com.lamphaus.app.mobile
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import com.lamphaus.core.data.preferences.ThemePreference
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.lamphaus.app.R
 
-private val LamphausLight = lightColorScheme(
-    primary = Color(0xFF40588D),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFDCE2FF),
-    onPrimaryContainer = Color(0xFF122653),
-    secondary = Color(0xFF006878),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFA8EDFA),
-    onSecondaryContainer = Color(0xFF00363F),
-    background = Color.White,
-    onBackground = Color(0xFF191B22),
-    surface = Color(0xFFF6F7FA),
-    onSurface = Color(0xFF191B22),
-    surfaceVariant = Color(0xFFE2E3EA),
-    onSurfaceVariant = Color(0xFF454852),
-    outline = Color(0xFF757781),
+private val Inter = FontFamily(
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium, FontWeight.Medium),
+    Font(R.font.inter_semibold, FontWeight.SemiBold),
+    Font(R.font.inter_bold, FontWeight.Bold),
 )
 
-private val LamphausDark = darkColorScheme(
-    primary = Color(0xFFAFC2FF),
-    onPrimary = Color(0xFF10234F),
-    primaryContainer = Color(0xFF293F72),
-    onPrimaryContainer = Color(0xFFDCE2FF),
-    secondary = Color(0xFF68D4E8),
-    onSecondary = Color(0xFF00363F),
-    secondaryContainer = Color(0xFF004F5C),
-    onSecondaryContainer = Color(0xFFA8EDFA),
-    background = Color(0xFF090A0D),
-    onBackground = Color(0xFFF2F3FA),
-    surface = Color(0xFF15171E),
-    onSurface = Color(0xFFF2F3FA),
-    surfaceVariant = Color(0xFF30323A),
-    onSurfaceVariant = Color(0xFFC6C8D2),
-    outline = Color(0xFF90929D),
+private val MobileDark = darkColorScheme(
+    background = MobileTokens.ink,
+    onBackground = MobileTokens.textPrimary,
+    surface = MobileTokens.ink,
+    onSurface = MobileTokens.textPrimary,
+    surfaceContainer = MobileTokens.surface,
+    surfaceContainerHigh = MobileTokens.surfaceRaised,
+    surfaceVariant = MobileTokens.surfaceRaised,
+    primary = MobileTokens.accent,
+    onPrimary = Color.Black,
+    onSurfaceVariant = MobileTokens.textMuted,
+    outlineVariant = MobileTokens.hairline,
 )
 
-@Composable
-fun LamphausMobileTheme(
-    preference: ThemePreference,
-    dynamicColor: Boolean,
-    content: @Composable () -> Unit,
-) {
-    val dark = when (preference) {
-        ThemePreference.SYSTEM -> isSystemInDarkTheme()
-        ThemePreference.LIGHT -> false
-        ThemePreference.DARK -> true
-    }
-    val context = LocalContext.current
-    val colors = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dark -> dynamicDarkColorScheme(context)
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
-        dark -> LamphausDark
-        else -> LamphausLight
-    }
-    MaterialTheme(colorScheme = colors, content = content)
+private fun mobileTypography(): Typography {
+    val base = Typography()
+    fun withInter(style: TextStyle) = style.copy(fontFamily = Inter)
+    return Typography(
+        // Named ramp slots per design spec; the rest of the ramp keeps M3 metrics on Inter.
+        displayLarge = base.displayLarge.copy(fontFamily = Inter, fontWeight = FontWeight.Bold, fontSize = 30.sp),
+        titleLarge = base.titleLarge.copy(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 20.sp),
+        titleMedium = base.titleMedium.copy(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 17.sp),
+        bodyMedium = base.bodyMedium.copy(fontFamily = Inter, fontWeight = FontWeight.Normal, fontSize = 14.sp),
+        labelMedium = base.labelMedium.copy(fontFamily = Inter, fontWeight = FontWeight.Medium, fontSize = 12.sp),
+        displayMedium = withInter(base.displayMedium),
+        displaySmall = withInter(base.displaySmall),
+        headlineLarge = withInter(base.headlineLarge),
+        headlineMedium = withInter(base.headlineMedium),
+        headlineSmall = withInter(base.headlineSmall),
+        titleSmall = withInter(base.titleSmall),
+        bodyLarge = withInter(base.bodyLarge),
+        bodySmall = withInter(base.bodySmall),
+        labelLarge = withInter(base.labelLarge),
+        labelSmall = withInter(base.labelSmall),
+    )
 }
 
+@Composable
+fun LamphausMobileTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = MobileDark,
+        typography = mobileTypography(),
+        content = content,
+    )
+}

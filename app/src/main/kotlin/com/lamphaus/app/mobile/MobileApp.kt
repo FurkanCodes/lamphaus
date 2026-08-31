@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import android.text.format.DateUtils
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
@@ -19,6 +20,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,8 +29,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -50,6 +54,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
@@ -61,21 +66,22 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
@@ -86,6 +92,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
@@ -105,6 +113,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -118,6 +127,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -130,11 +140,9 @@ import com.lamphaus.app.ui.ArtworkEditorState
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.ScaffoldDefaults
 import kotlin.math.roundToInt
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.LocalArtworkResolver
@@ -149,7 +157,6 @@ import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.data.cloud.AccountState
-import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
 import com.lamphaus.core.model.ArtworkProviderId
@@ -190,7 +197,7 @@ fun MobileApp(
     onExternalPlay: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    LamphausMobileTheme(state.theme, state.dynamicColor) {
+    LamphausMobileTheme {
         val artworkResolver = remember(state.artworkOverrides) {
             ArtworkResolver(state.artworkOverrides.associateBy { it.mediaKey })
         }
@@ -402,36 +409,14 @@ private fun MobileSignedInApp(
         }
         else -> {
             val compact = widthSizeClass == WindowWidthSizeClass.Compact
-            // Home is content-first: no top app bar, the hero carousel draws
-            // edge-to-edge behind the status bar (settings stay reachable via
-            // an overlay on the hero). Other destinations keep the app bar.
-            val immersiveHome = destination == MobileDestination.HOME
             val content: @Composable () -> Unit = {
-                Scaffold(
-                    topBar = {
-                        if (!immersiveHome) {
-                            TopAppBar(
-                                title = { Text(stringResource(destination.labelRes)) },
-                                actions = {
-                                    IconButton(onClick = { settingsOpen = true }) {
-                                        Icon(Icons.Outlined.Settings, contentDescription = stringResource(R.string.settings_and_profiles))
-                                    }
-                                },
-                            )
-                        }
-                    },
-                    contentWindowInsets = if (immersiveHome) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
-                ) { padding ->
-                    Box(
-                        Modifier.fillMaxSize().padding(
-                            if (immersiveHome) {
-                                PaddingValues(bottom = padding.calculateBottomPadding())
-                            } else {
-                                padding
-                            },
-                        ),
-                    ) {
-                        when (destination) {
+                Box(Modifier.fillMaxSize()) {
+                    Crossfade(
+                        targetState = destination,
+                        animationSpec = tween(180),
+                        label = "tab",
+                    ) { tab ->
+                        when (tab) {
                             MobileDestination.HOME -> MobileHomeScreen(
                                 state = state,
                                 onMedia = openMedia,
@@ -445,15 +430,17 @@ private fun MobileSignedInApp(
                                 onFocusRestored = { pendingMediaKey = null },
                             )
 
-                            MobileDestination.DISCOVER -> MediaGrid(
-                                media = state.allMedia,
+                            MobileDestination.DISCOVER -> DiscoverScreen(
+                                state = state,
                                 onMedia = openMedia,
+                                onSettings = { settingsOpen = true },
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
                             MobileDestination.LIBRARY -> LibraryScreen(
                                 state = state,
                                 onMedia = openMedia,
+                                onSettings = { settingsOpen = true },
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
@@ -468,28 +455,18 @@ private fun MobileSignedInApp(
                                 onCatalogLoadMore = viewModel::loadMoreCatalog,
                                 onCatalogRetry = viewModel::retryCatalogPage,
                                 onMedia = openMedia,
+                                onSettings = { settingsOpen = true },
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
                         }
-                        if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+                        }
+                        if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter).statusBarsPadding())
                     }
-                }
             }
             if (compact) {
                 Scaffold(
-                    bottomBar = {
-                        NavigationBar {
-                            MobileDestination.entries.forEach { item ->
-                                NavigationBarItem(
-                                    selected = destination == item,
-                                    onClick = { destination = item },
-                                    icon = { Icon(if (destination == item) item.selectedIcon else item.icon, null) },
-                            label = { Text(stringResource(item.labelRes)) },
-                                )
-                            }
-                        }
-                    },
+                    bottomBar = { MobileNavBar(destination) { destination = it } },
                 ) { outer -> Box(Modifier.padding(outer)) { content() } }
             } else {
                 Row(Modifier.fillMaxSize()) {
@@ -507,6 +484,126 @@ private fun MobileSignedInApp(
                     Box(Modifier.weight(1f)) { content() }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MobileNavBar(
+    destination: MobileDestination,
+    onSelect: (MobileDestination) -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 12.dp)
+            .background(MobileTokens.surface.copy(alpha = 0.92f), RoundedCornerShape(28.dp))
+            .height(64.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        MobileDestination.entries.forEach { item ->
+            val isSelected = destination == item
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(28.dp))
+                    .clickable(role = Role.Tab) { onSelect(item) }
+                    .semantics { if (isSelected) selected = true },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    if (isSelected) item.selectedIcon else item.icon,
+                    contentDescription = stringResource(item.labelRes),
+                    tint = if (isSelected) MobileTokens.accent else MobileTokens.textMuted,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    stringResource(item.labelRes),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isSelected) MobileTokens.accent else MobileTokens.textMuted,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileScreenHeader(
+    title: String,
+    showSettings: Boolean,
+    onSettings: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(top = 24.dp)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.displayLarge.copy(fontSize = 34.sp),
+            modifier = Modifier.weight(1f),
+        )
+        if (showSettings) {
+            IconButton(onClick = onSettings) {
+                Icon(
+                    Icons.Outlined.Settings,
+                    contentDescription = stringResource(R.string.settings_and_profiles),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun MobileFilterChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = label,
+        modifier = modifier,
+        enabled = enabled,
+        shape = RoundedCornerShape(20.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = MobileTokens.surfaceRaised,
+            labelColor = MobileTokens.textMuted,
+            selectedContainerColor = MobileTokens.accent.copy(alpha = 0.18f),
+            selectedLabelColor = MobileTokens.accent,
+        ),
+    )
+}
+
+@Composable
+private fun DiscoverScreen(
+    state: AppUiState,
+    onMedia: (MediaPreview) -> Unit,
+    onSettings: () -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        MobileScreenHeader(stringResource(R.string.discover), showSettings = true, onSettings = onSettings)
+        Box(Modifier.weight(1f)) {
+            MediaGrid(
+                media = state.allMedia,
+                onMedia = onMedia,
+                restoreMediaKey = restoreMediaKey,
+                onFocusRestored = onFocusRestored,
+            )
         }
     }
 }
@@ -574,7 +671,7 @@ private fun MobileHomeScreen(
     LazyColumn(
         state = listState,
         contentPadding = PaddingValues(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(28.dp),
+        verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
     ) {
         if (heroItems.isNotEmpty()) {
             item(key = "feature") {
@@ -643,7 +740,7 @@ private fun MobileHomeCatalogLoadingSkeleton() {
         modifier = Modifier
             .fillMaxWidth()
             .semantics { contentDescription = loadingDescription },
-        verticalArrangement = Arrangement.spacedBy(28.dp),
+        verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
     ) {
         Text(
             text = stringResource(R.string.loading_more_rows),
@@ -693,7 +790,7 @@ private fun MobileCatalogItemsLoadingSkeleton(
                 modifier = Modifier
                     .width(138.dp)
                     .aspectRatio(2f / 3f)
-                    .clip(RoundedCornerShape(4.dp))
+                    .clip(RoundedCornerShape(MobileTokens.radiusCard))
                     .background(skeletonColor),
             )
         }
@@ -725,6 +822,14 @@ private fun MobileHeroCarousel(
                 MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
                 // Top scrim keeps status-bar icons legible on any artwork; the
                 // bottom scrim carries the title block like the TV hero.
+                // Ink wash behind the title block so text reads on any artwork.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(0f to Color.Transparent, 1f to MobileTokens.ink),
+                        ),
+                )
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -838,7 +943,7 @@ private fun MobileContinueWatchingCard(
         modifier
             .width(220.dp)
             .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(MobileTokens.radiusResume))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(role = Role.Button) { onMedia(media) }
             .semantics { contentDescription = description },
@@ -996,7 +1101,7 @@ private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, mod
         modifier
             .width(if (landscape) 220.dp else 138.dp)
             .aspectRatio(if (landscape) 16f / 9f else 2f / 3f)
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(MobileTokens.radiusCard))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(role = Role.Button) { onMedia(media) }
             .semantics { contentDescription = cardDescription },
@@ -1019,6 +1124,7 @@ private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, mod
         }
     }
 }
+
 @Composable
 private fun MobileMetadataLine(
     presentation: com.lamphaus.app.ui.MediaMetadataPresentation,
@@ -1051,6 +1157,7 @@ private fun MediaGrid(
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    modifier: Modifier = Modifier,
     section: CatalogSection? = null,
     onLoadMore: (String) -> Unit = {},
     onRetry: (String) -> Unit = {},
@@ -1060,10 +1167,11 @@ private fun MediaGrid(
         return
     }
     LazyVerticalGrid(
+        modifier = modifier,
         columns = GridCells.Adaptive(150.dp),
-        contentPadding = PaddingValues(20.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(MobileTokens.spacingScreen),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(media, key = MediaPreview::stableKey) { item ->
             PosterCard(
@@ -1093,17 +1201,30 @@ private fun MediaGrid(
 private fun LibraryScreen(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
+    onSettings: () -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
     val media = state.library.map { it.preview }
-    if (media.isEmpty()) {
-        Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center) {
-            Text(stringResource(R.string.library_empty_title), style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.library_empty_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.fillMaxSize()) {
+        MobileScreenHeader(stringResource(R.string.library), showSettings = true, onSettings = onSettings)
+        if (media.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(stringResource(R.string.library_empty_title), style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text(stringResource(R.string.library_empty_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            Box(Modifier.weight(1f)) {
+                MediaGrid(media, onMedia, restoreMediaKey, onFocusRestored)
+            }
         }
-    } else MediaGrid(media, onMedia, restoreMediaKey, onFocusRestored)
+    }
 }
 
 @Composable
@@ -1120,34 +1241,46 @@ private fun SearchScreen(
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(query) { onSearch(query) }
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
+    Column(Modifier.fillMaxSize().imePadding()) {
+        MobileScreenHeader(stringResource(R.string.search), showSettings = true, onSettings = onSettings)
+        TextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text(stringResource(R.string.search_movies_series)) },
-            leadingIcon = { Icon(Icons.Outlined.Search, null) },
+            placeholder = { Text(stringResource(R.string.search_movies_series), color = MobileTokens.textMuted) },
+            leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MobileTokens.textMuted) },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            shape = RoundedCornerShape(MobileTokens.radiusField),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MobileTokens.surfaceRaised,
+                unfocusedContainerColor = MobileTokens.surfaceRaised,
+                focusedTextColor = MobileTokens.textPrimary,
+                unfocusedTextColor = MobileTokens.textPrimary,
+                cursorColor = MobileTokens.accent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = MobileTokens.spacingScreen),
         )
         if (state.searching || state.browse.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (query.isBlank()) {
             val browse = state.browse
             val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
-            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(browse.targets.map { it.catalog.type }.distinct(), key = { it }) { type ->
-                    FilterChip(
+                    MobileFilterChip(
                         selected = browse.selectedType == type,
                         onClick = { onBrowseType(type) },
                         label = { Text(type.replaceFirstChar(Char::uppercase)) },
                     )
                 }
             }
-            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyRow(contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(browse.targets.filter { it.catalog.type == browse.selectedType }, key = { it.id }) { target ->
-                    FilterChip(
+                    MobileFilterChip(
                         selected = browse.selectedCatalogId == target.id,
                         onClick = { onBrowseCatalog(target.id) },
                         label = { Text(target.catalog.name) },
@@ -1156,16 +1289,16 @@ private fun SearchScreen(
                 }
             }
             selectedTarget?.genres?.takeIf(List<String>::isNotEmpty)?.let { genres ->
-                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item {
-                        FilterChip(
+                        MobileFilterChip(
                             selected = browse.selectedGenre == null,
                             onClick = { onBrowseGenre(null) },
                             label = { Text(stringResource(R.string.all_genres)) },
                         )
                     }
                     items(genres, key = { it }) { genre ->
-                        FilterChip(
+                        MobileFilterChip(
                             selected = browse.selectedGenre == genre,
                             onClick = { onBrowseGenre(genre) },
                             label = { Text(genre) },
@@ -1245,78 +1378,80 @@ private fun MobileDetailScreen(
         artworkResolver.resolve(detail.preview).media
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(detail.preview.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back))
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        val info: @Composable () -> Unit = {
-            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (!resolvedPreview.logoUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = resolvedPreview.logoUrl,
-                        contentDescription = resolvedPreview.name,
-                        modifier = Modifier.fillMaxWidth().height(64.dp),
-                        contentScale = ContentScale.Fit,
-                        alignment = Alignment.CenterStart,
-                    )
-                }
-                Text(detail.preview.name, style = MaterialTheme.typography.headlineLarge)
-                MobileMetadataLine(
-                    presentation = detail.metadataPresentation(),
-                    includeGenres = true,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    val seasons = remember(detail) { detail.episodes.mapNotNull { it.season }.distinct().sorted() }
+    var selectedSeason by rememberSaveable(detail.preview.stableKey) { mutableStateOf(seasons.firstOrNull()) }
+    val info: @Composable () -> Unit = {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (!resolvedPreview.logoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = resolvedPreview.logoUrl,
+                    contentDescription = resolvedPreview.name,
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.CenterStart,
                 )
-                detail.preview.description
-                    ?.takeIf(String::isNotBlank)
-                    ?.let { overview ->
-                        Text(
-                            text = overview,
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(onClick = { onPlay(null) }) {
-                        Icon(Icons.Outlined.PlayArrow, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.play))
-                    }
-                    OutlinedButton(onClick = onLibrary, enabled = !inLibrary) {
-                        Text(stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library))
-                    }
-                    OutlinedButton(onClick = onEditArtwork) {
-                        Text(stringResource(R.string.edit_artwork))
-                    }
-                }
-                val fullGenres = detail.preview.metadataPresentation(maxGenres = Int.MAX_VALUE).genres
-                if (fullGenres.isNotEmpty()) {
-                    MobileDetailMetadataSection(R.string.genres, fullGenres.joinToString(", "))
-                }
-                if (detail.cast.isNotEmpty()) {
-                    MobileDetailMetadataSection(
-                        labelRes = R.string.cast,
-                        value = detail.cast.joinToString("  •  ", transform = ::plainPersonName),
+            }
+            Text(detail.preview.name, style = MaterialTheme.typography.headlineLarge)
+            MobileMetadataLine(
+                presentation = detail.metadataPresentation(),
+                includeGenres = true,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            detail.preview.description
+                ?.takeIf(String::isNotBlank)
+                ?.let { overview ->
+                    Text(
+                        text = overview,
+                        style = MaterialTheme.typography.bodyLarge,
                     )
                 }
-                if (detail.directors.isNotEmpty()) {
-                    MobileDetailMetadataSection(
-                        labelRes = R.string.directors,
-                        value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
-                    )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(onClick = { onPlay(null) }) {
+                    Icon(Icons.Outlined.PlayArrow, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.play))
+                }
+                OutlinedButton(onClick = onLibrary, enabled = !inLibrary) {
+                    Text(stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library))
+                }
+                OutlinedButton(onClick = onEditArtwork) {
+                    Text(stringResource(R.string.edit_artwork))
                 }
             }
+            val fullGenres = detail.preview.metadataPresentation(maxGenres = Int.MAX_VALUE).genres
+            if (fullGenres.isNotEmpty()) {
+                MobileDetailMetadataSection(R.string.genres, fullGenres.joinToString(", "))
+            }
+            if (detail.cast.isNotEmpty()) {
+                MobileDetailMetadataSection(
+                    labelRes = R.string.cast,
+                    value = detail.cast.joinToString("  •  ", transform = ::plainPersonName),
+                )
+            }
+            if (detail.directors.isNotEmpty()) {
+                MobileDetailMetadataSection(
+                    labelRes = R.string.directors,
+                    value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
+                )
+            }
         }
-        if (expanded) {
+    }
+    if (expanded) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(detail.preview.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back))
+                        }
+                    },
+                )
+            },
+        ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding)) {
                 MediaArtwork(
                     detail.preview,
@@ -1335,17 +1470,49 @@ private fun MobileDetailScreen(
                     }
                 }
             }
-        } else {
-            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-                item {
-                    MediaArtwork(
-                        detail.preview,
-                        Modifier.fillMaxWidth().height(300.dp),
-                        preferBackdrop = true,
-                    )
+        }
+    } else {
+        val visibleEpisodes = remember(detail, selectedSeason) {
+            detail.episodes.filter { selectedSeason == null || it.season == selectedSeason }
+        }
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            contentPadding = PaddingValues(bottom = 32.dp),
+        ) {
+            item(key = "hero") { MobileDetailHero(detail, resolvedPreview, onBack) }
+            item(key = "actions") {
+                MobileDetailActions(inLibrary, onPlay = { onPlay(null) }, onLibrary, onEditArtwork)
+            }
+            detail.preview.description
+                ?.takeIf(String::isNotBlank)
+                ?.let { overview ->
+                    item(key = "overview") {
+                        Text(
+                            overview,
+                            Modifier.padding(horizontal = MobileTokens.spacingScreen),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
-                item { info() }
-                items(detail.episodes, key = { it.id }) { episode ->
+            if (seasons.size > 1) {
+                item(key = "seasons") {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(seasons, key = { it }) { season ->
+                            MobileFilterChip(
+                                selected = selectedSeason == season,
+                                onClick = { selectedSeason = season },
+                                label = { Text(stringResource(R.string.season_format, season)) },
+                            )
+                        }
+                    }
+                }
+            }
+            items(visibleEpisodes, key = { it.id }) { episode ->
+                Box(Modifier.padding(horizontal = MobileTokens.spacingScreen)) {
                     EpisodeRow(
                         episode = episode,
                         watched = episode.id in watchedEpisodeIds,
@@ -1354,6 +1521,161 @@ private fun MobileDetailScreen(
                     )
                 }
             }
+            item(key = "metadata") {
+                Column(
+                    Modifier.padding(horizontal = MobileTokens.spacingScreen),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    val fullGenres = detail.preview.metadataPresentation(maxGenres = Int.MAX_VALUE).genres
+                    if (fullGenres.isNotEmpty()) {
+                        MobileDetailMetadataSection(R.string.genres, fullGenres.joinToString(", "))
+                    }
+                    if (detail.cast.isNotEmpty()) {
+                        MobileDetailMetadataSection(
+                            labelRes = R.string.cast,
+                            value = detail.cast.joinToString("  •  ", transform = ::plainPersonName),
+                        )
+                    }
+                    if (detail.directors.isNotEmpty()) {
+                        MobileDetailMetadataSection(
+                            labelRes = R.string.directors,
+                            value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileDetailHero(
+    detail: MediaDetail,
+    preview: MediaPreview,
+    onBack: () -> Unit,
+) {
+    Box(Modifier.fillMaxWidth().height(420.dp)) {
+        MediaArtwork(preview, Modifier.fillMaxSize(), preferBackdrop = true)
+        // Top scrim keeps status-bar icons legible; the bottom ink wash carries
+        // the title block on any artwork.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to MobileTokens.ink.copy(alpha = 0.6f),
+                        0.25f to Color.Transparent,
+                    ),
+                ),
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(0.45f to Color.Transparent, 1f to MobileTokens.ink),
+                ),
+        )
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(8.dp)
+                .size(40.dp)
+                .background(MobileTokens.surfaceRaised.copy(alpha = 0.68f), CircleShape),
+        ) {
+            Icon(
+                Icons.AutoMirrored.Outlined.ArrowBack,
+                contentDescription = stringResource(R.string.back),
+                tint = Color.White,
+            )
+        }
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .padding(horizontal = MobileTokens.spacingScreen, vertical = 20.dp),
+        ) {
+            if (!preview.logoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = preview.logoUrl,
+                    contentDescription = preview.name,
+                    modifier = Modifier.fillMaxWidth(0.72f).heightIn(max = 56.dp),
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.CenterStart,
+                )
+            } else {
+                Text(preview.name, style = MaterialTheme.typography.displayLarge, color = MobileTokens.textPrimary)
+            }
+            Spacer(Modifier.height(8.dp))
+            MobileMetadataLine(
+                presentation = preview.metadataPresentation(),
+                includeGenres = false,
+                color = MobileTokens.textMuted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MobileDetailActions(
+    inLibrary: Boolean,
+    onPlay: () -> Unit,
+    onLibrary: () -> Unit,
+    onEditArtwork: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = MobileTokens.spacingScreen),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Button(
+            onClick = onPlay,
+            modifier = Modifier.weight(1f).height(52.dp),
+            shape = RoundedCornerShape(26.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MobileTokens.textPrimary,
+                contentColor = Color.Black,
+            ),
+        ) {
+            Icon(Icons.Outlined.PlayArrow, null)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
+        }
+        Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+            if (inLibrary) {
+                SelectionCheckmark(
+                    selected = true,
+                    selectedContainerColor = MobileTokens.accent,
+                    selectedContentColor = Color.Black,
+                )
+            } else {
+                IconButton(
+                    onClick = onLibrary,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MobileTokens.surfaceRaised.copy(alpha = 0.68f), CircleShape),
+                ) {
+                    Icon(
+                        Icons.Outlined.Add,
+                        contentDescription = stringResource(R.string.add_to_library),
+                        tint = Color.White,
+                    )
+                }
+            }
+        }
+        IconButton(
+            onClick = onEditArtwork,
+            modifier = Modifier
+                .size(44.dp)
+                .background(MobileTokens.surfaceRaised.copy(alpha = 0.68f), CircleShape),
+        ) {
+            Icon(
+                Icons.Outlined.Edit,
+                contentDescription = stringResource(R.string.edit_artwork),
+                tint = Color.White,
+            )
         }
     }
 }
@@ -1432,13 +1754,13 @@ private fun MobileArtworkEditorScreen(
                 if (editor.availableProviders.isNotEmpty()) {
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
+                            MobileFilterChip(
                                 selected = editor.providerFilter == null,
                                 onClick = { onProviderSelected(null) },
                                 label = { Text(stringResource(R.string.artwork_all_sources)) },
                             )
                             editor.availableProviders.forEach { provider ->
-                                FilterChip(
+                                MobileFilterChip(
                                     selected = editor.providerFilter == provider,
                                     onClick = { onProviderSelected(provider) },
                                     label = { Text(provider.value) },
@@ -1673,8 +1995,8 @@ private fun MobileDetailMetadataSection(@StringRes labelRes: Int, value: String)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = stringResource(labelRes),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            color = MobileTokens.textMuted,
         )
         Text(
             text = value,
@@ -1697,71 +2019,94 @@ internal fun EpisodeRow(
     val artworkHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched)
     val synopsisHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched)
     val watchedDescription = if (watched) stringResource(R.string.watched) else ""
-    ListItem(
-        modifier = Modifier.semantics {
-            stateDescription = watchedDescription
-        },
-        leadingContent = {
-            if (!episode.thumbnailUrl.isNullOrBlank() || watched) {
-                Box(
-                    modifier = Modifier
-                        .width(80.dp)
-                        .height(48.dp),
-                ) {
-                    if (!episode.thumbnailUrl.isNullOrBlank()) {
-                        SpoilerBlurLayer(
-                            hidden = artworkHidden,
-                            veilColor = MaterialTheme.colorScheme.surface,
-                            semanticLabel = stringResource(R.string.spoiler_hidden),
+    val numberLabel = when {
+        number.season != null && number.episode != null ->
+            stringResource(R.string.episode_format, number.season, number.episode)
+        number.season != null -> stringResource(R.string.season_format, number.season)
+        number.episode != null -> stringResource(R.string.episode_number_format, number.episode)
+        else -> ""
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(MobileTokens.radiusCard))
+            .clickable(role = Role.Button) { onPlay(episode) }
+            .semantics { stateDescription = watchedDescription }
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .width(112.dp)
+                .height(63.dp)
+                .clip(RoundedCornerShape(MobileTokens.radiusCard))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            if (!episode.thumbnailUrl.isNullOrBlank()) {
+                SpoilerBlurLayer(
+                    hidden = artworkHidden,
+                    veilColor = MobileTokens.surface,
+                    semanticLabel = stringResource(R.string.spoiler_hidden),
+                    modifier = Modifier.fillMaxSize(),
+                    veilContent = { MobileSpoilerBadge() },
+                    content = {
+                        AsyncImage(
+                            model = episode.thumbnailUrl,
+                            contentDescription = episode.title,
                             modifier = Modifier.fillMaxSize(),
-                            veilContent = { MobileSpoilerBadge() },
-                            content = {
-                                AsyncImage(
-                                    model = episode.thumbnailUrl,
-                                    contentDescription = episode.title,
-                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)),
-                                    contentScale = ContentScale.Crop,
-                                )
-                            },
+                            contentScale = ContentScale.Crop,
                         )
-                    }
-                    SelectionCheckmark(
-                        selected = watched,
-                        selectedContainerColor = MaterialTheme.colorScheme.primary,
-                        selectedContentColor = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(2.dp),
+                    },
+                )
+            }
+            SelectionCheckmark(
+                selected = watched,
+                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.align(Alignment.TopEnd).padding(5.dp),
+            )
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .graphicsLayer { alpha = if (watched) 0.55f else 1f },
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (numberLabel.isNotEmpty()) {
+                Text(
+                    numberLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                episode.title,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (synopsisHidden) {
+                Text(
+                    stringResource(R.string.synopsis_hidden),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                episode.overview?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
-        },
-        headlineContent = { Text(episode.title) },
-        supportingContent = {
-            Column {
-                if (synopsisHidden) {
-                    Text(stringResource(R.string.synopsis_hidden))
-                } else {
-                    episode.overview?.let {
-                        Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-        },
-        overlineContent = {
-            when {
-                number.season != null && number.episode != null ->
-                    Text(stringResource(R.string.episode_format, number.season, number.episode))
-                number.season != null -> Text(stringResource(R.string.season_format, number.season))
-                number.episode != null -> Text(stringResource(R.string.episode_number_format, number.episode))
-            }
-        },
-        trailingContent = {
-            IconButton(onClick = { onPlay(episode) }) {
-                Icon(Icons.Outlined.PlayArrow, contentDescription = stringResource(R.string.play_title_format, episode.title))
-            }
-        },
-    )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1808,14 +2153,14 @@ private fun MobileSourcePickerScreen(
                 }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item {
-                        FilterChip(
+                        MobileFilterChip(
                             selected = picker.selectedProviderId == null,
                             onClick = { onProvider(null) },
                             label = { Text(stringResource(R.string.all_sources)) },
                         )
                     }
                     items(picker.providerIds, key = { it }) { providerId ->
-                        FilterChip(
+                        MobileFilterChip(
                             selected = picker.selectedProviderId == providerId,
                             onClick = { onProvider(providerId) },
                             label = { Text(picker.providerLabels[providerId] ?: providerId) },
@@ -1946,226 +2291,227 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(start = MobileTokens.spacingScreen, end = MobileTokens.spacingScreen, top = 8.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
         ) {
-            item { SettingsHeading(stringResource(R.string.profiles)) }
-            items(state.profiles, key = { it.id }) { profile ->
-                ListItem(
-                    headlineContent = { Text(profile.name) },
-                    supportingContent = {
-                        Text(stringResource(if (profile.kind == ProfileKind.CHILD) R.string.child_profile else R.string.adult_profile))
-                    },
-                    leadingContent = { Icon(Icons.Outlined.Person, null) },
-                    trailingContent = {
-                        TextButton(onClick = { viewModel.selectProfile(profile.id) }, enabled = state.activeProfileId != profile.id) {
-                            Text(stringResource(if (state.activeProfileId == profile.id) R.string.active else R.string.switch_profile))
-                        }
-                    },
-                )
-            }
             item {
-                val kidsName = stringResource(R.string.kids_profile_name)
-                OutlinedButton(onClick = { viewModel.addProfile(kidsName, true) }) {
-                    Icon(Icons.Outlined.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.add_child_profile))
-                }
-            }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item { SettingsHeading(stringResource(R.string.addons)) }
-            item {
-                OutlinedTextField(
-                    value = providerUrl,
-                    onValueChange = { providerUrl = it },
-                    label = { Text(stringResource(R.string.addon_address)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            item {
-                Button(
-                    onClick = { viewModel.addProvider(providerUrl) },
-                    enabled = providerUrl.isNotBlank(),
-                ) { Text(stringResource(R.string.install_addon)) }
-            }
-            item {
-                OutlinedButton(onClick = viewModel::refreshContent, enabled = state.providers.isNotEmpty() && !state.refreshing) {
-                    Text(stringResource(R.string.refresh_catalogs))
-                }
-            }
-            items(state.providers, key = { it.id }) { provider ->
-                ListItem(
-                    headlineContent = { Text(provider.displayName) },
-                    supportingContent = {
-                        Text(
-                            stringResource(
-                                if (provider.sortOrder < 0) R.string.included_catalog
-                                else if (provider.enabled) R.string.enabled
-                                else R.string.disabled,
-                            ),
-                        )
-                    },
-                    trailingContent = {
-                        if (provider.sortOrder >= 0) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(
-                                    checked = provider.enabled,
-                                    onCheckedChange = { viewModel.toggleProvider(provider.id, it) },
-                                )
-                                IconButton(onClick = { viewModel.removeProvider(provider.id) }) {
-                                    Icon(
-                                        Icons.Outlined.Delete,
-                                        contentDescription = stringResource(R.string.remove_provider_format, provider.displayName),
-                                    )
+                SettingsCard(stringResource(R.string.profiles)) {
+                    state.profiles.forEachIndexed { index, profile ->
+                        if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                        ListItem(
+                            headlineContent = { Text(profile.name) },
+                            supportingContent = {
+                                Text(stringResource(if (profile.kind == ProfileKind.CHILD) R.string.child_profile else R.string.adult_profile))
+                            },
+                            leadingContent = { Icon(Icons.Outlined.Person, null) },
+                            trailingContent = {
+                                TextButton(onClick = { viewModel.selectProfile(profile.id) }, enabled = state.activeProfileId != profile.id) {
+                                    Text(stringResource(if (state.activeProfileId == profile.id) R.string.active else R.string.switch_profile))
                                 }
-                            }
-                        }
-                    },
-                )
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    val kidsName = stringResource(R.string.kids_profile_name)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Button) { viewModel.addProfile(kidsName, true) }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Add, null, tint = MobileTokens.accent)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.add_child_profile), color = MobileTokens.accent)
+                    }
+                }
             }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item {
+                SettingsCard(stringResource(R.string.addons)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = providerUrl,
+                            onValueChange = { providerUrl = it },
+                            label = { Text(stringResource(R.string.addon_address)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Button(
+                            onClick = { viewModel.addProvider(providerUrl) },
+                            enabled = providerUrl.isNotBlank(),
+                        ) { Text(stringResource(R.string.install_addon)) }
+                        OutlinedButton(
+                            onClick = viewModel::refreshContent,
+                            enabled = state.providers.isNotEmpty() && !state.refreshing,
+                        ) {
+                            Text(stringResource(R.string.refresh_catalogs))
+                        }
+                    }
+                    state.providers.forEachIndexed { index, provider ->
+                        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                        ListItem(
+                            headlineContent = { Text(provider.displayName) },
+                            supportingContent = {
+                                Text(
+                                    stringResource(
+                                        if (provider.sortOrder < 0) R.string.included_catalog
+                                        else if (provider.enabled) R.string.enabled
+                                        else R.string.disabled,
+                                    ),
+                                )
+                            },
+                            trailingContent = {
+                                if (provider.sortOrder >= 0) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Switch(
+                                            checked = provider.enabled,
+                                            onCheckedChange = { viewModel.toggleProvider(provider.id, it) },
+                                        )
+                                        IconButton(onClick = { viewModel.removeProvider(provider.id) }) {
+                                            Icon(
+                                                Icons.Outlined.Delete,
+                                                contentDescription = stringResource(R.string.remove_provider_format, provider.displayName),
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                        if (index < state.providers.lastIndex) {
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                        }
+                    }
+                }
+            }
             if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
-                item { SettingsHeading(stringResource(R.string.paired_devices)) }
                 item {
                     LaunchedEffect(Unit) { viewModel.loadDevices() }
                 }
-                if (state.pairedDevices.isEmpty()) {
-                    item {
-                        Text(
-                            stringResource(R.string.no_paired_devices),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                item {
+                    SettingsCard(stringResource(R.string.paired_devices)) {
+                        if (state.pairedDevices.isEmpty()) {
+                            Text(
+                                stringResource(R.string.no_paired_devices),
+                                modifier = Modifier.padding(16.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        state.pairedDevices.forEachIndexed { index, device ->
+                            if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                            ListItem(
+                                headlineContent = { Text(device.label) },
+                                supportingContent = { Text(device.createdAt?.take(10) ?: device.platform) },
+                                leadingContent = { Icon(Icons.Outlined.Tv, null) },
+                                trailingContent = {
+                                    TextButton(onClick = {
+                                        deviceToRevoke = device
+                                    }) { Text(stringResource(R.string.disconnect)) }
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
+                        }
                     }
                 }
-                items(state.pairedDevices, key = { it.id }) { device ->
+            }
+            item {
+                SettingsCard(stringResource(R.string.appearance)) {
                     ListItem(
-                        headlineContent = { Text(device.label) },
-                        supportingContent = { Text(device.createdAt?.take(10) ?: device.platform) },
-                        leadingContent = { Icon(Icons.Outlined.Tv, null) },
+                        headlineContent = { Text(stringResource(R.string.ken_burns_effect)) },
+                        supportingContent = { Text(stringResource(R.string.ken_burns_effect_description)) },
                         trailingContent = {
-                            TextButton(onClick = {
-                                deviceToRevoke = device
-                            }) { Text(stringResource(R.string.disconnect)) }
+                            Switch(checked = state.kenBurnsEnabled, onCheckedChange = viewModel::setKenBurnsEnabled)
                         },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     )
                 }
             }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item { SettingsHeading(stringResource(R.string.appearance)) }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ThemePreference.entries.forEach { theme ->
-                        FilterChip(
-                            selected = state.theme == theme,
-                            onClick = { viewModel.setTheme(theme) },
-                            label = { Text(theme.name.lowercase().replaceFirstChar(Char::uppercase)) },
-                        )
-                    }
-                }
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.use_device_colors)) },
-                    supportingContent = { Text(stringResource(R.string.device_colors_requirement)) },
-                    trailingContent = {
-                        Switch(checked = state.dynamicColor, onCheckedChange = viewModel::setDynamicColor)
-                    },
-                )
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.ken_burns_effect)) },
-                    supportingContent = { Text(stringResource(R.string.ken_burns_effect_description)) },
-                    trailingContent = {
-                        Switch(checked = state.kenBurnsEnabled, onCheckedChange = viewModel::setKenBurnsEnabled)
-                    },
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SettingsHeading(stringResource(R.string.spoiler_protection))
+                SettingsCard(stringResource(R.string.spoiler_protection)) {
                     Text(
                         stringResource(R.string.spoiler_protection_description),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.protect_spoilers)) },
+                        supportingContent = { Text(stringResource(R.string.spoiler_protection_description)) },
+                        leadingContent = { Icon(Icons.Outlined.Visibility, null) },
+                        trailingContent = {
+                            Switch(
+                                checked = state.spoilerProtection.enabled,
+                                onCheckedChange = {
+                                    viewModel.setSpoilerProtection(state.spoilerProtection.copy(enabled = it))
+                                },
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.blur_episode_artwork)) },
+                        supportingContent = { Text(stringResource(R.string.blur_episode_artwork_description)) },
+                        trailingContent = {
+                            Switch(
+                                checked = state.spoilerProtection.blurEpisodeArtwork,
+                                enabled = state.spoilerProtection.enabled,
+                                onCheckedChange = {
+                                    viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeArtwork = it))
+                                },
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.blur_episode_synopsis)) },
+                        supportingContent = { Text(stringResource(R.string.blur_episode_synopsis_description)) },
+                        trailingContent = {
+                            Switch(
+                                checked = state.spoilerProtection.blurEpisodeSynopsis,
+                                enabled = state.spoilerProtection.enabled,
+                                onCheckedChange = {
+                                    viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeSynopsis = it))
+                                },
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
                 }
             }
             item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.protect_spoilers)) },
-                    supportingContent = { Text(stringResource(R.string.spoiler_protection_description)) },
-                    leadingContent = { Icon(Icons.Outlined.Visibility, null) },
-                    trailingContent = {
-                        Switch(
-                            checked = state.spoilerProtection.enabled,
-                            onCheckedChange = {
-                                viewModel.setSpoilerProtection(state.spoilerProtection.copy(enabled = it))
-                            },
-                        )
-                    },
-                )
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.blur_episode_artwork)) },
-                    supportingContent = { Text(stringResource(R.string.blur_episode_artwork_description)) },
-                    trailingContent = {
-                        Switch(
-                            checked = state.spoilerProtection.blurEpisodeArtwork,
-                            enabled = state.spoilerProtection.enabled,
-                            onCheckedChange = {
-                                viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeArtwork = it))
-                            },
-                        )
-                    },
-                )
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.blur_episode_synopsis)) },
-                    supportingContent = { Text(stringResource(R.string.blur_episode_synopsis_description)) },
-                    trailingContent = {
-                        Switch(
-                            checked = state.spoilerProtection.blurEpisodeSynopsis,
-                            enabled = state.spoilerProtection.enabled,
-                            onCheckedChange = {
-                                viewModel.setSpoilerProtection(state.spoilerProtection.copy(blurEpisodeSynopsis = it))
-                            },
-                        )
-                    },
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item { SettingsHeading(stringResource(R.string.artwork)) }
-            item {
-                Text(
-                    stringResource(R.string.artwork_settings_description),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            item {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.local_only_artwork_keys)) },
-                    supportingContent = { Text(stringResource(R.string.local_only_artwork_keys_description)) },
-                    trailingContent = {
-                        Switch(
-                            checked = state.localOnlyArtworkKeys,
-                            onCheckedChange = { pendingArtworkStorageMode = it },
-                            enabled = !state.artworkStorageModeChanging,
-                        )
-                    },
-                )
-            }
-            if (state.artworkProviders.isEmpty() && state.artworkProviderCatalogError != null) {
-                item {
-                    Text(state.artworkProviderCatalogError, color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = viewModel::refreshArtworkKeyStatus) {
-                        Text("Retry")
+                SettingsCard(stringResource(R.string.artwork)) {
+                    Text(
+                        stringResource(R.string.artwork_settings_description),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.local_only_artwork_keys)) },
+                        supportingContent = { Text(stringResource(R.string.local_only_artwork_keys_description)) },
+                        trailingContent = {
+                            Switch(
+                                checked = state.localOnlyArtworkKeys,
+                                onCheckedChange = { pendingArtworkStorageMode = it },
+                                enabled = !state.artworkStorageModeChanging,
+                            )
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                    if (state.artworkProviders.isEmpty() && state.artworkProviderCatalogError != null) {
+                        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(state.artworkProviderCatalogError, color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = viewModel::refreshArtworkKeyStatus) {
+                                Text("Retry")
+                            }
+                        }
                     }
                 }
             }
@@ -2182,7 +2528,8 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                 }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(MobileTokens.radiusSection),
+                    colors = CardDefaults.cardColors(containerColor = MobileTokens.surface),
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -2259,41 +2606,45 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
                     }
                 }
             }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item { SettingsHeading(stringResource(R.string.privacy)) }
             item {
-                ConsentRow(stringResource(R.string.crash_reports), state.diagnostics.crashReports) {
-                    viewModel.setDiagnostics(state.diagnostics.copy(crashReports = it))
-                }
-            }
-            item {
-                ConsentRow(stringResource(R.string.performance_metrics), state.diagnostics.performanceMetrics) {
-                    viewModel.setDiagnostics(state.diagnostics.copy(performanceMetrics = it))
-                }
-            }
-            item {
-                Text(
-                    stringResource(R.string.diagnostics_explanation),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
-                item { SettingsHeading(stringResource(R.string.account)) }
-                item {
+                SettingsCard(stringResource(R.string.privacy)) {
+                    ConsentRow(stringResource(R.string.crash_reports), state.diagnostics.crashReports) {
+                        viewModel.setDiagnostics(state.diagnostics.copy(crashReports = it))
+                    }
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    ConsentRow(stringResource(R.string.performance_metrics), state.diagnostics.performanceMetrics) {
+                        viewModel.setDiagnostics(state.diagnostics.copy(performanceMetrics = it))
+                    }
                     Text(
-                        stringResource(R.string.delete_account_explanation),
+                        stringResource(R.string.diagnostics_explanation),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
                 item {
-                    TextButton(onClick = { deleteAccountOpen = true }) {
+                    SettingsCard(stringResource(R.string.account)) {
                         Text(
-                            stringResource(R.string.delete_account),
-                            color = MaterialTheme.colorScheme.error,
+                            stringResource(R.string.delete_account_explanation),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable(role = Role.Button) { deleteAccountOpen = true }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.delete_account),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
@@ -2374,8 +2725,22 @@ private fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onB
 }
 
 @Composable
-private fun SettingsHeading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 12.dp).semantics { heading() })
+private fun SettingsCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(modifier = modifier) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        Spacer(Modifier.height(10.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(MobileTokens.radiusSection))
+                .background(MobileTokens.surfaceRaised),
+            content = content,
+        )
+    }
 }
 
 @Composable
@@ -2384,5 +2749,6 @@ private fun ConsentRow(title: String, checked: Boolean, onChecked: (Boolean) -> 
         headlineContent = { Text(title) },
         trailingContent = { Switch(checked, onChecked) },
         modifier = Modifier.sizeIn(minHeight = 48.dp).semantics(mergeDescendants = true) {},
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
 }
