@@ -1,34 +1,22 @@
 package com.lamphaus.app.ui
 
 import com.lamphaus.core.model.MediaPreview
-internal const val HOME_CATALOG_BATCH_SIZE = 50
 internal const val HOME_CATALOG_MAX_CONCURRENCY = 4
-internal const val HOME_CATALOG_PREFETCH_DISTANCE = 5
-
-internal data class HomeCatalogBatchBounds(
-    val fromIndex: Int,
-    val toIndexExclusive: Int,
-)
-
-internal fun nextHomeCatalogBatch(totalCount: Int, loadedCount: Int): HomeCatalogBatchBounds? {
-    val safeTotalCount = totalCount.coerceAtLeast(0)
-    val safeLoadedCount = loadedCount.coerceIn(0, safeTotalCount)
-    if (safeLoadedCount >= safeTotalCount) return null
-    return HomeCatalogBatchBounds(
-        fromIndex = safeLoadedCount,
-        toIndexExclusive = minOf(safeTotalCount, safeLoadedCount + HOME_CATALOG_BATCH_SIZE),
-    )
-}
+internal const val HOME_CATALOG_WINDOW_SIZE = 4
+internal const val HOME_CATALOG_PREFETCH_DISTANCE = 2
+internal const val HOME_CATALOG_SCROLL_SETTLE_MILLIS = 240L
 
 internal fun shouldPrefetchHomeCatalogBatch(
-    lastVisibleIndex: Int,
+    lastVisibleIndex: Int?,
     totalListItems: Int,
     hasMore: Boolean,
     loading: Boolean,
     failed: Boolean,
 ): Boolean {
-    if (!hasMore || loading || failed || totalListItems <= 0) return false
-    return lastVisibleIndex >= totalListItems - 1 - HOME_CATALOG_PREFETCH_DISTANCE
+    if (!hasMore || loading || failed) return false
+    if (totalListItems <= 0) return true
+    return lastVisibleIndex != null &&
+        lastVisibleIndex >= totalListItems - 1 - HOME_CATALOG_PREFETCH_DISTANCE
 }
 
 internal fun appendHomeCatalogBatch(
@@ -39,7 +27,7 @@ internal fun appendHomeCatalogBatch(
     return existing + incoming.filter { seenIds.add(it.id) }
 }
 internal fun CatalogSection.isRenderableHomeCatalogSection(): Boolean =
-    items.isNotEmpty() || hasMore || errorMessage != null || loadMoreError != null
+    initialLoading || items.isNotEmpty() || hasMore || errorMessage != null || loadMoreError != null
 
 
 
@@ -122,7 +110,12 @@ internal fun mergeCatalogRefresh(
     previous: List<CatalogSection>,
     refreshed: List<CatalogSection>,
 ): List<CatalogSection> = refreshed.flatMap { section ->
-    if (section.errorMessage == null) {
+    if (section.initialLoading) {
+        val stale = previous.firstOrNull {
+            it.id == section.id && it.providerId == section.providerId
+        }
+        listOf(if (stale == null) section else section.copy(items = stale.items))
+    } else if (section.errorMessage == null) {
         listOf(section)
     } else if (section.id == "${section.providerId}:error") {
         val staleSections = previous.filter { it.providerId == section.providerId && it.items.isNotEmpty() }

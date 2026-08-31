@@ -5,7 +5,6 @@ import com.lamphaus.core.model.MediaType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.assertNull
 
 import org.junit.Test
 
@@ -76,6 +75,39 @@ class CatalogRefreshPolicyTest {
 
         assertEquals(emptyList<MediaPreview>(), merged.single().items)
         assertEquals(null, merged.single().errorMessage)
+    }
+
+    @Test
+    fun `cold placeholder stays empty and loading`() {
+        val placeholder = section("a:movie:featured", "a").copy(initialLoading = true)
+
+        val merged = mergeCatalogRefresh(emptyList(), listOf(placeholder))
+
+        assertTrue(merged.single().items.isEmpty())
+        assertTrue(merged.single().initialLoading)
+    }
+
+    @Test
+    fun `matching placeholder retains stale items while adopting metadata`() {
+        val previous = section(
+            "a:movie:featured",
+            "a",
+            items = listOf(media("old")),
+        ).copy(title = "Old title")
+        val placeholder = section("a:movie:featured", "a").copy(
+            title = "New title",
+            initialLoading = true,
+            supportsSkip = true,
+            hasMore = true,
+        )
+
+        val merged = mergeCatalogRefresh(listOf(previous), listOf(placeholder)).single()
+
+        assertEquals(listOf("old"), merged.items.map(MediaPreview::id))
+        assertEquals("New title", merged.title)
+        assertTrue(merged.initialLoading)
+        assertTrue(merged.supportsSkip)
+        assertTrue(merged.hasMore)
     }
 
     @Test
@@ -159,25 +191,6 @@ class CatalogRefreshPolicyTest {
         assertEquals(null, retried.loadMoreError)
     }
 
-    @Test
-    fun `home catalog batches cover 980 sections in ordered 50-row slices`() {
-        val bounds = buildList {
-            var loaded = 0
-            while (true) {
-                val next = nextHomeCatalogBatch(980, loaded) ?: break
-                add(next)
-                loaded = next.toIndexExclusive
-            }
-        }
-
-        assertEquals(20, bounds.size)
-        assertEquals(HomeCatalogBatchBounds(0, 50), bounds.first())
-        assertEquals(HomeCatalogBatchBounds(50, 100), bounds[1])
-        assertEquals(HomeCatalogBatchBounds(950, 980), bounds.last())
-        assertNull(nextHomeCatalogBatch(980, 980))
-        assertEquals(HomeCatalogBatchBounds(0, 50), nextHomeCatalogBatch(80, -10))
-        assertEquals(HomeCatalogBatchBounds(79, 80), nextHomeCatalogBatch(80, 79))
-    }
 
     @Test
     fun `home catalog batches append in order and suppress duplicate IDs`() {
@@ -195,18 +208,21 @@ class CatalogRefreshPolicyTest {
     }
 
     @Test
-    fun `home catalog prefetch starts only near the end when idle`() {
-        assertFalse(shouldPrefetchHomeCatalogBatch(3, 10, hasMore = true, loading = false, failed = false))
-        assertTrue(shouldPrefetchHomeCatalogBatch(4, 10, hasMore = true, loading = false, failed = false))
+    fun `home catalog prefetch starts within two rows when idle`() {
+        assertFalse(shouldPrefetchHomeCatalogBatch(6, 10, hasMore = true, loading = false, failed = false))
+        assertTrue(shouldPrefetchHomeCatalogBatch(7, 10, hasMore = true, loading = false, failed = false))
         assertTrue(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = true, loading = false, failed = false))
-        assertFalse(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = true, loading = true, failed = false))
-        assertFalse(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = true, loading = false, failed = true))
-        assertFalse(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = false, loading = false, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(null, 10, hasMore = true, loading = false, failed = false))
+        assertTrue(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = true, loading = false, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = true, loading = true, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = true, loading = false, failed = true))
+        assertFalse(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = false, loading = false, failed = false))
     }
     @Test
     fun `TV renders only non-terminal or non-empty home sections`() {
         listOf(
             section("populated", "provider", items = listOf(media("item"))) to true,
+            section("loading", "provider").copy(initialLoading = true) to true,
             section("paged", "provider").copy(hasMore = true) to true,
             section("provider-error", "provider", error = "Manifest failed") to true,
             section("page-error", "provider").copy(loadMoreError = "Page failed") to true,

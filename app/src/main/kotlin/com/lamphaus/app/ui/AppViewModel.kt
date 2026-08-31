@@ -24,7 +24,6 @@ import com.lamphaus.core.model.DeviceGrant
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.ProfileKind
 import com.lamphaus.core.model.ProviderResult
-import com.lamphaus.core.model.ProviderCatalog
 import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.PlaybackRequest
@@ -41,7 +40,6 @@ import java.util.UUID
 import java.net.URI
 import java.util.Calendar
 import java.security.MessageDigest
-import java.util.concurrent.atomic.AtomicInteger
 
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.OtpType
@@ -55,8 +53,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -111,15 +107,6 @@ internal fun isTerminalDeviceBindingError(error: Throwable?): Boolean {
 class AppViewModel(
     private val container: AppContainer,
 ) : ViewModel() {
-    private sealed interface HomeCatalogTarget {
-        data class Request(
-            val subscription: ProviderSubscription,
-            val catalog: ProviderCatalog,
-            val plan: CatalogHomePlan.Request,
-        ) : HomeCatalogTarget
-
-        data class Ready(val section: CatalogSection) : HomeCatalogTarget
-    }
 
     private val mutableState = MutableStateFlow(AppUiState())
     val state: StateFlow<AppUiState> = mutableState.asStateFlow()
@@ -127,9 +114,7 @@ class AppViewModel(
     private var refreshJob: Job? = null
     private var homeCatalogBatchJob: Job? = null
     private var homeCatalogGeneration = 0L
-    private var homeCatalogTargets: List<HomeCatalogTarget> = emptyList()
-    private val homeCatalogSemaphore = Semaphore(HOME_CATALOG_MAX_CONCURRENCY)
-    private val homeCatalogActiveRequests = AtomicInteger(0)
+    private var homeCatalogLoader: HomeCatalogLoader? = null
 
     private var cloudSyncJob: Job? = null
     private var cloudSyncUserId: String? = null
@@ -1438,7 +1423,7 @@ class AppViewModel(
             homeCatalogBatchJob?.cancel()
             homeCatalogBatchJob = null
             homeCatalogGeneration++
-            homeCatalogTargets = emptyList()
+            homeCatalogLoader = null
             catalogRefreshGate.reset()
             mutableState.update { it.copy(homeCatalogBatch = HomeCatalogBatchState()) }
             homeLog("refresh cleared generation=$homeCatalogGeneration")
@@ -1470,7 +1455,7 @@ class AppViewModel(
         homeCatalogBatchJob?.cancel()
         homeCatalogGeneration++
         val generation = homeCatalogGeneration
-        homeCatalogTargets = emptyList()
+        homeCatalogLoader = null
         homeLog(
             "refresh started force=$force generation=$generation providers=${current.providers.size} " +
                 "previousSections=${current.sections.size}",
@@ -1497,7 +1482,6 @@ class AppViewModel(
                     emptyList()
                 }
                 currentCoroutineContext().ensureActive()
-                homeCatalogTargets = emptyList()
                 mutableState.update {
                     it.copy(
                         sections = mergeCatalogRefresh(current.sections, preview),
@@ -1510,82 +1494,60 @@ class AppViewModel(
                 return@launch
             }
 
+            val loader = HomeCatalogLoader(
+                providerClient = container.providerClient,
+                providers = current.providers,
+                currentYear = Calendar.getInstance().get(Calendar.YEAR),
+                logger = ::homeLog,
+            )
+            homeCatalogLoader = loader
             mutableState.update {
                 it.copy(
                     refreshing = true,
-                    homeCatalogBatch = HomeCatalogBatchState(),
+                    homeCatalogBatch = HomeCatalogBatchState(loadingMore = true),
                 )
             }
-            homeLog("building Home targets from enabled providers")
-            val targets = buildHomeCatalogTargets(
-                providers = current.providers,
-                currentYear = Calendar.getInstance().get(Calendar.YEAR),
-            )
-            currentCoroutineContext().ensureActive()
-            homeLog("Home targets built count=${targets.size}")
-            if (generation != homeCatalogGeneration) {
-                homeLog("refresh discarded generation=$generation currentGeneration=$homeCatalogGeneration")
-                return@launch
-            }
-            homeCatalogTargets = targets
-            val bounds = nextHomeCatalogBatch(targets.size, 0)
-            homeLog("initial Home batch bounds=${bounds?.fromIndex}..${bounds?.toIndexExclusive}")
-            val resolved = bounds?.let {
-                resolveHomeCatalogBatch(
-                    targets = targets,
-                    bounds = it,
+            homeLog("initial Home window requested generation=$generation")
+            try {
+                val window = requestHomeCatalogWindow(
+                    loader = loader,
+                    generation = generation,
                     childFilterEnabled = fingerprint.childFilterEnabled,
+                    append = false,
                 )
-            }.orEmpty()
-            currentCoroutineContext().ensureActive()
-            if (generation != homeCatalogGeneration) {
-                homeLog("initial batch discarded generation=$generation currentGeneration=$homeCatalogGeneration")
-                return@launch
-            }
-            homeLog("initial Home batch resolved sections=${resolved.size}")
-            var publishedCount = 0
-            mutableState.update {
-                val merged = mergeCatalogRefresh(current.sections, resolved)
-                publishedCount = merged.size
-                it.copy(
-                    sections = merged,
-                    homeCatalogBatch = HomeCatalogBatchState(totalSectionCount = targets.size),
-                    initialContentLoading = false,
-                    refreshing = false,
+                finishHomeCatalogWindow(generation, window)
+                homeLog(
+                    "initial Home window complete sections=${window.sections.size} " +
+                        "consumed=${window.consumedTargetCount} hasMore=${window.hasMore}",
                 )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                markHomeCatalogFailure("initial Home window failed", generation, error)
             }
-            homeLog("Home state published sections=$publishedCount totalTargets=${targets.size}")
         }
     }
 
     fun loadMoreHomeCatalogSections() {
         val current = state.value
         val batchState = current.homeCatalogBatch
-        if (batchState.loadingMore || batchState.loadMoreFailed) {
-            homeLog("batch load ignored loading=${batchState.loadingMore} failed=${batchState.loadMoreFailed}")
-            return
-        }
-        val generation = homeCatalogGeneration
-        val bounds = nextHomeCatalogBatch(batchState.totalSectionCount, current.sections.size)
-        if (bounds == null) {
+        val loader = homeCatalogLoader
+        if (
+            !batchState.hasMore ||
+            batchState.loadingMore ||
+            batchState.loadMoreFailed ||
+            loader == null
+        ) {
             homeLog(
-                "batch load ignored terminal sections=${current.sections.size} " +
-                    "totalTargets=${batchState.totalSectionCount}",
+                "window load ignored hasMore=${batchState.hasMore} loading=${batchState.loadingMore} " +
+                    "failed=${batchState.loadMoreFailed} loader=${loader != null}",
             )
             return
         }
-        val targets = homeCatalogTargets
-        if (targets.size < bounds.toIndexExclusive) {
-            homeLog("batch load ignored targetQueue=${targets.size} required=${bounds.toIndexExclusive}")
-            return
-        }
+        val generation = homeCatalogGeneration
         val childFilterEnabled = current.activeProfile?.let { profile ->
             profile.kind == ProfileKind.CHILD && profile.hideUnrated
         } == true
-        homeLog(
-            "batch load started generation=$generation bounds=${bounds.fromIndex}..${bounds.toIndexExclusive} " +
-                "targets=${targets.size}",
-        )
         mutableState.update {
             if (it.homeCatalogBatch != batchState) {
                 it
@@ -1593,211 +1555,154 @@ class AppViewModel(
                 it.copy(homeCatalogBatch = batchState.copy(loadingMore = true))
             }
         }
+        homeLog(
+            "Home window load started generation=$generation consumed=${batchState.consumedTargetCount}",
+        )
         homeCatalogBatchJob = viewModelScope.launch {
             try {
-                val incoming = resolveHomeCatalogBatch(
-                    targets = targets,
-                    bounds = bounds,
+                val window = requestHomeCatalogWindow(
+                    loader = loader,
+                    generation = generation,
                     childFilterEnabled = childFilterEnabled,
+                    append = true,
                 )
-                currentCoroutineContext().ensureActive()
-                homeLog("batch load resolved incoming=${incoming.size}")
-                if (generation != homeCatalogGeneration) {
-                    homeLog("batch load discarded generation=$generation currentGeneration=$homeCatalogGeneration")
-                    return@launch
-                }
-                val latest = state.value
-                if (
-                    latest.sections.size != bounds.fromIndex ||
-                    latest.homeCatalogBatch.totalSectionCount != batchState.totalSectionCount
-                ) {
-                    homeLog(
-                        "batch load discarded sections=${latest.sections.size} expected=${bounds.fromIndex} " +
-                            "totalTargets=${latest.homeCatalogBatch.totalSectionCount}",
-                    )
-                    return@launch
-                }
-                val merged = appendHomeCatalogBatch(latest.sections, incoming)
-                mutableState.update {
-                    it.copy(
-                        sections = merged,
-                        homeCatalogBatch = it.homeCatalogBatch.copy(
-                            loadingMore = false,
-                            loadMoreFailed = false,
-                        ),
-                    )
-                }
-                homeLog("batch load applied sections=${merged.size}")
+                finishHomeCatalogWindow(generation, window)
+                homeLog(
+                    "Home window load complete sections=${window.sections.size} " +
+                        "consumed=${window.consumedTargetCount} hasMore=${window.hasMore}",
+                )
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                Log.e(HOME_CATALOG_LOG_TAG, "batch load failed generation=$generation", error)
-                if (generation != homeCatalogGeneration) return@launch
-                val latest = state.value
-                if (
-                    latest.sections.size == bounds.fromIndex &&
-                    latest.homeCatalogBatch.totalSectionCount == batchState.totalSectionCount
-                ) {
-                    mutableState.update {
-                        it.copy(
-                            homeCatalogBatch = it.homeCatalogBatch.copy(
-                                loadingMore = false,
-                                loadMoreFailed = true,
-                            ),
-                        )
-                    }
-                    homeLog("batch load marked retryable failure")
-                }
+                markHomeCatalogFailure("Home window load failed", generation, error)
             }
         }
     }
 
     fun retryHomeCatalogSections() {
         val current = state.value
-        if (current.homeCatalogBatch.loadingMore || !current.homeCatalogBatch.loadMoreFailed) return
-        homeLog("batch retry requested sections=${current.sections.size}")
+        val batchState = current.homeCatalogBatch
+        val loader = homeCatalogLoader
+        if (batchState.loadingMore || !batchState.loadMoreFailed || loader == null) return
+
+        val generation = homeCatalogGeneration
+        val childFilterEnabled = current.activeProfile?.let { profile ->
+            profile.kind == ProfileKind.CHILD && profile.hideUnrated
+        } == true
+        val append = batchState.consumedTargetCount > 0
         mutableState.update {
-            it.copy(homeCatalogBatch = it.homeCatalogBatch.copy(loadMoreFailed = false))
+            it.copy(
+                homeCatalogBatch = it.homeCatalogBatch.copy(
+                    loadingMore = true,
+                    loadMoreFailed = false,
+                ),
+            )
         }
-        loadMoreHomeCatalogSections()
-    }
-
-    private suspend fun buildHomeCatalogTargets(
-        providers: List<ProviderSubscription>,
-        currentYear: Int,
-    ): List<HomeCatalogTarget> = buildList {
-        providers
-            .filter(ProviderSubscription::enabled)
-            .sortedWith(compareBy<ProviderSubscription> { it.sortOrder }.thenBy { it.id })
-            .forEach { subscription ->
-                when (val manifestResult = container.providerClient.manifest(subscription.manifestUrl)) {
-                    is ProviderResult.Failure -> {
-                        homeLog("manifest failed provider=${subscription.id} message=${manifestResult.safeMessage}")
-                        add(
-                            HomeCatalogTarget.Ready(
-                                CatalogSection(
-                                    id = "${subscription.id}:error",
-                                    providerId = subscription.id,
-                                    title = subscription.displayName,
-                                    providerName = subscription.displayName,
-                                    items = emptyList(),
-                                    errorMessage = manifestResult.safeMessage,
-                                ),
-                            ),
-                        )
-                    }
-                    is ProviderResult.Success -> {
-                        val targetStart = size
-                        val catalogs = manifestResult.value.catalogs
-                        val includeCuratedGenres = subscription.id == DEFAULT_CATALOG_PROVIDER_ID ||
-                            subscription.manifestUrl == DEFAULT_CATALOG_MANIFEST
-                        val providerTargets = catalogs.asSequence().flatMap { catalog ->
-                            catalog.homePlans(
-                                includeCuratedGenres = includeCuratedGenres,
-                                currentYear = currentYear,
-                            ).map { plan -> catalog to plan }
-                        }
-                        providerTargets.forEach { (catalog, plan) ->
-                            when (plan) {
-                                is CatalogHomePlan.Request -> add(
-                                    HomeCatalogTarget.Request(subscription, catalog, plan),
-                                )
-                                is CatalogHomePlan.Unavailable -> add(
-                                    HomeCatalogTarget.Ready(
-                                        CatalogSection(
-                                            id = "${subscription.id}:${catalog.type}:${catalog.id}:unavailable",
-                                            providerId = subscription.id,
-                                            title = plan.title,
-                                            providerName = subscription.displayName,
-                                            items = emptyList(),
-                                            errorMessage = plan.reason,
-                                        ),
-                                    ),
-                                )
-                            }
-                        }
-                        homeLog(
-                            "manifest success provider=${subscription.id} catalogs=${catalogs.size} " +
-                                "homeTargets=${size - targetStart}",
-                        )
-                    }
-                }
+        homeLog(
+            "Home window retry started generation=$generation consumed=${batchState.consumedTargetCount}",
+        )
+        homeCatalogBatchJob = viewModelScope.launch {
+            try {
+                val window = requestHomeCatalogWindow(
+                    loader = loader,
+                    generation = generation,
+                    childFilterEnabled = childFilterEnabled,
+                    append = append,
+                )
+                finishHomeCatalogWindow(generation, window)
+                homeLog(
+                    "Home window retry complete consumed=${window.consumedTargetCount} hasMore=${window.hasMore}",
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                markHomeCatalogFailure("Home window retry failed", generation, error)
             }
+        }
     }
 
-    private suspend fun resolveHomeCatalogBatch(
-        targets: List<HomeCatalogTarget>,
-        bounds: HomeCatalogBatchBounds,
+    private suspend fun requestHomeCatalogWindow(
+        loader: HomeCatalogLoader,
+        generation: Long,
         childFilterEnabled: Boolean,
-    ): List<CatalogSection> = coroutineScope {
-        targets
-            .subList(bounds.fromIndex, bounds.toIndexExclusive)
-            .map { target ->
-                async {
-                    when (target) {
-                        is HomeCatalogTarget.Ready -> {
-                            homeLog("ready Home target id=${target.section.id}")
-                            target.section
-                        }
-                        is HomeCatalogTarget.Request -> {
-                            val query = target.plan.query
-                            val section = CatalogSection(
-                                id = "home:${canonicalCatalogRequestIdentity(target.subscription.id, query)}",
-                                providerId = target.subscription.id,
-                                title = target.plan.title,
-                                providerName = target.subscription.displayName,
-                                items = emptyList(),
-                                baseQuery = query,
-                                supportsSkip = target.catalog.supportsSkip(),
-                                skipStep = target.catalog.initialSkipStep(),
-                                hasMore = target.catalog.supportsSkip(),
-                            )
-                            homeCatalogSemaphore.withPermit {
-                                val active = homeCatalogActiveRequests.incrementAndGet()
-                                homeLog(
-                                    "catalog start provider=${target.subscription.id} catalog=${query.catalogId} " +
-                                        "active=$active",
-                                )
-                                try {
-                                    when (val result = container.providerClient.catalog(
-                                        target.subscription.manifestUrl,
-                                        target.subscription.id,
-                                        query,
-                                    )) {
-                                        is ProviderResult.Success -> {
-                                            homeLog(
-                                                "catalog success provider=${target.subscription.id} " +
-                                                    "catalog=${query.catalogId} items=${result.value.size}",
-                                            )
-                                            firstCatalogPage(
-                                                section,
-                                                result.value,
-                                                filterForProfile(result.value, childFilterEnabled),
-                                            )
-                                        }
-                                        is ProviderResult.Failure -> {
-                                            homeLog(
-                                                "catalog failure provider=${target.subscription.id} " +
-                                                    "catalog=${query.catalogId} message=${result.safeMessage}",
-                                            )
-                                            section.copy(
-                                                errorMessage = result.safeMessage,
-                                                hasMore = false,
-                                            )
-                                        }
-                                    }
-                                } finally {
-                                    homeLog(
-                                        "catalog end provider=${target.subscription.id} catalog=${query.catalogId} " +
-                                            "active=${homeCatalogActiveRequests.decrementAndGet()}",
-                                    )
-                                }
-                            }
-                        }
-                    }
+        append: Boolean,
+    ): HomeCatalogWindow = loader.loadNextWindow(
+        childFilterEnabled = childFilterEnabled,
+        onPrepared = prepared@{ window ->
+            if (generation != homeCatalogGeneration) return@prepared
+            mutableState.update { current ->
+                val sections = if (append) {
+                    appendHomeCatalogBatch(current.sections, window.sections)
+                } else {
+                    mergeCatalogRefresh(current.sections, window.sections)
                 }
+                current.copy(
+                    sections = sections,
+                    homeCatalogBatch = current.homeCatalogBatch.copy(
+                        consumedTargetCount = window.consumedTargetCount,
+                        hasMore = window.hasMore,
+                        loadingMore = window.sections.any(CatalogSection::initialLoading),
+                        loadMoreFailed = false,
+                    ),
+                    initialContentLoading = false,
+                )
             }
-            .awaitAll()
+            homeLog(
+                "Home window prepared append=$append sections=${window.sections.size} " +
+                    "consumed=${window.consumedTargetCount} hasMore=${window.hasMore}",
+            )
+        },
+        onResolved = resolved@{ section ->
+            if (generation != homeCatalogGeneration) return@resolved
+            mutableState.update { current ->
+                val index = current.sections.indexOfFirst { it.id == section.id }
+                if (index < 0) return@update current
+                val currentSection = current.sections[index]
+                val merged = mergeCatalogRefresh(listOf(currentSection), listOf(section)).single()
+                val sections = current.sections.toMutableList()
+                sections[index] = merged
+                current.copy(sections = sections)
+            }
+            homeLog("Home section resolved id=${section.id}")
+        },
+    )
+
+    private fun finishHomeCatalogWindow(
+        generation: Long,
+        window: HomeCatalogWindow,
+    ) {
+        if (generation != homeCatalogGeneration) return
+        mutableState.update {
+            it.copy(
+                homeCatalogBatch = it.homeCatalogBatch.copy(
+                    consumedTargetCount = window.consumedTargetCount,
+                    hasMore = window.hasMore,
+                    loadingMore = false,
+                    loadMoreFailed = false,
+                ),
+                initialContentLoading = false,
+                refreshing = false,
+            )
+        }
+    }
+
+    private fun markHomeCatalogFailure(
+        message: String,
+        generation: Long,
+        error: Throwable,
+    ) {
+        Log.e(HOME_CATALOG_LOG_TAG, "$message generation=$generation", error)
+        if (generation != homeCatalogGeneration) return
+        mutableState.update {
+            it.copy(
+                homeCatalogBatch = it.homeCatalogBatch.copy(
+                    loadingMore = false,
+                    loadMoreFailed = true,
+                ),
+                initialContentLoading = false,
+                refreshing = false,
+            )
+        }
     }
 
     private fun filterForProfile(
@@ -1816,8 +1721,8 @@ class AppViewModel(
     ) {
         val canonicalAddress = address.canonicalProviderAddress()
         val existingId = state.value.providers.firstOrNull { it.manifestUrl.canonicalProviderAddress() == canonicalAddress }?.id
-        val installationId = existingId ?: if (manifest.id == DEFAULT_CATALOG_PROVIDER_ID || canonicalAddress == DEFAULT_CATALOG_MANIFEST) {
-            DEFAULT_CATALOG_PROVIDER_ID
+        val installationId = existingId ?: if (manifest.id == CINEMETA_PROVIDER_ID || canonicalAddress == CINEMETA_MANIFEST_URL) {
+            CINEMETA_PROVIDER_ID
         } else {
             stableInstallationId(manifest.id, canonicalAddress)
         }
@@ -1850,7 +1755,7 @@ class AppViewModel(
     private fun ensureDefaultCatalog(providers: List<ProviderSubscription>) {
         val developmentSources = providers.filter { BuildConfig.DEBUG && it.id == DEVELOPMENT_SOURCE_ID }
         val existing = providers.firstOrNull {
-            it.id == DEFAULT_CATALOG_PROVIDER_ID || it.manifestUrl == DEFAULT_CATALOG_MANIFEST
+            it.id == CINEMETA_PROVIDER_ID || it.manifestUrl == CINEMETA_MANIFEST_URL
         }
         val normalized = existing?.let {
             it.displayName == DEFAULT_CATALOG_DISPLAY_NAME && it.sortOrder == DEFAULT_CATALOG_SORT_ORDER && it.enabled
@@ -1861,7 +1766,7 @@ class AppViewModel(
             developmentSources.forEach { container.libraryRepository.removeProvider(it.id) }
             if (existing != null) {
                 val catalog = existing.copy(
-                    manifestUrl = DEFAULT_CATALOG_MANIFEST,
+                    manifestUrl = CINEMETA_MANIFEST_URL,
                     displayName = DEFAULT_CATALOG_DISPLAY_NAME,
                     enabled = true,
                     sortOrder = DEFAULT_CATALOG_SORT_ORDER,
@@ -1875,9 +1780,9 @@ class AppViewModel(
                 }
                 return@launch
             }
-            when (val result = container.providerClient.manifest(DEFAULT_CATALOG_MANIFEST)) {
+            when (val result = container.providerClient.manifest(CINEMETA_MANIFEST_URL)) {
                 is ProviderResult.Success -> saveProvider(
-                    address = DEFAULT_CATALOG_MANIFEST,
+                    address = CINEMETA_MANIFEST_URL,
                     manifest = result.value,
                     sortOrder = DEFAULT_CATALOG_SORT_ORDER,
                     displayName = DEFAULT_CATALOG_DISPLAY_NAME,
@@ -2085,8 +1990,6 @@ class AppViewModel(
         private const val DEFAULT_CATALOG_SORT_ORDER = -100
         private const val DEFAULT_CATALOG_DISPLAY_NAME = "Cinemeta"
 
-        private const val DEFAULT_CATALOG_PROVIDER_ID = CINEMETA_PROVIDER_ID
-        private const val DEFAULT_CATALOG_MANIFEST = "https://v3-cinemeta.strem.io/manifest.json"
         private const val PAIRING_POLL_MILLIS = 3_000L
         private const val PAIRING_DEVICE_LABEL = "Living room TV"
         private const val DEVELOPMENT_SOURCE_ID = "lamphaus.dev.source"
