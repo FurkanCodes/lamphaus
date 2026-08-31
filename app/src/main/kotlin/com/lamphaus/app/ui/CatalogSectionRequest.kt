@@ -2,6 +2,7 @@ package com.lamphaus.app.ui
 
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.ProviderCatalog
+internal const val CINEMETA_PROVIDER_ID = "com.linvo.cinemeta"
 
 internal sealed interface CatalogHomePlan {
     data class Request(

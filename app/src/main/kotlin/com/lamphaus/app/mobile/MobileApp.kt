@@ -4,6 +4,10 @@ import androidx.activity.compose.BackHandler
 import android.text.format.DateUtils
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +32,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -84,6 +90,8 @@ import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,6 +104,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -106,6 +115,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+
 import androidx.core.text.HtmlCompat
 import com.lamphaus.app.ui.artworkImageUrl
 import com.lamphaus.app.ui.MediaArtwork
@@ -122,6 +133,7 @@ import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
+import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.ArtworkAsset
@@ -400,9 +412,12 @@ private fun MobileSignedInApp(
                                 onAddSource = { settingsOpen = true },
                                 onLoadMore = viewModel::loadMoreCatalog,
                                 onRetry = viewModel::retryCatalogPage,
+                                onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
+                                onRetryHome = viewModel::retryHomeCatalogSections,
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
+
                             MobileDestination.DISCOVER -> MediaGrid(
                                 media = state.allMedia,
                                 onMedia = openMedia,
@@ -476,11 +491,40 @@ private fun MobileHomeScreen(
     onAddSource: () -> Unit,
     onLoadMore: (String) -> Unit,
     onRetry: (String) -> Unit,
+    onLoadMoreHome: () -> Unit,
+    onRetryHome: () -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
     val feature = state.allMedia.firstOrNull()
+    val listState = rememberLazyListState()
+    LaunchedEffect(
+        listState,
+        state.sections.size,
+        state.homeCatalogBatch.totalSectionCount,
+        state.homeCatalogBatch.loadingMore,
+        state.homeCatalogBatch.loadMoreFailed,
+    ) {
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to
+                listState.layoutInfo.totalItemsCount
+        }.distinctUntilChanged().collect { (lastVisibleIndex, totalListItems) ->
+            if (
+                lastVisibleIndex != null &&
+                shouldPrefetchHomeCatalogBatch(
+                    lastVisibleIndex = lastVisibleIndex,
+                    totalListItems = totalListItems,
+                    hasMore = state.sections.size < state.homeCatalogBatch.totalSectionCount,
+                    loading = state.homeCatalogBatch.loadingMore,
+                    failed = state.homeCatalogBatch.loadMoreFailed,
+                )
+            ) {
+                onLoadMoreHome()
+            }
+        }
+    }
     LazyColumn(
+        state = listState,
         contentPadding = PaddingValues(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
@@ -490,6 +534,111 @@ private fun MobileHomeScreen(
         }
         items(state.sections, key = CatalogSection::id) { section ->
             CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
+        }
+        when {
+            state.homeCatalogBatch.loadingMore -> item(key = "home-catalog-loading") {
+                MobileHomeCatalogLoadingSkeleton()
+            }
+            state.homeCatalogBatch.loadMoreFailed -> item(key = "home-catalog-retry") {
+                OutlinedButton(
+                    onClick = onRetryHome,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                ) {
+                    Text(stringResource(R.string.retry))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileHomeCatalogLoadingSkeleton() {
+    val loadingDescription = stringResource(R.string.loading_more_rows)
+    val pulse by rememberInfiniteTransition(label = "home catalog loading").animateFloat(
+        initialValue = 0.58f,
+        targetValue = 0.78f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "skeleton pulse",
+    )
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { contentDescription = loadingDescription },
+        verticalArrangement = Arrangement.spacedBy(28.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.loading_more_rows),
+            modifier = Modifier.padding(horizontal = 20.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        repeat(2) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(180.dp)
+                            .height(22.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(skeletonColor),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(96.dp)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(skeletonColor.copy(alpha = pulse * 0.8f)),
+                    )
+                }
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    userScrollEnabled = false,
+                ) {
+                    items(4) {
+                        Column(
+                            modifier = Modifier
+                                .width(138.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
+                                .padding(bottom = 10.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(2f / 3f)
+                                    .background(skeletonColor),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 10.dp)
+                                    .fillMaxWidth(0.82f)
+                                    .height(14.dp)
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(skeletonColor.copy(alpha = pulse * 0.8f)),
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 10.dp)
+                                    .fillMaxWidth(0.54f)
+                                    .height(11.dp)
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(skeletonColor.copy(alpha = pulse * 0.65f)),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

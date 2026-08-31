@@ -19,6 +19,7 @@
     <string name="search_movies_series">Search movies and series</string>
     <string name="search_no_results">No matching movies or series.</string>
     <string name="loading">Loading…</string>
+    <string name="loading_more_rows">Loading more rows…</string>
     <string name="retry">Retry</string>
     <string name="load_more">Load more</string>
     <string name="all_genres">All genres</string>

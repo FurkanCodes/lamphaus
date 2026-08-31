@@ -97,12 +97,19 @@ data class SourcePickerState(
     fun selectProvider(providerId: String?) = copy(selectedProviderId = providerId)
 }
 
+data class HomeCatalogBatchState(
+    val totalSectionCount: Int = 0,
+    val loadingMore: Boolean = false,
+    val loadMoreFailed: Boolean = false,
+)
+
 data class AppUiState(
     val account: AccountState = AccountState.Loading,
     val profiles: List<Profile> = emptyList(),
     val activeProfileId: String? = null,
     val providers: List<ProviderSubscription> = emptyList(),
     val sections: List<CatalogSection> = emptyList(),
+    val homeCatalogBatch: HomeCatalogBatchState = HomeCatalogBatchState(),
     val searchSections: List<CatalogSection> = emptyList(),
     val browse: CatalogBrowseState = CatalogBrowseState(),
     val library: List<LibraryEntry> = emptyList(),

@@ -5,6 +5,8 @@ import com.lamphaus.core.model.MediaType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
+
 import org.junit.Test
 
 class CatalogRefreshPolicyTest {
@@ -156,6 +158,64 @@ class CatalogRefreshPolicyTest {
         assertEquals(listOf("one", "two"), retried.items.map(MediaPreview::id))
         assertEquals(null, retried.loadMoreError)
     }
+
+    @Test
+    fun `home catalog batches cover 980 sections in ordered 50-row slices`() {
+        val bounds = buildList {
+            var loaded = 0
+            while (true) {
+                val next = nextHomeCatalogBatch(980, loaded) ?: break
+                add(next)
+                loaded = next.toIndexExclusive
+            }
+        }
+
+        assertEquals(20, bounds.size)
+        assertEquals(HomeCatalogBatchBounds(0, 50), bounds.first())
+        assertEquals(HomeCatalogBatchBounds(50, 100), bounds[1])
+        assertEquals(HomeCatalogBatchBounds(950, 980), bounds.last())
+        assertNull(nextHomeCatalogBatch(980, 980))
+        assertEquals(HomeCatalogBatchBounds(0, 50), nextHomeCatalogBatch(80, -10))
+        assertEquals(HomeCatalogBatchBounds(79, 80), nextHomeCatalogBatch(80, 79))
+    }
+
+    @Test
+    fun `home catalog batches append in order and suppress duplicate IDs`() {
+        val existing = listOf(section("one", "provider"), section("two", "provider"))
+        val incoming = listOf(
+            section("two", "provider"),
+            section("three", "provider"),
+            section("four", "provider"),
+            section("three", "provider"),
+        )
+
+        val merged = appendHomeCatalogBatch(existing, incoming)
+
+        assertEquals(listOf("one", "two", "three", "four"), merged.map(CatalogSection::id))
+    }
+
+    @Test
+    fun `home catalog prefetch starts only near the end when idle`() {
+        assertFalse(shouldPrefetchHomeCatalogBatch(3, 10, hasMore = true, loading = false, failed = false))
+        assertTrue(shouldPrefetchHomeCatalogBatch(4, 10, hasMore = true, loading = false, failed = false))
+        assertTrue(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = true, loading = false, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = true, loading = true, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = true, loading = false, failed = true))
+        assertFalse(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = false, loading = false, failed = false))
+    }
+    @Test
+    fun `TV renders only non-terminal or non-empty home sections`() {
+        listOf(
+            section("populated", "provider", items = listOf(media("item"))) to true,
+            section("paged", "provider").copy(hasMore = true) to true,
+            section("provider-error", "provider", error = "Manifest failed") to true,
+            section("page-error", "provider").copy(loadMoreError = "Page failed") to true,
+            section("empty-terminal", "provider") to false,
+        ).forEach { (catalogSection, expected) ->
+            assertEquals(expected, catalogSection.isRenderableHomeCatalogSection())
+        }
+    }
+
 
     private fun fingerprint() = CatalogRefreshFingerprint(
         userId = "user",
