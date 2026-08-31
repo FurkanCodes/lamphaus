@@ -56,6 +56,14 @@ data class WatchProgress(
     val durationMillis: Long,
     val completed: Boolean,
     val updatedAtEpochMillis: Long,
+    /**
+     * Snapshot of the catalog item this progress belongs to. Continue Watching
+     * renders from this directly so entries surface even when the title is not
+     * present in any loaded home catalog section (NuvioTV-style hydration).
+     */
+    val preview: MediaPreview? = null,
+    /** Episode identifier shown on Continue Watching entries (e.g. "S1 · E4 · Pilot"); null for movies. */
+    val episodeLabel: String? = null,
 ) {
     val fraction: Float
         get() = if (durationMillis <= 0) 0f else (positionMillis.toFloat() / durationMillis).coerceIn(0f, 1f)

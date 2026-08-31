@@ -105,6 +105,14 @@ data class HomeCatalogBatchState(
     val loadMoreFailed: Boolean = false,
 )
 
+/** Minimum watch time before an entry qualifies for Continue Watching. */
+internal const val CONTINUE_WATCHING_MIN_POSITION_MILLIS = 30_000L
+
+internal fun WatchProgress.isResumable(): Boolean =
+    !completed &&
+        positionMillis >= CONTINUE_WATCHING_MIN_POSITION_MILLIS &&
+        fraction <= 0.98f
+
 data class AppUiState(
     val account: AccountState = AccountState.Loading,
     val profiles: List<Profile> = emptyList(),

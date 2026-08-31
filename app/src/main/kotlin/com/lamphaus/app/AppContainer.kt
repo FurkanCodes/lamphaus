@@ -32,6 +32,9 @@ import com.lamphaus.core.data.security.LocalArtworkKeyStore
 import com.lamphaus.core.provider.ProviderAggregator
 import com.lamphaus.core.provider.ProviderClient
 import com.lamphaus.core.provider.ProviderUrlPolicy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class AppContainer(context: Context) {
     private val database = Room.databaseBuilder(
@@ -39,6 +42,7 @@ class AppContainer(context: Context) {
         LamphausDatabase::class.java,
         "lamphaus.db",
     )
+        .addMigrations(LamphausDatabase.MIGRATION_1_2, LamphausDatabase.MIGRATION_2_3)
         .fallbackToDestructiveMigrationOnDowngrade()
         .build()
 
@@ -60,6 +64,16 @@ class AppContainer(context: Context) {
         )?.takeIf { it.length >= 8 }
 
     val preferences = UserPreferences(context)
+
+    /**
+     * Application-lifetime scope for work that must outlive any single screen.
+     * Watch-progress writes are launched from [com.lamphaus.app.player.PlayerActivity]
+     * while it is stopping or already destroyed, where the activity's
+     * lifecycleScope is cancelled before the write can land (mirrors NuvioTV's
+     * singleton persistence scope).
+     */
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val libraryRepository: LibraryRepository = RoomLibraryRepository(
         database.dao(),
         AndroidKeystoreStringCipher(),

@@ -90,7 +90,7 @@ class SupabaseCloudSyncGateway(
                 filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
             )
             .withSessionRecovery(sessionRecovery)
-            .map { rows -> rows.map { it.toModel() } }
+            .map { rows -> rows.map { it.toModel(json) } }
             .recoverWithEmpty()
     override suspend fun saveProfile(userId: String, profile: Profile): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
@@ -107,7 +107,7 @@ class SupabaseCloudSyncGateway(
     override suspend fun saveProgress(userId: String, progress: WatchProgress): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
             supabase.from(TABLE_PROGRESS)
-                .upsert(listOf(WatchProgressRow.of(userId, progress))) { onConflict = "profile_id,video_id" }
+                .upsert(listOf(WatchProgressRow.of(userId, progress, json))) { onConflict = "profile_id,video_id" }
         }
     }
     override fun settings(userId: String): Flow<SyncedSettings?> =
@@ -366,8 +366,10 @@ class SupabaseCloudSyncGateway(
         @SerialName("duration_millis") val durationMillis: Long,
         @SerialName("completed") val completed: Boolean,
         @SerialName("updated_at_epoch_millis") val updatedAtEpochMillis: Long,
+        @SerialName("preview") val preview: JsonElement? = null,
+        @SerialName("episode_label") val episodeLabel: String? = null,
     ) {
-        fun toModel() = WatchProgress(
+        fun toModel(json: Json) = WatchProgress(
             profileId = profileId,
             mediaKey = mediaKey,
             videoId = videoId,
@@ -375,10 +377,14 @@ class SupabaseCloudSyncGateway(
             durationMillis = durationMillis,
             completed = completed,
             updatedAtEpochMillis = updatedAtEpochMillis,
+            preview = preview?.let { element ->
+                runCatching { json.decodeFromJsonElement<MediaPreview>(element) }.getOrNull()
+            },
+            episodeLabel = episodeLabel,
         )
 
         companion object {
-            fun of(userId: String, progress: WatchProgress) = WatchProgressRow(
+            fun of(userId: String, progress: WatchProgress, json: Json) = WatchProgressRow(
                 userId = userId,
                 profileId = progress.profileId,
                 mediaKey = progress.mediaKey,
@@ -387,6 +393,8 @@ class SupabaseCloudSyncGateway(
                 durationMillis = progress.durationMillis,
                 completed = progress.completed,
                 updatedAtEpochMillis = progress.updatedAtEpochMillis,
+                episodeLabel = progress.episodeLabel,
+                preview = progress.preview?.let { json.encodeToJsonElement(it) },
             )
         }
     }
