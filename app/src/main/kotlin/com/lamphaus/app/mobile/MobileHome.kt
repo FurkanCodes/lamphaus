@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 
@@ -33,6 +34,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -63,6 +66,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 import com.lamphaus.app.ui.MediaArtwork
+import com.lamphaus.app.ui.KenBurnsArtwork
+import com.lamphaus.app.ui.rememberReducedMotion
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -89,6 +94,8 @@ internal fun MobileHomeScreen(
     onRetryHome: () -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    onPlay: (MediaPreview) -> Unit,
+    kenBurnsEnabled: Boolean,
 ) {
     val allMedia = state.allMedia
     // Same feature selection as the TV home: first five distinct catalog items.
@@ -144,7 +151,14 @@ internal fun MobileHomeScreen(
     ) {
         if (heroItems.isNotEmpty()) {
             item(key = "feature") {
-                MobileHeroCarousel(heroItems, onMedia, restoreMediaKey, onFocusRestored)
+                MobileHeroCarousel(
+                    heroItems,
+                    onMedia,
+                    onPlay,
+                    kenBurnsEnabled,
+                    restoreMediaKey,
+                    onFocusRestored,
+                )
             }
         } else if (
             state.initialContentLoading ||
@@ -270,6 +284,8 @@ private fun MobileCatalogItemsLoadingSkeleton(
 private fun MobileHeroCarousel(
     items: List<MediaPreview>,
     onMedia: (MediaPreview) -> Unit,
+    onPlay: (MediaPreview) -> Unit,
+    kenBurnsEnabled: Boolean,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
@@ -287,7 +303,7 @@ private fun MobileHeroCarousel(
                     .clickable(role = Role.Button) { onMedia(media) }
                     .semantics { contentDescription = pageDescription },
             ) {
-                MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
+                MobileHeroArtwork(media, kenBurnsEnabled, Modifier.fillMaxSize())
                 // Top scrim keeps status-bar icons legible on any artwork; the
                 // bottom scrim carries the title block like the TV hero.
                 // Ink wash behind the title block so text reads on any artwork.
@@ -328,6 +344,19 @@ private fun MobileHeroCarousel(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    Button(
+                        onClick = { onPlay(media) },
+                        modifier = Modifier.padding(top = 12.dp),
+                        shape = RoundedCornerShape(26.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MobileTokens.textPrimary,
+                            contentColor = Color.Black,
+                        ),
+                    ) {
+                        Icon(Icons.Outlined.PlayArrow, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
+                    }
                 }
             }
         }
@@ -349,6 +378,20 @@ private fun MobileHeroCarousel(
             }
         }
     }
+}
+
+@Composable
+internal fun MobileHeroArtwork(
+    media: MediaPreview,
+    kenBurnsEnabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    KenBurnsArtwork(
+        media = media,
+        enabled = kenBurnsEnabled,
+        reducedMotion = rememberReducedMotion(),
+        modifier = modifier,
+    )
 }
 
 @Composable

@@ -1,4 +1,4 @@
-package com.lamphaus.app.tv
+package com.lamphaus.app.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

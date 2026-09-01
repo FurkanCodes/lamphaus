@@ -91,6 +91,7 @@ import androidx.core.text.HtmlCompat
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.metadataPresentation
+import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.WatchProgress
@@ -956,19 +957,6 @@ internal fun TvExpandablePeopleSection(
     }
 }
 
-@Composable
-internal fun rememberReducedMotion(): Boolean {
-    val context = LocalContext.current
-    return remember {
-        runCatching {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                1f,
-            ) == 0f
-        }.getOrDefault(false)
-    }
-}
 
 @Composable
 internal fun TvIcon(

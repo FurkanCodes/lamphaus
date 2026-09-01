@@ -123,6 +123,7 @@ import androidx.tv.material3.Switch
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.ArtworkResolver
+import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.ArtworkEditorState
 import com.lamphaus.app.ui.AppUiState

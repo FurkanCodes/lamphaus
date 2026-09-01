@@ -353,6 +353,8 @@ private fun MobileSignedInApp(
                                 onAddSource = { settingsOpen = true },
                                 onLoadMore = viewModel::loadMoreCatalog,
                                 onRetry = viewModel::retryCatalogPage,
+                                onPlay = { media -> viewModel.openSources(media, null) },
+                                kenBurnsEnabled = state.kenBurnsEnabled,
                                 onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
                                 onRetryHome = viewModel::retryHomeCatalogSections,
                                 restoreMediaKey = pendingMediaKey,
