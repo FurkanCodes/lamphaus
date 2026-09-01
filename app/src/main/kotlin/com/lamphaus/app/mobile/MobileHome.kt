@@ -66,8 +66,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 import com.lamphaus.app.ui.MediaArtwork
-import com.lamphaus.app.ui.KenBurnsArtwork
-import com.lamphaus.app.ui.rememberReducedMotion
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -95,7 +93,6 @@ internal fun MobileHomeScreen(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onPlay: (MediaPreview) -> Unit,
-    kenBurnsEnabled: Boolean,
 ) {
     val allMedia = state.allMedia
     // Same feature selection as the TV home: first five distinct catalog items.
@@ -155,7 +152,6 @@ internal fun MobileHomeScreen(
                     heroItems,
                     onMedia,
                     onPlay,
-                    kenBurnsEnabled,
                     restoreMediaKey,
                     onFocusRestored,
                 )
@@ -285,7 +281,6 @@ private fun MobileHeroCarousel(
     items: List<MediaPreview>,
     onMedia: (MediaPreview) -> Unit,
     onPlay: (MediaPreview) -> Unit,
-    kenBurnsEnabled: Boolean,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
@@ -303,7 +298,7 @@ private fun MobileHeroCarousel(
                     .clickable(role = Role.Button) { onMedia(media) }
                     .semantics { contentDescription = pageDescription },
             ) {
-                MobileHeroArtwork(media, kenBurnsEnabled, Modifier.fillMaxSize())
+                MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
                 // Top scrim keeps status-bar icons legible on any artwork; the
                 // bottom scrim carries the title block like the TV hero.
                 // Ink wash behind the title block so text reads on any artwork.
@@ -378,20 +373,6 @@ private fun MobileHeroCarousel(
             }
         }
     }
-}
-
-@Composable
-internal fun MobileHeroArtwork(
-    media: MediaPreview,
-    kenBurnsEnabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    KenBurnsArtwork(
-        media = media,
-        enabled = kenBurnsEnabled,
-        reducedMotion = rememberReducedMotion(),
-        modifier = modifier,
-    )
 }
 
 @Composable
