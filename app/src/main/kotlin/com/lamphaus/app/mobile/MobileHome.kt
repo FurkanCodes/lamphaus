@@ -57,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.derivedStateOf
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -114,11 +115,8 @@ private const val HOME_REVEAL_WARM_MILLIS = 900L
 /** Skeleton cover hard cap so slow or failed loads still reveal. */
 private const val HOME_REVEAL_MAX_WAIT_MILLIS = 8_000L
 
-/** Counter-parallax so hero artwork trails the swipe instead of sliding flat. */
-private const val HERO_ARTWORK_PARALLAX_FRACTION = 0.55f
-
-/** Dimming applied to artwork as it leaves the settled page. */
-private const val HERO_ARTWORK_NEIGHBOR_DIM = 0.22f
+/** Zoom-settle applied to hero artwork while it crossfades during a swipe. */
+private const val HERO_ARTWORK_ZOOM = 0.06f
 
 /** Crossfade timing for the detached hero title block (MOB-MOT-02: 150-250ms). */
 private const val HERO_CONTENT_FADE_MILLIS = 220
@@ -388,6 +386,80 @@ private fun MobileHeroCarousel(
     val pagerState = rememberPagerState { items.size }
     val reducedMotion = rememberReducedMotion()
     Box(Modifier.fillMaxWidth().height(400.dp)) {
+        // Artwork stage: fixed full-bleed layers crossfaded by the swipe
+        // fraction. Nothing translates with the pager, so artwork never
+        // overflows its bounds or misaligns with the scrims above it.
+        val settledIndex = pagerState.currentPage.coerceIn(0, items.lastIndex)
+        KenBurnsArtwork(
+            media = items[settledIndex],
+            enabled = kenBurnsEnabled,
+            reducedMotion = reducedMotion,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    if (!reducedMotion) {
+                        val zoom = 1f + HERO_ARTWORK_ZOOM *
+                            pagerState.currentPageOffsetFraction.absoluteValue
+                        scaleX = zoom
+                        scaleY = zoom
+                    }
+                },
+        )
+        // Neighbor layer mounts only while a swipe is in progress; its alpha
+        // and zoom mirror the settled layer so the roles swap without a pop.
+        val neighborIndex by remember(items) {
+            derivedStateOf {
+                val fraction = pagerState.currentPageOffsetFraction
+                when {
+                    fraction > 0.001f -> (pagerState.currentPage + 1).takeIf { it < items.size }
+                    fraction < -0.001f -> (pagerState.currentPage - 1).takeIf { it >= 0 }
+                    else -> null
+                }
+            }
+        }
+        neighborIndex?.let { neighbor ->
+            KenBurnsArtwork(
+                media = items[neighbor],
+                enabled = kenBurnsEnabled,
+                reducedMotion = reducedMotion,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val progress = pagerState.currentPageOffsetFraction.absoluteValue
+                        alpha = progress
+                        if (!reducedMotion) {
+                            val zoom = 1f + HERO_ARTWORK_ZOOM * (1f - progress)
+                            scaleX = zoom
+                            scaleY = zoom
+                        }
+                    },
+            )
+        }
+        // Static scrims: aligned with the stage at all times, unlike the old
+        // per-page scrims that slid at pager speed under lagging artwork.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(0f to Color.Transparent, 1f to MobileTokens.black),
+                ),
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
+                            0.16f to Color.Transparent,
+                            0.55f to Color.Transparent,
+                            1f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.88f),
+                        ),
+                    ),
+                ),
+        )
+        // Pager is a gesture surface only: per-item click, focus restore, and
+        // semantics; all visuals live in the detached layers around it.
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val media = items[page]
             val pageDescription = stringResource(
@@ -399,53 +471,7 @@ private fun MobileHeroCarousel(
                     .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
                     .clickable(role = Role.Button) { onMedia(media) }
                     .semantics { contentDescription = pageDescription },
-            ) {
-                // Artwork trails the swipe (counter-parallax) and dims as it
-                // leaves the settled position. Pager state is read inside the
-                // layer block so swipes update draw layers without recomposing.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            val offset = (
-                                (pagerState.currentPage - page) +
-                                    pagerState.currentPageOffsetFraction
-                                ).coerceIn(-1f, 1f)
-                            translationX = offset * size.width * HERO_ARTWORK_PARALLAX_FRACTION
-                            alpha = 1f - HERO_ARTWORK_NEIGHBOR_DIM * offset.absoluteValue
-                        },
-                ) {
-                    KenBurnsArtwork(
-                        media = media,
-                        enabled = kenBurnsEnabled,
-                        reducedMotion = reducedMotion,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                // Top scrim keeps status-bar icons legible on any artwork; the
-                // bottom scrim carries the title block like the TV hero.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(0f to Color.Transparent, 1f to MobileTokens.black),
-                        ),
-                )
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colorStops = arrayOf(
-                                    0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
-                                    0.16f to Color.Transparent,
-                                    0.55f to Color.Transparent,
-                                    1f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.88f),
-                                ),
-                            ),
-                        ),
-                )
-            }
+            )
         }
         // Detached overlay: the title block crossfades and the page indicator
         // holds still instead of sliding with the pager pages.
