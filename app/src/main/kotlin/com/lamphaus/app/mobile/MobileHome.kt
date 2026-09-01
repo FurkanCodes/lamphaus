@@ -3,6 +3,7 @@ package com.lamphaus.app.mobile
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -31,6 +32,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
@@ -43,13 +45,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -80,6 +85,15 @@ import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
+
+/** Resolved rows required before the home screen is revealed. */
+private const val HOME_REVEAL_READY_ROWS = 2
+
+/** Warm-up window so the first rows' images decode behind the cover. */
+private const val HOME_REVEAL_WARM_MILLIS = 900L
+
+/** Skeleton cover hard cap so slow or failed loads still reveal. */
+private const val HOME_REVEAL_MAX_WAIT_MILLIS = 8_000L
 
 @Composable
 internal fun MobileHomeScreen(
@@ -116,6 +130,35 @@ internal fun MobileHomeScreen(
             .toList()
     }
     val listState = rememberLazyListState()
+    var revealed by rememberSaveable { mutableStateOf(false) }
+    val readyRows = state.sections.count { section -> section.items.isNotEmpty() }
+    val homeEmpty = !state.initialContentLoading &&
+        !state.homeCatalogBatch.loadingMore &&
+        !state.homeCatalogBatch.loadMoreFailed &&
+        !state.homeCatalogBatch.hasMore &&
+        state.providers.isEmpty() &&
+        state.sections.isEmpty()
+    // Content that was already resident (back navigation, warm process) skips
+    // the warm-up: images are cached and the screen can appear instantly.
+    val warmOnReady = remember { readyRows < HOME_REVEAL_READY_ROWS }
+    LaunchedEffect(readyRows, homeEmpty) {
+        if (revealed) return@LaunchedEffect
+        when {
+            homeEmpty -> revealed = true
+            readyRows >= HOME_REVEAL_READY_ROWS -> {
+                if (warmOnReady) {
+                    delay(HOME_REVEAL_WARM_MILLIS)
+                }
+                revealed = true
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (!revealed) {
+            delay(HOME_REVEAL_MAX_WAIT_MILLIS)
+            revealed = true
+        }
+    }
     LaunchedEffect(
         listState,
         state.sections.size,
@@ -141,61 +184,83 @@ internal fun MobileHomeScreen(
             }
         }
     }
-    LazyColumn(
-        state = listState,
-        contentPadding = PaddingValues(bottom = navBarClearancePadding()),
-        verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
-    ) {
-        if (heroItems.isNotEmpty()) {
-            item(key = "feature") {
-                MobileHeroCarousel(
-                    heroItems,
-                    onMedia,
-                    onPlay,
-                    restoreMediaKey,
-                    onFocusRestored,
-                )
-            }
-        } else if (
-            state.initialContentLoading ||
-            state.homeCatalogBatch.loadingMore ||
-            state.sections.any(CatalogSection::initialLoading)
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = tween(220),
+        label = "home reveal",
+    )
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().alpha(contentAlpha),
+            contentPadding = PaddingValues(bottom = navBarClearancePadding()),
+            verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
         ) {
-            // Keep the hero slot present while the first catalog window loads,
-            // so the big card never disappears during progressive loading.
-            item(key = "feature") { MobileHeroLoadingSkeleton() }
-        }
-        if (continueWatching.isNotEmpty()) {
-            item(key = "continue-watching") {
-                MobileContinueWatchingRow(continueWatching, onMedia)
+            if (heroItems.isNotEmpty()) {
+                item(key = "feature") {
+                    MobileHeroCarousel(
+                        heroItems,
+                        onMedia,
+                        onPlay,
+                        restoreMediaKey,
+                        onFocusRestored,
+                    )
+                }
+            } else if (
+                state.initialContentLoading ||
+                state.homeCatalogBatch.loadingMore ||
+                state.sections.any(CatalogSection::initialLoading)
+            ) {
+                // Keep the hero slot present while the first catalog window loads,
+                // so the big card never disappears during progressive loading.
+                item(key = "feature") { MobileHeroLoadingSkeleton() }
             }
-        }
-        if (
-            !state.initialContentLoading &&
-            !state.homeCatalogBatch.loadingMore &&
-            !state.homeCatalogBatch.loadMoreFailed &&
-            !state.homeCatalogBatch.hasMore &&
-            state.providers.isEmpty() &&
-            state.sections.isEmpty()
-        ) {
-            item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
-        }
-        items(state.sections, key = CatalogSection::id) { section ->
-            CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
-        }
-        when {
-            state.homeCatalogBatch.loadMoreFailed -> item(key = "home-catalog-retry") {
-                OutlinedButton(
-                    onClick = onRetryHome,
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                ) {
-                    Text(stringResource(R.string.retry))
+            if (continueWatching.isNotEmpty()) {
+                item(key = "continue-watching") {
+                    MobileContinueWatchingRow(continueWatching, onMedia)
                 }
             }
-            state.homeCatalogBatch.loadingMore && state.sections.none(CatalogSection::initialLoading) -> {
-                item(key = "home-catalog-loading") {
-                    MobileHomeCatalogLoadingSkeleton()
+            if (
+                !state.initialContentLoading &&
+                !state.homeCatalogBatch.loadingMore &&
+                !state.homeCatalogBatch.loadMoreFailed &&
+                !state.homeCatalogBatch.hasMore &&
+                state.providers.isEmpty() &&
+                state.sections.isEmpty()
+            ) {
+                item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
+            }
+            items(state.sections, key = CatalogSection::id) { section ->
+                CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
+            }
+            when {
+                state.homeCatalogBatch.loadMoreFailed -> item(key = "home-catalog-retry") {
+                    OutlinedButton(
+                        onClick = onRetryHome,
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                    ) {
+                        Text(stringResource(R.string.retry))
+                    }
                 }
+                state.homeCatalogBatch.loadingMore && state.sections.none(CatalogSection::initialLoading) -> {
+                    item(key = "home-catalog-loading") {
+                        MobileHomeCatalogLoadingSkeleton()
+                    }
+                }
+            }
+        }
+        if (!revealed) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(MobileTokens.ink)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {},
+            ) {
+                MobileHeroLoadingSkeleton()
+                MobileHomeCatalogLoadingSkeleton()
             }
         }
     }
