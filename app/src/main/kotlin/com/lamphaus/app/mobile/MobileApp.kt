@@ -182,7 +182,7 @@ fun MobileApp(
 }
 
 @Composable
-private fun LoadingScreen() {
+internal fun LoadingScreen() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,

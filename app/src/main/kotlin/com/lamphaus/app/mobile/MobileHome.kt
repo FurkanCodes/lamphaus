@@ -250,7 +250,7 @@ internal fun MobileHomeScreen(
             }
         }
         if (!revealed) {
-            Column(
+            Box(
                 Modifier
                     .fillMaxSize()
                     .background(MobileTokens.ink)
@@ -259,8 +259,7 @@ internal fun MobileHomeScreen(
                         indication = null,
                     ) {},
             ) {
-                MobileHeroLoadingSkeleton()
-                MobileHomeCatalogLoadingSkeleton()
+                LoadingScreen()
             }
         }
     }
