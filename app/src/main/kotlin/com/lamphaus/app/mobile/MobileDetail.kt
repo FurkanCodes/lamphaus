@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -41,10 +40,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 
@@ -178,34 +175,21 @@ internal fun MobileDetailScreen(
         }
     }
     if (expanded) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text(detail.preview.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back))
-                        }
-                    },
-                )
-            },
-        ) { padding ->
-            Row(Modifier.fillMaxSize().padding(padding)) {
-                MediaArtwork(
-                    detail.preview,
-                    Modifier.fillMaxHeight().weight(0.44f),
-                    preferBackdrop = true,
-                )
-                LazyColumn(Modifier.weight(0.56f)) {
-                    item { info() }
-                    items(detail.episodes, key = { it.id }) { episode ->
-                        EpisodeRow(
-                            episode = episode,
-                            watched = episode.id in watchedEpisodeIds,
-                            spoilerProtection = spoilerProtection,
-                            onPlay = onPlay,
-                        )
-                    }
+        Row(Modifier.fillMaxSize()) {
+            MediaArtwork(
+                detail.preview,
+                Modifier.fillMaxHeight().weight(0.44f),
+                preferBackdrop = true,
+            )
+            LazyColumn(Modifier.weight(0.56f)) {
+                item { info() }
+                items(detail.episodes, key = { it.id }) { episode ->
+                    EpisodeRow(
+                        episode = episode,
+                        watched = episode.id in watchedEpisodeIds,
+                        spoilerProtection = spoilerProtection,
+                        onPlay = onPlay,
+                    )
                 }
             }
         }
@@ -218,7 +202,7 @@ internal fun MobileDetailScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
-            item(key = "hero") { MobileDetailHero(detail, resolvedPreview, onBack) }
+            item(key = "hero") { MobileDetailHero(detail, resolvedPreview) }
             item(key = "actions") {
                 MobileDetailActions(inLibrary, onPlay = { onPlay(null) }, onLibrary, onEditArtwork)
             }
@@ -290,7 +274,6 @@ internal fun MobileDetailScreen(
 private fun MobileDetailHero(
     detail: MediaDetail,
     preview: MediaPreview,
-    onBack: () -> Unit,
 ) {
     Box(Modifier.fillMaxWidth().height(420.dp)) {
         MediaArtwork(preview, Modifier.fillMaxSize(), preferBackdrop = true)
@@ -313,21 +296,6 @@ private fun MobileDetailHero(
                     Brush.verticalGradient(0.45f to Color.Transparent, 1f to MobileTokens.ink),
                 ),
         )
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(8.dp)
-                .size(40.dp)
-                .background(MobileTokens.surfaceRaised.copy(alpha = 0.68f), CircleShape),
-        ) {
-            Icon(
-                Icons.AutoMirrored.Outlined.ArrowBack,
-                contentDescription = stringResource(R.string.back),
-                tint = Color.White,
-            )
-        }
         Column(
             Modifier
                 .align(Alignment.BottomStart)
@@ -449,238 +417,231 @@ internal fun MobileArtworkEditorScreen(
     onProviderSelected: (ArtworkProviderId?) -> Unit,
     onSave: () -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.edit_artwork)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        if (editor.loading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+    if (editor.loading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().statusBarsPadding(),
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                Text(
+                    stringResource(R.string.edit_artwork),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                item {
-                    if (!editor.media.logoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = editor.media.logoUrl,
-                            contentDescription = editor.media.name,
-                            modifier = Modifier.fillMaxWidth().height(72.dp),
-                            contentScale = ContentScale.Fit,
-                            alignment = Alignment.CenterStart,
-                        )
-                    } else {
-                        Text(editor.media.name, style = MaterialTheme.typography.headlineSmall)
-                    }
-                }
-                item {
-                    Text(
-                        text = stringResource(R.string.artwork_choose),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+            item {
+                if (!editor.media.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = editor.media.logoUrl,
+                        contentDescription = editor.media.name,
+                        modifier = Modifier.fillMaxWidth().height(72.dp),
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.CenterStart,
                     )
+                } else {
+                    Text(editor.media.name, style = MaterialTheme.typography.headlineSmall)
                 }
-                if (editor.availableProviders.isNotEmpty()) {
-                    item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            }
+            item {
+                Text(
+                    text = stringResource(R.string.artwork_choose),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (editor.availableProviders.isNotEmpty()) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MobileFilterChip(
+                            selected = editor.providerFilter == null,
+                            onClick = { onProviderSelected(null) },
+                            label = { Text(stringResource(R.string.artwork_all_sources)) },
+                        )
+                        editor.availableProviders.forEach { provider ->
                             MobileFilterChip(
-                                selected = editor.providerFilter == null,
-                                onClick = { onProviderSelected(null) },
-                                label = { Text(stringResource(R.string.artwork_all_sources)) },
+                                selected = editor.providerFilter == provider,
+                                onClick = { onProviderSelected(provider) },
+                                label = { Text(provider.value) },
                             )
-                            editor.availableProviders.forEach { provider ->
-                                MobileFilterChip(
-                                    selected = editor.providerFilter == provider,
-                                    onClick = { onProviderSelected(provider) },
-                                    label = { Text(provider.value) },
-                                )
-                            }
                         }
                     }
                 }
-                editor.error?.let { error ->
-                    item { Text(error, color = MaterialTheme.colorScheme.error) }
+            }
+            editor.error?.let { error ->
+                item { Text(error, color = MaterialTheme.colorScheme.error) }
+            }
+            editor.candidates?.providerResults
+                ?.takeIf { results -> results.any { it.status != ArtworkLookupStatus.SUCCESS } }
+                ?.let { results ->
+                    item { MobileArtworkProviderMessages(results) }
                 }
-                editor.candidates?.providerResults
-                    ?.takeIf { results -> results.any { it.status != ArtworkLookupStatus.SUCCESS } }
-                    ?.let { results ->
-                        item { MobileArtworkProviderMessages(results) }
-                    }
-                item { Text(stringResource(R.string.artwork_logos), style = MaterialTheme.typography.titleLarge) }
-                item {
-                    val logos = editor.filteredLogos
-                    if (logos.isEmpty()) {
-                        MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_logo_kind))
-                    } else {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(logos, key = { "${it.provider}:${it.reference}" }) { asset ->
-                                val selected = editor.selectedLogo == asset
-                                Card(
-                                    modifier = Modifier
-                                        .width(228.dp)
-                                        .height(96.dp)
-                                        .clickable { onLogoSelected(asset) }
-                                        .semantics { this.selected = selected },
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (selected) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                        },
-                                    ),
-                                ) {
-                                    Box(Modifier.fillMaxSize()) {
-                                        AsyncImage(
-                                            model = artworkImageUrl(asset, "w500"),
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(
-                                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f),
-                                                    RoundedCornerShape(8.dp),
-                                                )
-                                                .padding(10.dp),
-                                            contentScale = ContentScale.Fit,
-                                        )
-                                        SelectionCheckmark(
-                                            selected = selected,
-                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                            selectedContentColor = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                                        )
-                                        Text(
-                                            text = asset.provider.value,
-                                            modifier = Modifier
-                                                .align(Alignment.BottomStart)
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 3.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                        )
-                                    }
+            item { Text(stringResource(R.string.artwork_logos), style = MaterialTheme.typography.titleLarge) }
+            item {
+                val logos = editor.filteredLogos
+                if (logos.isEmpty()) {
+                    MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_logo_kind))
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(logos, key = { "${it.provider}:${it.reference}" }) { asset ->
+                            val selected = editor.selectedLogo == asset
+                            Card(
+                                modifier = Modifier
+                                    .width(228.dp)
+                                    .height(96.dp)
+                                    .clickable { onLogoSelected(asset) }
+                                    .semantics { this.selected = selected },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (selected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                ),
+                            ) {
+                                Box(Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = artworkImageUrl(asset, "w500"),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.50f),
+                                                RoundedCornerShape(8.dp),
+                                            )
+                                            .padding(10.dp),
+                                        contentScale = ContentScale.Fit,
+                                    )
+                                    SelectionCheckmark(
+                                        selected = selected,
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                                    )
+                                    Text(
+                                        text = asset.provider.value,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
                                 }
                             }
                         }
                     }
                 }
-                item { Text(stringResource(R.string.artwork_posters), style = MaterialTheme.typography.titleLarge) }
-                item {
-                    val posters = editor.filteredPosters
-                    if (posters.isEmpty()) {
-                        MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_poster_kind))
-                    } else {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(posters, key = { "${it.provider}:${it.reference}" }) { asset ->
-                                val selected = editor.selectedPoster == asset
-                                Card(
-                                    modifier = Modifier
-                                        .width(112.dp)
-                                        .height(168.dp)
-                                        .clickable { onPosterSelected(asset) }
-                                        .semantics { this.selected = selected },
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (selected) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                        },
-                                    ),
-                                ) {
-                                    Box(Modifier.fillMaxSize()) {
-                                        AsyncImage(
-                                            model = artworkImageUrl(asset, "w342"),
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize().padding(4.dp),
-                                            contentScale = ContentScale.Crop,
-                                        )
-                                        SelectionCheckmark(
-                                            selected = selected,
-                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                            selectedContentColor = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                                        )
-                                        Text(
-                                            text = asset.provider.value,
-                                            modifier = Modifier
-                                                .align(Alignment.BottomStart)
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 3.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                        )
-                                    }
+            }
+            item { Text(stringResource(R.string.artwork_posters), style = MaterialTheme.typography.titleLarge) }
+            item {
+                val posters = editor.filteredPosters
+                if (posters.isEmpty()) {
+                    MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_poster_kind))
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(posters, key = { "${it.provider}:${it.reference}" }) { asset ->
+                            val selected = editor.selectedPoster == asset
+                            Card(
+                                modifier = Modifier
+                                    .width(112.dp)
+                                    .height(168.dp)
+                                    .clickable { onPosterSelected(asset) }
+                                    .semantics { this.selected = selected },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (selected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                ),
+                            ) {
+                                Box(Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = artworkImageUrl(asset, "w342"),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    SelectionCheckmark(
+                                        selected = selected,
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                                    )
+                                    Text(
+                                        text = asset.provider.value,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
                                 }
                             }
                         }
                     }
                 }
-                item { Text(stringResource(R.string.artwork_backdrops), style = MaterialTheme.typography.titleLarge) }
-                item {
-                    val backdrops = editor.filteredBackdrops
-                    if (backdrops.isEmpty()) {
-                        MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_backdrop_kind))
-                    } else {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(backdrops, key = { "${it.provider}:${it.reference}" }) { asset ->
-                                val selected = editor.selectedBackdrop == asset
-                                Card(
-                                    modifier = Modifier
-                                        .width(228.dp)
-                                        .height(128.dp)
-                                        .clickable { onBackdropSelected(asset) }
-                                        .semantics { this.selected = selected },
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (selected) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                        },
-                                    ),
-                                ) {
-                                    Box(Modifier.fillMaxSize()) {
-                                        AsyncImage(
-                                            model = artworkImageUrl(asset, "w780"),
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize().padding(4.dp),
-                                            contentScale = ContentScale.Crop,
-                                        )
-                                        SelectionCheckmark(
-                                            selected = selected,
-                                            selectedContainerColor = MaterialTheme.colorScheme.primary,
-                                            selectedContentColor = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                                        )
-                                        Text(
-                                            text = asset.provider.value,
-                                            modifier = Modifier
-                                                .align(Alignment.BottomStart)
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 3.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                        )
-                                    }
+            }
+            item { Text(stringResource(R.string.artwork_backdrops), style = MaterialTheme.typography.titleLarge) }
+            item {
+                val backdrops = editor.filteredBackdrops
+                if (backdrops.isEmpty()) {
+                    MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_backdrop_kind))
+                } else {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(backdrops, key = { "${it.provider}:${it.reference}" }) { asset ->
+                            val selected = editor.selectedBackdrop == asset
+                            Card(
+                                modifier = Modifier
+                                    .width(228.dp)
+                                    .height(128.dp)
+                                    .clickable { onBackdropSelected(asset) }
+                                    .semantics { this.selected = selected },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (selected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                ),
+                            ) {
+                                Box(Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = artworkImageUrl(asset, "w780"),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    SelectionCheckmark(
+                                        selected = selected,
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                                    )
+                                    Text(
+                                        text = asset.provider.value,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.90f), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
                                 }
                             }
                         }
                     }
                 }
-                item {
-                    Button(
-                        onClick = onSave,
-                        enabled = editor.selectedPoster != null ||
-                            editor.selectedBackdrop != null ||
-                            editor.selectedLogo != null,
-                    ) {
-                        Text(stringResource(R.string.save_artwork))
-                    }
+            }
+            item {
+                Button(
+                    onClick = onSave,
+                    enabled = editor.selectedPoster != null ||
+                        editor.selectedBackdrop != null ||
+                        editor.selectedLogo != null,
+                ) {
+                    Text(stringResource(R.string.save_artwork))
                 }
             }
         }
@@ -859,152 +820,139 @@ internal fun MobileSourcePickerScreen(
     onProvider: (String?) -> Unit,
     onSource: (StreamCandidate) -> Unit,
 ) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {},
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back))
-                    }
-                },
-            )
-        },
-    ) { padding ->
-        if (picker.loading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-            return@Scaffold
+    if (picker.loading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
         }
-        val content: @Composable () -> Unit = {
-            Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!picker.media.logoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = picker.media.logoUrl,
-                            contentDescription = picker.media.name,
-                            modifier = Modifier.height(52.dp).fillMaxWidth(),
-                            contentScale = ContentScale.Fit,
-                        )
-                    } else {
-                        Text(picker.media.name, style = MaterialTheme.typography.headlineSmall)
-                    }
-                    picker.episode?.title?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item {
-                        MobileFilterChip(
-                            selected = picker.selectedProviderId == null,
-                            onClick = { onProvider(null) },
-                            label = { Text(stringResource(R.string.all_sources)) },
-                        )
-                    }
-                    items(picker.providerIds, key = { it }) { providerId ->
-                        MobileFilterChip(
-                            selected = picker.selectedProviderId == providerId,
-                            onClick = { onProvider(providerId) },
-                            label = { Text(picker.providerLabels[providerId] ?: providerId) },
-                        )
-                    }
-                }
-                picker.failures.values.forEach { error ->
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-                if (picker.visibleSources.isEmpty()) {
-                    Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    val content: @Composable () -> Unit = {
+        Column(Modifier.fillMaxSize().statusBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!picker.media.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = picker.media.logoUrl,
+                        contentDescription = picker.media.name,
+                        modifier = Modifier.height(52.dp).fillMaxWidth(),
+                        contentScale = ContentScale.Fit,
+                    )
                 } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        itemsIndexed(
-                            picker.visibleSources,
-                            key = { index, source -> sourceItemKey(source, index) },
-                        ) { _, source ->
-                            val providerLabel = picker.providerLabels[source.providerId]
-                            val presentation = remember(source, providerLabel) {
-                                source.sourcePresentation(providerLabel)
-                            }
-                            Card(
-                                onClick = { onSource(source) },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                ),
+                    Text(picker.media.name, style = MaterialTheme.typography.headlineSmall)
+                }
+                picker.episode?.title?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    MobileFilterChip(
+                        selected = picker.selectedProviderId == null,
+                        onClick = { onProvider(null) },
+                        label = { Text(stringResource(R.string.all_sources)) },
+                    )
+                }
+                items(picker.providerIds, key = { it }) { providerId ->
+                    MobileFilterChip(
+                        selected = picker.selectedProviderId == providerId,
+                        onClick = { onProvider(providerId) },
+                        label = { Text(picker.providerLabels[providerId] ?: providerId) },
+                    )
+                }
+            }
+            picker.failures.values.forEach { error ->
+                Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            if (picker.visibleSources.isEmpty()) {
+                Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    itemsIndexed(
+                        picker.visibleSources,
+                        key = { index, source -> sourceItemKey(source, index) },
+                    ) { _, source ->
+                        val providerLabel = picker.providerLabels[source.providerId]
+                        val presentation = remember(source, providerLabel) {
+                            source.sourcePresentation(providerLabel)
+                        }
+                        Card(
+                            onClick = { onSource(source) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp),
                                 ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(5.dp),
-                                    ) {
-                                        if (presentation.badges.isNotEmpty()) {
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                presentation.badges.forEach { badge ->
-                                                    Surface(
-                                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                                        shape = RoundedCornerShape(4.dp),
-                                                    ) {
-                                                        Text(
-                                                            badge,
-                                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                        )
-                                                    }
+                                    if (presentation.badges.isNotEmpty()) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            presentation.badges.forEach { badge ->
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                                    shape = RoundedCornerShape(4.dp),
+                                                ) {
+                                                    Text(
+                                                        badge,
+                                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                    )
                                                 }
                                             }
                                         }
-                                        Text(
-                                            presentation.title,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            style = MaterialTheme.typography.titleMedium,
-                                        )
-                                        presentation.description?.let { description ->
-                                            Text(
-                                                description,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 3,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                        }
-                                        if (!presentation.usesProviderFormatting) {
-                                            Text(
-                                                buildList {
-                                                    providerLabel?.let(::add)
-                                                    presentation.size?.let(::add)
-                                                    add(stringResource(presentation.transport.labelRes))
-                                                }.distinct().joinToString("  ·  "),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = MaterialTheme.typography.labelSmall,
-                                            )
-                                        }
                                     }
-                                    Icon(Icons.Outlined.PlayArrow, stringResource(R.string.play))
+                                    Text(
+                                        presentation.title,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
+                                    presentation.description?.let { description ->
+                                        Text(
+                                            description,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                    if (!presentation.usesProviderFormatting) {
+                                        Text(
+                                            buildList {
+                                                providerLabel?.let(::add)
+                                                presentation.size?.let(::add)
+                                                add(stringResource(presentation.transport.labelRes))
+                                            }.distinct().joinToString("  ·  "),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
+                                    }
                                 }
+                                Icon(Icons.Outlined.PlayArrow, stringResource(R.string.play))
                             }
                         }
                     }
                 }
             }
         }
-        if (widthSizeClass == WindowWidthSizeClass.Expanded) {
-            Row(Modifier.fillMaxSize().padding(padding)) {
-                Box(Modifier.weight(0.35f).fillMaxHeight()) {
-                    MediaArtwork(picker.media, Modifier.fillMaxSize(), preferBackdrop = true)
-                }
-                Box(Modifier.weight(0.65f).fillMaxHeight()) { content() }
+    }
+    if (widthSizeClass == WindowWidthSizeClass.Expanded) {
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(0.35f).fillMaxHeight()) {
+                MediaArtwork(picker.media, Modifier.fillMaxSize(), preferBackdrop = true)
             }
-        } else {
-            Box(Modifier.fillMaxSize().padding(padding)) { content() }
+            Box(Modifier.weight(0.65f).fillMaxHeight()) { content() }
         }
+    } else {
+        Box(Modifier.fillMaxSize()) { content() }
     }
 }
