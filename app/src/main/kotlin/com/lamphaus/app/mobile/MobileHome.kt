@@ -1,5 +1,11 @@
 package com.lamphaus.app.mobile
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
@@ -62,6 +68,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
@@ -83,6 +90,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import kotlin.math.roundToInt
+import kotlin.math.absoluteValue
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
@@ -91,9 +99,11 @@ import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.KenBurnsArtwork
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.LocalArtworkResolver
+import com.lamphaus.app.ui.rememberReducedMotion
 
 /** Resolved rows required before the home screen is revealed. */
 private const val HOME_REVEAL_READY_ROWS = 2
@@ -103,6 +113,15 @@ private const val HOME_REVEAL_WARM_MILLIS = 900L
 
 /** Skeleton cover hard cap so slow or failed loads still reveal. */
 private const val HOME_REVEAL_MAX_WAIT_MILLIS = 8_000L
+
+/** Counter-parallax so hero artwork trails the swipe instead of sliding flat. */
+private const val HERO_ARTWORK_PARALLAX_FRACTION = 0.55f
+
+/** Dimming applied to artwork as it leaves the settled page. */
+private const val HERO_ARTWORK_NEIGHBOR_DIM = 0.22f
+
+/** Crossfade timing for the detached hero title block (MOB-MOT-02: 150-250ms). */
+private const val HERO_CONTENT_FADE_MILLIS = 220
 
 @Composable
 internal fun MobileHomeScreen(
@@ -217,6 +236,7 @@ internal fun MobileHomeScreen(
                         onToggleLibrary,
                         restoreMediaKey,
                         onFocusRestored,
+                        state.kenBurnsEnabled,
                     )
                 }
             } else if (
@@ -362,12 +382,14 @@ private fun MobileHeroCarousel(
     onToggleLibrary: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    kenBurnsEnabled: Boolean,
 ) {
+    if (items.isEmpty()) return
     val pagerState = rememberPagerState { items.size }
+    val reducedMotion = rememberReducedMotion()
     Box(Modifier.fillMaxWidth().height(400.dp)) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val media = items[page]
-            val saved = inLibrary(media)
             val pageDescription = stringResource(
                 R.string.hero_carousel_description_touch, media.name, page + 1, items.size,
             )
@@ -378,10 +400,30 @@ private fun MobileHeroCarousel(
                     .clickable(role = Role.Button) { onMedia(media) }
                     .semantics { contentDescription = pageDescription },
             ) {
-                MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
+                // Artwork trails the swipe (counter-parallax) and dims as it
+                // leaves the settled position. Pager state is read inside the
+                // layer block so swipes update draw layers without recomposing.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val offset = (
+                                (pagerState.currentPage - page) +
+                                    pagerState.currentPageOffsetFraction
+                                ).coerceIn(-1f, 1f)
+                            translationX = offset * size.width * HERO_ARTWORK_PARALLAX_FRACTION
+                            alpha = 1f - HERO_ARTWORK_NEIGHBOR_DIM * offset.absoluteValue
+                        },
+                ) {
+                    KenBurnsArtwork(
+                        media = media,
+                        enabled = kenBurnsEnabled,
+                        reducedMotion = reducedMotion,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
                 // Top scrim keeps status-bar icons legible on any artwork; the
                 // bottom scrim carries the title block like the TV hero.
-                // Ink wash behind the title block so text reads on any artwork.
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -403,83 +445,148 @@ private fun MobileHeroCarousel(
                             ),
                         ),
                 )
-                val heroLogo = LocalArtworkResolver.current.resolve(media).media.logoUrl
-                Column(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    if (heroLogo.isNullOrBlank()) {
-                        Text(
-                            text = media.name,
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                        )
-                    } else {
-                        AsyncImage(
-                            model = heroLogo,
-                            contentDescription = media.name,
-                            modifier = Modifier.heightIn(max = 64.dp),
-                            contentScale = ContentScale.Fit,
-                        )
-                    }
-                    MobileMetadataLine(
-                        presentation = media.metadataPresentation(maxGenres = 2),
-                        includeGenres = true,
-                        color = Color.White.copy(alpha = 0.88f),
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    Row(
-                        Modifier.padding(top = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(28.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        HeroIconAction(
-                            icon = if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                            label = stringResource(if (saved) R.string.saved else R.string.save),
-                            tint = if (saved) MaterialTheme.colorScheme.primary else Color.White,
-                            onClick = { onToggleLibrary(media) },
-                        )
-                        Button(
-                            onClick = { onPlay(media) },
-                            shape = RoundedCornerShape(26.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MobileTokens.textPrimary,
-                                contentColor = Color.Black,
-                            ),
-                        ) {
-                            Icon(Icons.Outlined.PlayArrow, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
-                        }
-                        HeroIconAction(
-                            icon = Icons.Outlined.Info,
-                            label = stringResource(R.string.info),
-                            tint = Color.White,
-                            onClick = { onMedia(media) },
-                        )
-                    }
-                    Row(
-                        Modifier.padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        repeat(items.size) { index ->
-                            val active = index == pagerState.currentPage
-                            val width by animateDpAsState(targetValue = if (active) 18.dp else 6.dp, label = "hero indicator")
-                            Box(
-                                Modifier
-                                    .size(width, 6.dp)
-                                    .clip(CircleShape)
-                                    .background(if (active) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.45f)),
-                            )
-                        }
-                    }
-                }
             }
+        }
+        // Detached overlay: the title block crossfades and the page indicator
+        // holds still instead of sliding with the pager pages.
+        val current = items[pagerState.currentPage.coerceIn(0, items.lastIndex)]
+        AnimatedContent(
+            targetState = current,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            transitionSpec = {
+                if (reducedMotion) {
+                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                } else {
+                    (
+                        fadeIn(
+                            tween(
+                                HERO_CONTENT_FADE_MILLIS,
+                                delayMillis = HERO_CONTENT_FADE_MILLIS / 2,
+                            ),
+                        ) +
+                            slideInVertically(
+                                tween(
+                                    HERO_CONTENT_FADE_MILLIS,
+                                    delayMillis = HERO_CONTENT_FADE_MILLIS / 2,
+                                ),
+                            ) { height -> height / 10 }
+                        ) togetherWith fadeOut(tween(HERO_CONTENT_FADE_MILLIS / 2))
+                }
+            },
+            label = "hero content",
+        ) { media ->
+            HeroOverlayContent(
+                media = media,
+                saved = inLibrary(media),
+                onMedia = onMedia,
+                onPlay = onPlay,
+                onToggleLibrary = onToggleLibrary,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            repeat(items.size) { index ->
+                val active = index == pagerState.currentPage
+                val width by animateDpAsState(
+                    targetValue = if (active) 18.dp else 6.dp,
+                    label = "hero indicator",
+                )
+                val dotColor by animateColorAsState(
+                    targetValue = if (active) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        Color.White.copy(alpha = 0.45f)
+                    },
+                    animationSpec = tween(HERO_CONTENT_FADE_MILLIS),
+                    label = "hero indicator color",
+                )
+                Box(
+                    Modifier
+                        .size(width, 6.dp)
+                        .clip(CircleShape)
+                        .background(dotColor),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Title, metadata, and actions for the settled hero page. Lives outside the
+ * pager so it crossfades on page change instead of sliding with the artwork.
+ */
+@Composable
+private fun HeroOverlayContent(
+    media: MediaPreview,
+    saved: Boolean,
+    onMedia: (MediaPreview) -> Unit,
+    onPlay: (MediaPreview) -> Unit,
+    onToggleLibrary: (MediaPreview) -> Unit,
+) {
+    val heroLogo = LocalArtworkResolver.current.resolve(media).media.logoUrl
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 48.dp), // clearance for the detached page indicator
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (heroLogo.isNullOrBlank()) {
+            Text(
+                text = media.name,
+                style = MaterialTheme.typography.headlineMedium,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            AsyncImage(
+                model = heroLogo,
+                contentDescription = media.name,
+                modifier = Modifier.heightIn(max = 64.dp),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        MobileMetadataLine(
+            presentation = media.metadataPresentation(maxGenres = 2),
+            includeGenres = true,
+            color = Color.White.copy(alpha = 0.88f),
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Row(
+            Modifier.padding(top = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(28.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HeroIconAction(
+                icon = if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                label = stringResource(if (saved) R.string.saved else R.string.save),
+                tint = if (saved) MaterialTheme.colorScheme.primary else Color.White,
+                onClick = { onToggleLibrary(media) },
+            )
+            Button(
+                onClick = { onPlay(media) },
+                shape = RoundedCornerShape(26.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MobileTokens.textPrimary,
+                    contentColor = Color.Black,
+                ),
+            ) {
+                Icon(Icons.Outlined.PlayArrow, null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
+            }
+            HeroIconAction(
+                icon = Icons.Outlined.Info,
+                label = stringResource(R.string.info),
+                tint = Color.White,
+                onClick = { onMedia(media) },
+            )
         }
     }
 }
