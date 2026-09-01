@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -41,22 +44,20 @@ import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -89,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+import androidx.compose.ui.unit.Dp
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.AppUiState
@@ -344,7 +346,6 @@ private fun MobileSignedInApp(
                                 state = state,
                                 onMedia = openMedia,
                                 onAddSource = { settingsOpen = true },
-                                onSettings = { settingsOpen = true },
                                 onLoadMore = viewModel::loadMoreCatalog,
                                 onRetry = viewModel::retryCatalogPage,
                                 onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
@@ -356,14 +357,12 @@ private fun MobileSignedInApp(
                             MobileDestination.DISCOVER -> DiscoverScreen(
                                 state = state,
                                 onMedia = openMedia,
-                                onSettings = { settingsOpen = true },
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
                             MobileDestination.LIBRARY -> LibraryScreen(
                                 state = state,
                                 onMedia = openMedia,
-                                onSettings = { settingsOpen = true },
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
@@ -378,7 +377,6 @@ private fun MobileSignedInApp(
                                 onCatalogLoadMore = viewModel::loadMoreCatalog,
                                 onCatalogRetry = viewModel::retryCatalogPage,
                                 onMedia = openMedia,
-                                onSettings = { settingsOpen = true },
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
                             )
@@ -388,9 +386,15 @@ private fun MobileSignedInApp(
                     }
             }
             if (compact) {
-                Scaffold(
-                    bottomBar = { MobileNavBar(destination) { destination = it } },
-                ) { outer -> Box(Modifier.padding(outer)) { content() } }
+                Box(Modifier.fillMaxSize()) {
+                    content()
+                    MobileNavBar(
+                        destination = destination,
+                        onProfile = { settingsOpen = true },
+                        onSelect = { destination = it },
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                }
             } else {
                 Row(Modifier.fillMaxSize()) {
                     NavigationRail {
@@ -403,6 +407,12 @@ private fun MobileSignedInApp(
                             label = { Text(stringResource(item.labelRes)) },
                             )
                         }
+                        NavigationRailItem(
+                            selected = false,
+                            onClick = { settingsOpen = true },
+                            icon = { Icon(Icons.Outlined.Person, null) },
+                            label = { Text(stringResource(R.string.profile)) },
+                        )
                     }
                     Box(Modifier.weight(1f)) { content() }
                 }
@@ -414,10 +424,12 @@ private fun MobileSignedInApp(
 @Composable
 private fun MobileNavBar(
     destination: MobileDestination,
+    onProfile: () -> Unit,
     onSelect: (MobileDestination) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 24.dp)
@@ -452,38 +464,47 @@ private fun MobileNavBar(
                 )
             }
         }
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(28.dp))
+                .clickable(role = Role.Button) { onProfile() },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                Icons.Outlined.Person,
+                contentDescription = stringResource(R.string.profile),
+                tint = MobileTokens.textMuted,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                stringResource(R.string.profile),
+                style = MaterialTheme.typography.labelMedium,
+                color = MobileTokens.textMuted,
+                maxLines = 1,
+            )
+        }
     }
 }
 
 @Composable
-private fun MobileScreenHeader(
-    title: String,
-    showSettings: Boolean,
-    onSettings: () -> Unit,
-) {
-    Row(
-        Modifier
+private fun MobileScreenHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.displayLarge.copy(fontSize = 34.sp),
+        modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(top = 24.dp)
+            .padding(top = 12.dp)
             .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.displayLarge.copy(fontSize = 34.sp),
-            modifier = Modifier.weight(1f),
-        )
-        if (showSettings) {
-            IconButton(onClick = onSettings) {
-                Icon(
-                    Icons.Outlined.Settings,
-                    contentDescription = stringResource(R.string.settings_and_profiles),
-                )
-            }
-        }
-    }
+    )
 }
+
+@Composable
+internal fun navBarClearancePadding(): Dp =
+    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 92.dp
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -514,12 +535,11 @@ internal fun MobileFilterChip(
 private fun DiscoverScreen(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
-    onSettings: () -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        MobileScreenHeader(stringResource(R.string.discover), showSettings = true, onSettings = onSettings)
+        MobileScreenHeader(stringResource(R.string.discover))
         Box(Modifier.weight(1f)) {
             MediaGrid(
                 media = state.allMedia,
@@ -535,13 +555,12 @@ private fun DiscoverScreen(
 private fun LibraryScreen(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
-    onSettings: () -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
     val media = state.library.map { it.preview }
     Column(Modifier.fillMaxSize()) {
-        MobileScreenHeader(stringResource(R.string.library), showSettings = true, onSettings = onSettings)
+        MobileScreenHeader(stringResource(R.string.library))
         if (media.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Column(
@@ -575,12 +594,11 @@ private fun SearchScreen(
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(query) { onSearch(query) }
     Column(Modifier.fillMaxSize().imePadding()) {
-        MobileScreenHeader(stringResource(R.string.search), showSettings = true, onSettings = onSettings)
+        MobileScreenHeader(stringResource(R.string.search))
         TextField(
             value = query,
             onValueChange = { query = it },
@@ -661,7 +679,7 @@ private fun SearchScreen(
         } else if (state.searchSections.isEmpty()) {
             Text(stringResource(R.string.search_no_results), modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            LazyColumn(contentPadding = PaddingValues(bottom = navBarClearancePadding()), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 items(state.searchSections, key = CatalogSection::id) { section ->
                     CatalogRow(section, onMedia, onCatalogLoadMore, onCatalogRetry, restoreMediaKey, onFocusRestored)
                 }

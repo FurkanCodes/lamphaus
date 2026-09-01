@@ -166,4 +166,7 @@
     <string name="delete_account_explanation">Deleting your account removes your profiles, library, progress, settings and every paired TV from our servers. This cannot be undone.</string>
     <string name="delete_account_confirm_body">This permanently deletes your account and all cloud data on all devices. This cannot be undone.</string>
     <string name="cancel">Cancel</string>
+    <string name="profile">Profile</string>
+    <string name="resume">Resume</string>
+    <string name="resume_episode_format">Resume %1$s</string>
 </resources>

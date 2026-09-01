@@ -32,11 +32,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -85,7 +83,6 @@ internal fun MobileHomeScreen(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
-    onSettings: () -> Unit,
     onLoadMore: (String) -> Unit,
     onRetry: (String) -> Unit,
     onLoadMoreHome: () -> Unit,
@@ -142,12 +139,12 @@ internal fun MobileHomeScreen(
     }
     LazyColumn(
         state = listState,
-        contentPadding = PaddingValues(bottom = 32.dp),
+        contentPadding = PaddingValues(bottom = navBarClearancePadding()),
         verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
     ) {
         if (heroItems.isNotEmpty()) {
             item(key = "feature") {
-                MobileHeroCarousel(heroItems, onMedia, onSettings, restoreMediaKey, onFocusRestored)
+                MobileHeroCarousel(heroItems, onMedia, restoreMediaKey, onFocusRestored)
             }
         } else if (
             state.initialContentLoading ||
@@ -273,7 +270,6 @@ private fun MobileCatalogItemsLoadingSkeleton(
 private fun MobileHeroCarousel(
     items: List<MediaPreview>,
     onMedia: (MediaPreview) -> Unit,
-    onSettings: () -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
@@ -351,20 +347,6 @@ private fun MobileHeroCarousel(
                         .background(if (active) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.45f)),
                 )
             }
-        }
-        IconButton(
-            onClick = onSettings,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-                .background(Color.Black.copy(alpha = 0.45f), CircleShape),
-        ) {
-            Icon(
-                Icons.Outlined.Settings,
-                contentDescription = stringResource(R.string.settings_and_profiles),
-                tint = Color.White,
-            )
         }
     }
 }
@@ -641,7 +623,12 @@ internal fun MediaGrid(
     LazyVerticalGrid(
         modifier = modifier,
         columns = GridCells.Adaptive(150.dp),
-        contentPadding = PaddingValues(MobileTokens.spacingScreen),
+        contentPadding = PaddingValues(
+            start = MobileTokens.spacingScreen,
+            end = MobileTokens.spacingScreen,
+            top = MobileTokens.spacingScreen,
+            bottom = navBarClearancePadding(),
+        ),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
