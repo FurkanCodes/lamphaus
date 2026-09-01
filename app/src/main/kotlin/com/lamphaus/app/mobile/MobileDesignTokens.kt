@@ -14,7 +14,7 @@ internal object MobileTokens {
     val hairline = Color(0x14FFFFFF) // dividers, borders
     val textPrimary = Color(0xFFF2F4F8)
     val textMuted = Color(0xFF9AA1AF)
-    val accent = Color(0xFF7D9BFF) // selected states, nav, links
+    val accent = Color(0xFFA8C8FF) // instrument blue, matches TV beam (TV-CLR-01)
 
     val radiusCard = 8.dp // posters, thumbnails
     val radiusResume = 12.dp // continue-watching landscape cards

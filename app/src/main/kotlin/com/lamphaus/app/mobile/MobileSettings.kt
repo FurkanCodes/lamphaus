@@ -40,7 +40,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.Visibility
@@ -92,7 +91,6 @@ internal enum class SettingsSection(
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     ADDONS(R.string.addons, Icons.Outlined.Extension),
     PAIRED_DEVICES(R.string.paired_devices, Icons.Outlined.Tv),
-    APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
     SPOILER_PROTECTION(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ARTWORK(R.string.artwork, Icons.Outlined.Image),
     PRIVACY(R.string.privacy, Icons.Outlined.Lock),
@@ -126,7 +124,6 @@ internal fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, on
             SettingsSection.PROFILES -> SettingsProfilesPage(state, viewModel)
             SettingsSection.ADDONS -> SettingsAddonsPage(state, viewModel)
             SettingsSection.PAIRED_DEVICES -> SettingsPairedDevicesPage(state, viewModel)
-            SettingsSection.APPEARANCE -> SettingsAppearancePage(state, viewModel)
             SettingsSection.SPOILER_PROTECTION -> SettingsSpoilerPage(state, viewModel)
             SettingsSection.ARTWORK -> SettingsArtworkPage(state, viewModel)
             SettingsSection.PRIVACY -> SettingsPrivacyPage(state, viewModel)
@@ -143,7 +140,6 @@ private fun SettingsRootMenu(onSelect: (SettingsSection) -> Unit) {
         if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
             add(SettingsSection.PAIRED_DEVICES)
         }
-        add(SettingsSection.APPEARANCE)
         add(SettingsSection.SPOILER_PROTECTION)
         add(SettingsSection.ARTWORK)
         add(SettingsSection.PRIVACY)
@@ -373,24 +369,6 @@ private fun SettingsPairedDevicesPage(state: AppUiState, viewModel: AppViewModel
                 TextButton(onClick = { deviceToRevoke = null }) { Text(stringResource(R.string.cancel)) }
             },
         )
-    }
-}
-
-@Composable
-private fun SettingsAppearancePage(state: AppUiState, viewModel: AppViewModel) {
-    SettingsPage(title = stringResource(R.string.appearance)) {
-        item {
-            SettingsCard(stringResource(R.string.appearance)) {
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.ken_burns_effect)) },
-                    supportingContent = { Text(stringResource(R.string.ken_burns_effect_description)) },
-                    trailingContent = {
-                        Switch(checked = state.kenBurnsEnabled, onCheckedChange = viewModel::setKenBurnsEnabled)
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-        }
     }
 }
 

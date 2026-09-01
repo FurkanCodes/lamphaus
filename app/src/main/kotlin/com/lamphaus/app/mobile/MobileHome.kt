@@ -1,8 +1,15 @@
 package com.lamphaus.app.mobile
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -16,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,9 +39,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,21 +55,28 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,13 +84,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
+import coil3.compose.AsyncImage
 import com.lamphaus.app.ui.MediaArtwork
-import com.lamphaus.app.ui.KenBurnsArtwork
-import com.lamphaus.app.ui.rememberReducedMotion
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import kotlin.math.roundToInt
+import kotlin.math.absoluteValue
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
@@ -80,8 +99,29 @@ import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.KenBurnsArtwork
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
+import com.lamphaus.app.ui.LocalArtworkResolver
+import com.lamphaus.app.ui.rememberReducedMotion
+
+/** Resolved rows required before the home screen is revealed. */
+private const val HOME_REVEAL_READY_ROWS = 2
+
+/** Warm-up window so the first rows' images decode behind the cover. */
+private const val HOME_REVEAL_WARM_MILLIS = 900L
+
+/** Skeleton cover hard cap so slow or failed loads still reveal. */
+private const val HOME_REVEAL_MAX_WAIT_MILLIS = 8_000L
+
+/** Counter-parallax so hero artwork trails the swipe instead of sliding flat. */
+private const val HERO_ARTWORK_PARALLAX_FRACTION = 0.55f
+
+/** Dimming applied to artwork as it leaves the settled page. */
+private const val HERO_ARTWORK_NEIGHBOR_DIM = 0.22f
+
+/** Crossfade timing for the detached hero title block (MOB-MOT-02: 150-250ms). */
+private const val HERO_CONTENT_FADE_MILLIS = 220
 
 @Composable
 internal fun MobileHomeScreen(
@@ -95,7 +135,8 @@ internal fun MobileHomeScreen(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onPlay: (MediaPreview) -> Unit,
-    kenBurnsEnabled: Boolean,
+    inLibrary: (MediaPreview) -> Boolean,
+    onToggleLibrary: (MediaPreview) -> Unit,
 ) {
     val allMedia = state.allMedia
     // Same feature selection as the TV home: first five distinct catalog items.
@@ -119,6 +160,35 @@ internal fun MobileHomeScreen(
             .toList()
     }
     val listState = rememberLazyListState()
+    var revealed by rememberSaveable { mutableStateOf(false) }
+    val readyRows = state.sections.count { section -> section.items.isNotEmpty() }
+    val homeEmpty = !state.initialContentLoading &&
+        !state.homeCatalogBatch.loadingMore &&
+        !state.homeCatalogBatch.loadMoreFailed &&
+        !state.homeCatalogBatch.hasMore &&
+        state.providers.isEmpty() &&
+        state.sections.isEmpty()
+    // Content that was already resident (back navigation, warm process) skips
+    // the warm-up: images are cached and the screen can appear instantly.
+    val warmOnReady = remember { readyRows < HOME_REVEAL_READY_ROWS }
+    LaunchedEffect(readyRows, homeEmpty) {
+        if (revealed) return@LaunchedEffect
+        when {
+            homeEmpty -> revealed = true
+            readyRows >= HOME_REVEAL_READY_ROWS -> {
+                if (warmOnReady) {
+                    delay(HOME_REVEAL_WARM_MILLIS)
+                }
+                revealed = true
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (!revealed) {
+            delay(HOME_REVEAL_MAX_WAIT_MILLIS)
+            revealed = true
+        }
+    }
     LaunchedEffect(
         listState,
         state.sections.size,
@@ -144,62 +214,85 @@ internal fun MobileHomeScreen(
             }
         }
     }
-    LazyColumn(
-        state = listState,
-        contentPadding = PaddingValues(bottom = navBarClearancePadding()),
-        verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
-    ) {
-        if (heroItems.isNotEmpty()) {
-            item(key = "feature") {
-                MobileHeroCarousel(
-                    heroItems,
-                    onMedia,
-                    onPlay,
-                    kenBurnsEnabled,
-                    restoreMediaKey,
-                    onFocusRestored,
-                )
-            }
-        } else if (
-            state.initialContentLoading ||
-            state.homeCatalogBatch.loadingMore ||
-            state.sections.any(CatalogSection::initialLoading)
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = tween(220),
+        label = "home reveal",
+    )
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().alpha(contentAlpha),
+            contentPadding = PaddingValues(bottom = navBarClearancePadding()),
+            verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
         ) {
-            // Keep the hero slot present while the first catalog window loads,
-            // so the big card never disappears during progressive loading.
-            item(key = "feature") { MobileHeroLoadingSkeleton() }
-        }
-        if (continueWatching.isNotEmpty()) {
-            item(key = "continue-watching") {
-                MobileContinueWatchingRow(continueWatching, onMedia)
+            if (heroItems.isNotEmpty()) {
+                item(key = "feature") {
+                    MobileHeroCarousel(
+                        heroItems,
+                        onMedia,
+                        onPlay,
+                        inLibrary,
+                        onToggleLibrary,
+                        restoreMediaKey,
+                        onFocusRestored,
+                        state.kenBurnsEnabled,
+                    )
+                }
+            } else if (
+                state.initialContentLoading ||
+                state.homeCatalogBatch.loadingMore ||
+                state.sections.any(CatalogSection::initialLoading)
+            ) {
+                // Keep the hero slot present while the first catalog window loads,
+                // so the big card never disappears during progressive loading.
+                item(key = "feature") { MobileHeroLoadingSkeleton() }
             }
-        }
-        if (
-            !state.initialContentLoading &&
-            !state.homeCatalogBatch.loadingMore &&
-            !state.homeCatalogBatch.loadMoreFailed &&
-            !state.homeCatalogBatch.hasMore &&
-            state.providers.isEmpty() &&
-            state.sections.isEmpty()
-        ) {
-            item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
-        }
-        items(state.sections, key = CatalogSection::id) { section ->
-            CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
-        }
-        when {
-            state.homeCatalogBatch.loadMoreFailed -> item(key = "home-catalog-retry") {
-                OutlinedButton(
-                    onClick = onRetryHome,
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                ) {
-                    Text(stringResource(R.string.retry))
+            if (continueWatching.isNotEmpty()) {
+                item(key = "continue-watching") {
+                    MobileContinueWatchingRow(continueWatching, onMedia)
                 }
             }
-            state.homeCatalogBatch.loadingMore && state.sections.none(CatalogSection::initialLoading) -> {
-                item(key = "home-catalog-loading") {
-                    MobileHomeCatalogLoadingSkeleton()
+            if (
+                !state.initialContentLoading &&
+                !state.homeCatalogBatch.loadingMore &&
+                !state.homeCatalogBatch.loadMoreFailed &&
+                !state.homeCatalogBatch.hasMore &&
+                state.providers.isEmpty() &&
+                state.sections.isEmpty()
+            ) {
+                item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
+            }
+            items(state.sections, key = CatalogSection::id) { section ->
+                CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
+            }
+            when {
+                state.homeCatalogBatch.loadMoreFailed -> item(key = "home-catalog-retry") {
+                    OutlinedButton(
+                        onClick = onRetryHome,
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                    ) {
+                        Text(stringResource(R.string.retry))
+                    }
                 }
+                state.homeCatalogBatch.loadingMore && state.sections.none(CatalogSection::initialLoading) -> {
+                    item(key = "home-catalog-loading") {
+                        MobileHomeCatalogLoadingSkeleton()
+                    }
+                }
+            }
+        }
+        if (!revealed) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MobileTokens.ink)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {},
+            ) {
+                LoadingScreen()
             }
         }
     }
@@ -285,11 +378,15 @@ private fun MobileHeroCarousel(
     items: List<MediaPreview>,
     onMedia: (MediaPreview) -> Unit,
     onPlay: (MediaPreview) -> Unit,
-    kenBurnsEnabled: Boolean,
+    inLibrary: (MediaPreview) -> Boolean,
+    onToggleLibrary: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    kenBurnsEnabled: Boolean,
 ) {
+    if (items.isEmpty()) return
     val pagerState = rememberPagerState { items.size }
+    val reducedMotion = rememberReducedMotion()
     Box(Modifier.fillMaxWidth().height(400.dp)) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val media = items[page]
@@ -303,10 +400,30 @@ private fun MobileHeroCarousel(
                     .clickable(role = Role.Button) { onMedia(media) }
                     .semantics { contentDescription = pageDescription },
             ) {
-                MobileHeroArtwork(media, kenBurnsEnabled, Modifier.fillMaxSize())
+                // Artwork trails the swipe (counter-parallax) and dims as it
+                // leaves the settled position. Pager state is read inside the
+                // layer block so swipes update draw layers without recomposing.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val offset = (
+                                (pagerState.currentPage - page) +
+                                    pagerState.currentPageOffsetFraction
+                                ).coerceIn(-1f, 1f)
+                            translationX = offset * size.width * HERO_ARTWORK_PARALLAX_FRACTION
+                            alpha = 1f - HERO_ARTWORK_NEIGHBOR_DIM * offset.absoluteValue
+                        },
+                ) {
+                    KenBurnsArtwork(
+                        media = media,
+                        enabled = kenBurnsEnabled,
+                        reducedMotion = reducedMotion,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
                 // Top scrim keeps status-bar icons legible on any artwork; the
                 // bottom scrim carries the title block like the TV hero.
-                // Ink wash behind the title block so text reads on any artwork.
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -328,70 +445,170 @@ private fun MobileHeroCarousel(
                             ),
                         ),
                 )
-                Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp, vertical = 20.dp)) {
-                    Text(media.name, style = MaterialTheme.typography.headlineSmall, color = Color.White)
-                    MobileMetadataLine(
-                        presentation = media.metadataPresentation(maxGenres = 1),
-                        includeGenres = true,
-                        color = Color.White.copy(alpha = 0.88f),
-                    )
-                    media.description?.takeIf { it.isNotBlank() }?.let { description ->
-                        Text(
-                            description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.76f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Button(
-                        onClick = { onPlay(media) },
-                        modifier = Modifier.padding(top = 12.dp),
-                        shape = RoundedCornerShape(26.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MobileTokens.textPrimary,
-                            contentColor = Color.Black,
-                        ),
-                    ) {
-                        Icon(Icons.Outlined.PlayArrow, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
-                    }
-                }
             }
         }
-        // Manual paging only: nothing auto-advances while the user is reading.
+        // Detached overlay: the title block crossfades and the page indicator
+        // holds still instead of sliding with the pager pages.
+        val current = items[pagerState.currentPage.coerceIn(0, items.lastIndex)]
+        AnimatedContent(
+            targetState = current,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            transitionSpec = {
+                if (reducedMotion) {
+                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                } else {
+                    (
+                        fadeIn(
+                            tween(
+                                HERO_CONTENT_FADE_MILLIS,
+                                delayMillis = HERO_CONTENT_FADE_MILLIS / 2,
+                            ),
+                        ) +
+                            slideInVertically(
+                                tween(
+                                    HERO_CONTENT_FADE_MILLIS,
+                                    delayMillis = HERO_CONTENT_FADE_MILLIS / 2,
+                                ),
+                            ) { height -> height / 10 }
+                        ) togetherWith fadeOut(tween(HERO_CONTENT_FADE_MILLIS / 2))
+                }
+            },
+            label = "hero content",
+        ) { media ->
+            HeroOverlayContent(
+                media = media,
+                saved = inLibrary(media),
+                onMedia = onMedia,
+                onPlay = onPlay,
+                onToggleLibrary = onToggleLibrary,
+            )
+        }
         Row(
-            Modifier.align(Alignment.BottomEnd).padding(horizontal = 20.dp, vertical = 20.dp),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
             repeat(items.size) { index ->
                 val active = index == pagerState.currentPage
-                val width by animateDpAsState(targetValue = if (active) 18.dp else 6.dp, label = "hero indicator")
+                val width by animateDpAsState(
+                    targetValue = if (active) 18.dp else 6.dp,
+                    label = "hero indicator",
+                )
+                val dotColor by animateColorAsState(
+                    targetValue = if (active) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        Color.White.copy(alpha = 0.45f)
+                    },
+                    animationSpec = tween(HERO_CONTENT_FADE_MILLIS),
+                    label = "hero indicator color",
+                )
                 Box(
                     Modifier
                         .size(width, 6.dp)
                         .clip(CircleShape)
-                        .background(if (active) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.45f)),
+                        .background(dotColor),
                 )
             }
         }
     }
 }
 
+/**
+ * Title, metadata, and actions for the settled hero page. Lives outside the
+ * pager so it crossfades on page change instead of sliding with the artwork.
+ */
 @Composable
-internal fun MobileHeroArtwork(
+private fun HeroOverlayContent(
     media: MediaPreview,
-    kenBurnsEnabled: Boolean,
-    modifier: Modifier = Modifier,
+    saved: Boolean,
+    onMedia: (MediaPreview) -> Unit,
+    onPlay: (MediaPreview) -> Unit,
+    onToggleLibrary: (MediaPreview) -> Unit,
 ) {
-    KenBurnsArtwork(
-        media = media,
-        enabled = kenBurnsEnabled,
-        reducedMotion = rememberReducedMotion(),
-        modifier = modifier,
-    )
+    val heroLogo = LocalArtworkResolver.current.resolve(media).media.logoUrl
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 48.dp), // clearance for the detached page indicator
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (heroLogo.isNullOrBlank()) {
+            Text(
+                text = media.name,
+                style = MaterialTheme.typography.headlineMedium,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            AsyncImage(
+                model = heroLogo,
+                contentDescription = media.name,
+                modifier = Modifier.heightIn(max = 64.dp),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        MobileMetadataLine(
+            presentation = media.metadataPresentation(maxGenres = 2),
+            includeGenres = true,
+            color = Color.White.copy(alpha = 0.88f),
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Row(
+            Modifier.padding(top = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(28.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HeroIconAction(
+                icon = if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                label = stringResource(if (saved) R.string.saved else R.string.save),
+                tint = if (saved) MaterialTheme.colorScheme.primary else Color.White,
+                onClick = { onToggleLibrary(media) },
+            )
+            Button(
+                onClick = { onPlay(media) },
+                shape = RoundedCornerShape(26.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MobileTokens.textPrimary,
+                    contentColor = Color.Black,
+                ),
+            ) {
+                Icon(Icons.Outlined.PlayArrow, null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
+            }
+            HeroIconAction(
+                icon = Icons.Outlined.Info,
+                label = stringResource(R.string.info),
+                tint = Color.White,
+                onClick = { onMedia(media) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeroIconAction(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint)
+        Spacer(Modifier.height(2.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
+    }
 }
 
 @Composable

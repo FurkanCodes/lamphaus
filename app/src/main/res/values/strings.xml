@@ -130,6 +130,9 @@
     <string name="media_card_description_rating">%1$s, rated %2$s out of 10</string>
     <string name="media_card_description_progress">%1$s, %2$d%% watched</string>
     <string name="continue_watching_time_left">%1$s left</string>
+    <string name="save">Save</string>
+    <string name="saved">Saved</string>
+    <string name="info">Info</string>
     <string name="hero_carousel_description_touch">%1$s, featured title %2$d of %3$d. Swipe to browse.</string>
     <string name="episodes">Episodes</string>
     <string name="watched">Watched</string>
