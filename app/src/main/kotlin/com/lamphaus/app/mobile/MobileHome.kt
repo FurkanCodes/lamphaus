@@ -462,24 +462,23 @@ private fun MobileHeroCarousel(
                             onClick = { onMedia(media) },
                         )
                     }
+                    Row(
+                        Modifier.padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        repeat(items.size) { index ->
+                            val active = index == pagerState.currentPage
+                            val width by animateDpAsState(targetValue = if (active) 18.dp else 6.dp, label = "hero indicator")
+                            Box(
+                                Modifier
+                                    .size(width, 6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (active) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.45f)),
+                            )
+                        }
+                    }
                 }
-            }
-        }
-        // Manual paging only: nothing auto-advances while the user is reading.
-        Row(
-            Modifier.align(Alignment.BottomEnd).padding(horizontal = 20.dp, vertical = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            repeat(items.size) { index ->
-                val active = index == pagerState.currentPage
-                val width by animateDpAsState(targetValue = if (active) 18.dp else 6.dp, label = "hero indicator")
-                Box(
-                    Modifier
-                        .size(width, 6.dp)
-                        .clip(CircleShape)
-                        .background(if (active) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.45f)),
-                )
             }
         }
     }
