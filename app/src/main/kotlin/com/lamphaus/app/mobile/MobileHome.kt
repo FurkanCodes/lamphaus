@@ -1,7 +1,6 @@
 package com.lamphaus.app.mobile
 
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -65,7 +64,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -96,7 +94,6 @@ import com.lamphaus.app.R
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.LocalArtworkResolver
-import com.lamphaus.app.ui.rememberArtworkAmbient
 
 /** Resolved rows required before the home screen is revealed. */
 private const val HOME_REVEAL_READY_ROWS = 2
@@ -367,12 +364,6 @@ private fun MobileHeroCarousel(
     onFocusRestored: () -> Unit,
 ) {
     val pagerState = rememberPagerState { items.size }
-    val ambient = rememberArtworkAmbient(items[pagerState.currentPage.coerceAtMost(items.lastIndex)])
-    val bleed by animateColorAsState(
-        targetValue = ambient ?: Color.Transparent,
-        animationSpec = tween(600),
-        label = "hero ambient bleed",
-    )
     Box(Modifier.fillMaxWidth().height(400.dp)) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val media = items[page]
@@ -395,12 +386,7 @@ private fun MobileHeroCarousel(
                     Modifier
                         .fillMaxSize()
                         .background(
-                            Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.42f to Color.Transparent,
-                                0.66f to lerp(Color.Transparent, bleed, 0.72f),
-                                1f to MobileTokens.ink,
-                            ),
+                            Brush.verticalGradient(0f to Color.Transparent, 1f to MobileTokens.ink),
                         ),
                 )
                 Box(
