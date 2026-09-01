@@ -3,27 +3,27 @@ package com.lamphaus.app.mobile
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
@@ -54,6 +54,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.OutlinedButton
@@ -80,10 +83,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -341,10 +340,15 @@ private fun MobileSignedInApp(
             val compact = widthSizeClass == WindowWidthSizeClass.Compact
             val content: @Composable () -> Unit = {
                 Box(Modifier.fillMaxSize()) {
-                    Crossfade(
+                    AnimatedContent(
                         targetState = destination,
-                        animationSpec = tween(180),
-                        label = "tab",
+                        transitionSpec = {
+                            (fadeIn(tween(220, delayMillis = 90, easing = LinearOutSlowInEasing)) + scaleIn(
+                                initialScale = 0.92f,
+                                animationSpec = tween(220, delayMillis = 90, easing = LinearOutSlowInEasing),
+                            )) togetherWith fadeOut(tween(90, easing = FastOutLinearInEasing))
+                        },
+                        label = "destination",
                     ) { tab ->
                         when (tab) {
                             MobileDestination.HOME -> MobileHomeScreen(
@@ -435,64 +439,59 @@ private fun MobileNavBar(
     onSelect: (MobileDestination) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier
+    NavigationBar(
+        modifier = modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 24.dp)
-            .padding(bottom = 12.dp)
-            .background(MobileTokens.surface.copy(alpha = 0.92f), RoundedCornerShape(28.dp))
-            .height(64.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .border(1.dp, MobileTokens.hairline, RoundedCornerShape(20.dp)),
+        containerColor = MobileTokens.surface.copy(alpha = 0.94f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp,
+        windowInsets = WindowInsets(0, 0, 0, 0),
     ) {
         MobileDestination.entries.forEach { item ->
-            val isSelected = destination == item
-            Column(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(28.dp))
-                    .clickable(role = Role.Tab) { onSelect(item) }
-                    .semantics { if (isSelected) selected = true },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Icon(
-                    if (isSelected) item.selectedIcon else item.icon,
-                    contentDescription = stringResource(item.labelRes),
-                    tint = if (isSelected) MobileTokens.accent else MobileTokens.textMuted,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    stringResource(item.labelRes),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (isSelected) MobileTokens.accent else MobileTokens.textMuted,
-                    maxLines = 1,
-                )
-            }
-        }
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(28.dp))
-                .clickable(role = Role.Button) { onProfile() },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                Icons.Outlined.Person,
-                contentDescription = stringResource(R.string.profile),
-                tint = MobileTokens.textMuted,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                stringResource(R.string.profile),
-                style = MaterialTheme.typography.labelMedium,
-                color = MobileTokens.textMuted,
-                maxLines = 1,
+            NavigationBarItem(
+                selected = destination == item,
+                onClick = { onSelect(item) },
+                icon = { MobileNavIcon(item, destination == item) },
+                label = { Text(stringResource(item.labelRes), style = MaterialTheme.typography.labelSmall) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = Color.Transparent,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
             )
         }
+        NavigationBarItem(
+            selected = false,
+            onClick = onProfile,
+            icon = { Icon(Icons.Outlined.Person, contentDescription = null) },
+            label = { Text(stringResource(R.string.profile), style = MaterialTheme.typography.labelSmall) },
+            colors = NavigationBarItemDefaults.colors(
+                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun MobileNavIcon(item: MobileDestination, selected: Boolean) {
+    AnimatedContent(
+        targetState = selected,
+        transitionSpec = {
+            (fadeIn(tween(140, delayMillis = 40)) + scaleIn(
+                initialScale = 0.72f,
+                animationSpec = spring(dampingRatio = 0.75f, stiffness = 500f),
+            )) togetherWith fadeOut(tween(80))
+        },
+        label = "navIcon",
+    ) { isSelected ->
+        Icon(if (isSelected) item.selectedIcon else item.icon, contentDescription = null)
     }
 }
 
@@ -511,7 +510,7 @@ internal fun MobileScreenHeader(title: String) {
 
 @Composable
 internal fun navBarClearancePadding(): Dp =
-    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 92.dp
+    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 88.dp
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)

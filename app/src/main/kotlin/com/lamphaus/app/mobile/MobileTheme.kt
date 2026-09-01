@@ -28,7 +28,11 @@ private val MobileDark = darkColorScheme(
     surfaceContainerHigh = MobileTokens.surfaceRaised,
     surfaceVariant = MobileTokens.surfaceRaised,
     primary = MobileTokens.accent,
-    onPrimary = Color.Black,
+    onPrimary = Color(0xFF003062), // TV-approved on-primary pairing
+    primaryContainer = MobileTokens.accent.copy(alpha = 0.16f),
+    onPrimaryContainer = MobileTokens.accent,
+    secondaryContainer = MobileTokens.accent.copy(alpha = 0.16f),
+    onSecondaryContainer = MobileTokens.accent,
     onSurfaceVariant = MobileTokens.textMuted,
     outlineVariant = MobileTokens.hairline,
 )
