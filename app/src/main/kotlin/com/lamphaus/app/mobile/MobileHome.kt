@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -71,6 +70,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -88,7 +88,6 @@ import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
-import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.R
@@ -537,71 +536,73 @@ private fun MobileContinueWatchingCard(
     onMedia: (MediaPreview) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val title = progress.episodeLabel ?: media.name
     val percent = (progress.fraction * 100).roundToInt()
-    val description = stringResource(R.string.media_card_description_progress, media.name, percent)
-    val typeLabel = when (media.type) {
-        MediaType.MOVIE -> stringResource(R.string.type_movie)
-        MediaType.SERIES -> stringResource(R.string.type_series)
-        MediaType.UNKNOWN -> null
+    val description = stringResource(R.string.media_card_description_progress, title, percent)
+    val remainingMillis = (progress.durationMillis - progress.positionMillis).coerceAtLeast(0)
+    val hours = remainingMillis / 3_600_000
+    val minutes = (remainingMillis % 3_600_000) / 60_000
+    val timeLeft = when {
+        hours > 0 -> "$hours h $minutes min"
+        minutes > 0 -> "$minutes min"
+        else -> null
     }
-    val metaLine = progress.episodeLabel
-        ?: listOfNotNull(media.releaseYear?.toString(), typeLabel).joinToString(" • ").takeIf { it.isNotBlank() }
-    Row(
+    Box(
         modifier
-            .width(320.dp)
-            .height(104.dp)
+            .width(220.dp)
+            .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(MobileTokens.radiusResume))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .clickable(role = Role.Button) { onMedia(media) }
             .semantics { contentDescription = description },
     ) {
-        Box(Modifier.width(68.dp).fillMaxHeight()) {
-            MediaArtwork(media, Modifier.fillMaxSize())
-        }
-        Column(
+        MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
+        Box(
             Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.45f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.78f),
+                    ),
+                ),
+        )
+        timeLeft?.let { left ->
             Text(
-                text = media.name,
-                style = MaterialTheme.typography.titleMedium,
-                color = MobileTokens.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                text = stringResource(R.string.continue_watching_time_left, left),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.62f))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
             )
-            metaLine?.let { line ->
-                Text(
-                    text = line,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MobileTokens.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-            Spacer(Modifier.height(10.dp))
+        }
+        Text(
+            text = title,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 8.dp, end = 8.dp, bottom = 15.dp),
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(7.dp)
+                .background(Color.Black.copy(alpha = 0.55f)),
+        ) {
             Box(
                 Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White.copy(alpha = 0.18f)),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(progress.fraction)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.primary),
-                )
-            }
-            Text(
-                text = stringResource(R.string.percent_watched, percent),
-                style = MaterialTheme.typography.labelSmall,
-                color = MobileTokens.textMuted,
-                modifier = Modifier.padding(top = 6.dp),
+                    .fillMaxWidth(progress.fraction)
+                    .height(7.dp)
+                    .background(MaterialTheme.colorScheme.primary),
             )
         }
     }
