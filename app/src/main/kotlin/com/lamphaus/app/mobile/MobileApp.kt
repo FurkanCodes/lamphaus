@@ -490,7 +490,7 @@ private fun MobileNavBar(
 }
 
 @Composable
-private fun MobileScreenHeader(title: String) {
+internal fun MobileScreenHeader(title: String) {
     Text(
         title,
         style = MaterialTheme.typography.displayLarge.copy(fontSize = 34.sp),
