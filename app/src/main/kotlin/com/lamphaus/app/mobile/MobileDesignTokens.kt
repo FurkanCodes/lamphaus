@@ -9,6 +9,7 @@ import androidx.compose.ui.unit.dp
  */
 internal object MobileTokens {
     val ink = Color(0xFF08090D) // app background, near-black
+    val black = Color(0xFF000000) // home-only canvas so hero artwork blends edge-to-edge
     val surface = Color(0xFF101218) // cards, fields, bars
     val surfaceRaised = Color(0xFF181B23) // raised rows, inputs, episode thumbs
     val hairline = Color(0x14FFFFFF) // dividers, borders

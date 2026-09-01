@@ -219,7 +219,7 @@ internal fun MobileHomeScreen(
         animationSpec = tween(220),
         label = "home reveal",
     )
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().background(MobileTokens.black)) {
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().alpha(contentAlpha),
@@ -286,7 +286,7 @@ internal fun MobileHomeScreen(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(MobileTokens.ink)
+                    .background(MobileTokens.black)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -428,7 +428,7 @@ private fun MobileHeroCarousel(
                     Modifier
                         .fillMaxSize()
                         .background(
-                            Brush.verticalGradient(0f to Color.Transparent, 1f to MobileTokens.ink),
+                            Brush.verticalGradient(0f to Color.Transparent, 1f to MobileTokens.black),
                         ),
                 )
                 Box(
