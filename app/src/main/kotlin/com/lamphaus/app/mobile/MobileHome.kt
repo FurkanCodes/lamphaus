@@ -3,7 +3,6 @@ package com.lamphaus.app.mobile
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -445,7 +444,7 @@ private fun MobileHeroCarousel(
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.55f to Color.Transparent,
+                            0.50f to Color.Transparent,
                             1f to MobileTokens.black,
                         ),
                     ),
@@ -459,9 +458,8 @@ private fun MobileHeroCarousel(
                         colorStops = arrayOf(
                             0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
                             0.16f to Color.Transparent,
-                            0.38f to Color.Transparent,
-                            0.70f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f),
-                            1f to MobileTokens.black,
+                            0.34f to Color.Transparent,
+                            0.68f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.50f),
                         ),
                     ),
                 ),
@@ -489,14 +487,12 @@ private fun MobileHeroCarousel(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth(),
+            contentAlignment = Alignment.BottomCenter,
             transitionSpec = {
                 if (reducedMotion) {
                     fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                 } else {
-                    (
-                        fadeIn(tween(HERO_CONTENT_FADE_MILLIS)) +
-                            slideInVertically(tween(HERO_CONTENT_FADE_MILLIS)) { height -> height / 16 }
-                        ) togetherWith fadeOut(tween(HERO_CONTENT_FADE_MILLIS / 2))
+                    fadeIn(tween(HERO_CONTENT_FADE_MILLIS)) togetherWith fadeOut(tween(HERO_CONTENT_FADE_MILLIS / 2))
                 }
             },
             label = "hero content",
