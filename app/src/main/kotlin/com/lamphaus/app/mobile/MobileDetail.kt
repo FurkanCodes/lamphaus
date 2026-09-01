@@ -1,6 +1,7 @@
 package com.lamphaus.app.mobile
 
 import androidx.annotation.StringRes
+import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +61,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
@@ -91,6 +93,7 @@ import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
+import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKey
 
@@ -102,6 +105,7 @@ internal fun MobileDetailScreen(
     inLibrary: Boolean,
     watchedEpisodeIds: Set<String>,
     spoilerProtection: SpoilerProtectionSettings,
+    resumeProgress: WatchProgress?,
     onBack: () -> Unit,
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
     onLibrary: () -> Unit,
@@ -140,37 +144,23 @@ internal fun MobileDetailScreen(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(onClick = { onPlay(null) }) {
-                    Icon(Icons.Outlined.PlayArrow, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.play))
-                }
-                OutlinedButton(onClick = onLibrary, enabled = !inLibrary) {
-                    Text(stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library))
-                }
-                OutlinedButton(onClick = onEditArtwork) {
-                    Text(stringResource(R.string.edit_artwork))
-                }
-            }
+            MobileDetailActions(
+                inLibrary = inLibrary,
+                resumeProgress = resumeProgress,
+                resumeEpisode = detail.episodes.firstOrNull { it.id == resumeProgress?.videoId },
+                onPlay = onPlay,
+                onLibrary = onLibrary,
+                onEditArtwork = onEditArtwork,
+            )
             val fullGenres = detail.preview.metadataPresentation(maxGenres = Int.MAX_VALUE).genres
             if (fullGenres.isNotEmpty()) {
                 MobileDetailMetadataSection(R.string.genres, fullGenres.joinToString(", "))
             }
             if (detail.cast.isNotEmpty()) {
-                MobileDetailMetadataSection(
-                    labelRes = R.string.cast,
-                    value = detail.cast.joinToString("  •  ", transform = ::plainPersonName),
-                )
+                MobilePersonChips(labelRes = R.string.cast, names = detail.cast)
             }
             if (detail.directors.isNotEmpty()) {
-                MobileDetailMetadataSection(
-                    labelRes = R.string.directors,
-                    value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
-                )
+                MobilePersonChips(labelRes = R.string.directors, names = detail.directors)
             }
         }
     }
@@ -181,7 +171,7 @@ internal fun MobileDetailScreen(
                 Modifier.fillMaxHeight().weight(0.44f),
                 preferBackdrop = true,
             )
-            LazyColumn(Modifier.weight(0.56f)) {
+            LazyColumn(Modifier.weight(0.56f).statusBarsPadding()) {
                 item { info() }
                 items(detail.episodes, key = { it.id }) { episode ->
                     EpisodeRow(
@@ -202,9 +192,17 @@ internal fun MobileDetailScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
-            item(key = "hero") { MobileDetailHero(detail, resolvedPreview) }
-            item(key = "actions") {
-                MobileDetailActions(inLibrary, onPlay = { onPlay(null) }, onLibrary, onEditArtwork)
+            item(key = "hero") {
+                MobileDetailHero(
+                    detail = detail,
+                    preview = resolvedPreview,
+                    resumeProgress = resumeProgress,
+                    resumeEpisode = detail.episodes.firstOrNull { it.id == resumeProgress?.videoId },
+                    inLibrary = inLibrary,
+                    onPlay = onPlay,
+                    onLibrary = onLibrary,
+                    onEditArtwork = onEditArtwork,
+                )
             }
             detail.preview.description
                 ?.takeIf(String::isNotBlank)
@@ -253,16 +251,10 @@ internal fun MobileDetailScreen(
                         MobileDetailMetadataSection(R.string.genres, fullGenres.joinToString(", "))
                     }
                     if (detail.cast.isNotEmpty()) {
-                        MobileDetailMetadataSection(
-                            labelRes = R.string.cast,
-                            value = detail.cast.joinToString("  •  ", transform = ::plainPersonName),
-                        )
+                        MobilePersonChips(labelRes = R.string.cast, names = detail.cast)
                     }
                     if (detail.directors.isNotEmpty()) {
-                        MobileDetailMetadataSection(
-                            labelRes = R.string.directors,
-                            value = detail.directors.joinToString("  •  ", transform = ::plainPersonName),
-                        )
+                        MobilePersonChips(labelRes = R.string.directors, names = detail.directors)
                     }
                 }
             }
@@ -274,8 +266,14 @@ internal fun MobileDetailScreen(
 private fun MobileDetailHero(
     detail: MediaDetail,
     preview: MediaPreview,
+    resumeProgress: WatchProgress?,
+    resumeEpisode: com.lamphaus.core.model.Episode?,
+    inLibrary: Boolean,
+    onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
+    onLibrary: () -> Unit,
+    onEditArtwork: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth().height(420.dp)) {
+    Box(Modifier.fillMaxWidth().height(480.dp)) {
         MediaArtwork(preview, Modifier.fillMaxSize(), preferBackdrop = true)
         // Top scrim keeps status-bar icons legible; the bottom ink wash carries
         // the title block on any artwork.
@@ -318,26 +316,52 @@ private fun MobileDetailHero(
                 includeGenres = false,
                 color = MobileTokens.textMuted,
             )
+            resumeProgress?.let { progress ->
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.72f)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress.fraction)
+                            .height(4.dp)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            MobileDetailActions(
+                inLibrary = inLibrary,
+                resumeProgress = resumeProgress,
+                resumeEpisode = resumeEpisode,
+                onPlay = onPlay,
+                onLibrary = onLibrary,
+                onEditArtwork = onEditArtwork,
+            )
         }
     }
 }
 
 @Composable
-private fun MobileDetailActions(
+internal fun MobileDetailActions(
     inLibrary: Boolean,
-    onPlay: () -> Unit,
+    resumeProgress: WatchProgress?,
+    resumeEpisode: com.lamphaus.core.model.Episode?,
+    onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
 ) {
     Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = MobileTokens.spacingScreen),
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Button(
-            onClick = onPlay,
+            onClick = { onPlay(resumeEpisode) },
             modifier = Modifier.weight(1f).height(52.dp),
             shape = RoundedCornerShape(26.dp),
             colors = ButtonDefaults.buttonColors(
@@ -347,7 +371,17 @@ private fun MobileDetailActions(
         ) {
             Icon(Icons.Outlined.PlayArrow, null)
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = when {
+                    resumeProgress == null -> stringResource(R.string.play)
+                    resumeProgress.episodeLabel != null ->
+                        stringResource(R.string.resume_episode_format, resumeProgress.episodeLabel ?: "")
+                    else -> stringResource(R.string.resume)
+                },
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
             if (inLibrary) {
@@ -710,6 +744,33 @@ private fun MobileDetailMetadataSection(@StringRes labelRes: Int, value: String)
 private fun plainPersonName(value: String): String =
     HtmlCompat.fromHtml(value, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun MobilePersonChips(@StringRes labelRes: Int, names: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            stringResource(labelRes),
+            style = MaterialTheme.typography.labelMedium,
+            color = MobileTokens.textMuted,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            names.forEach { name ->
+                Text(
+                    text = plainPersonName(name),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MobileTokens.surfaceRaised)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 internal fun EpisodeRow(
     episode: com.lamphaus.core.model.Episode,
@@ -727,6 +788,14 @@ internal fun EpisodeRow(
         number.season != null -> stringResource(R.string.season_format, number.season)
         number.episode != null -> stringResource(R.string.episode_number_format, number.episode)
         else -> ""
+    }
+    val airDate = episode.releasedAtEpochMillis?.let {
+        DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE)
+    }
+    val episodeLine = when {
+        numberLabel.isNotEmpty() && airDate != null -> "$numberLabel · $airDate"
+        numberLabel.isNotEmpty() -> numberLabel
+        else -> airDate ?: ""
     }
     Row(
         Modifier
@@ -775,9 +844,9 @@ internal fun EpisodeRow(
                 .graphicsLayer { alpha = if (watched) 0.55f else 1f },
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (numberLabel.isNotEmpty()) {
+            if (episodeLine.isNotEmpty()) {
                 Text(
-                    numberLabel,
+                    episodeLine,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -89,6 +89,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lamphaus.app.ui.isResumable
 
 import androidx.compose.ui.unit.Dp
 import com.lamphaus.app.ui.ArtworkResolver
@@ -316,6 +317,9 @@ private fun MobileSignedInApp(
         }
         state.selectedDetail != null -> {
             BackHandler { viewModel.clearDetail() }
+            val detailProgress = state.progress.lastOrNull {
+                it.mediaKey == state.selectedDetail.preview.stableKey && it.isResumable()
+            }
             MobileDetailScreen(
                 detail = state.selectedDetail,
                 expanded = widthSizeClass == WindowWidthSizeClass.Expanded,
@@ -323,6 +327,7 @@ private fun MobileSignedInApp(
                 watchedEpisodeIds = watchedEpisodeIds,
                 spoilerProtection = state.spoilerProtection,
                 onBack = viewModel::clearDetail,
+                resumeProgress = detailProgress,
                 onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
                 onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
                 onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
