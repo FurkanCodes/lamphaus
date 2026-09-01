@@ -443,7 +443,12 @@ private fun MobileHeroCarousel(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(0f to Color.Transparent, 1f to MobileTokens.black),
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.55f to Color.Transparent,
+                            1f to MobileTokens.black,
+                        ),
+                    ),
                 ),
         )
         Box(
@@ -454,8 +459,9 @@ private fun MobileHeroCarousel(
                         colorStops = arrayOf(
                             0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
                             0.16f to Color.Transparent,
-                            0.45f to Color.Transparent,
-                            1f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.88f),
+                            0.38f to Color.Transparent,
+                            0.70f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f),
+                            1f to MobileTokens.black,
                         ),
                     ),
                 ),
