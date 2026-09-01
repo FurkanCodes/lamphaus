@@ -1,13 +1,11 @@
 package com.lamphaus.app.mobile
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -67,9 +65,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
@@ -89,7 +92,6 @@ import coil3.compose.AsyncImage
 import com.lamphaus.app.ui.MediaArtwork
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import kotlin.math.roundToInt
 import kotlin.math.absoluteValue
 import com.lamphaus.app.ui.AppUiState
@@ -452,7 +454,7 @@ private fun MobileHeroCarousel(
                         colorStops = arrayOf(
                             0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
                             0.16f to Color.Transparent,
-                            0.55f to Color.Transparent,
+                            0.45f to Color.Transparent,
                             1f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.88f),
                         ),
                     ),
@@ -460,7 +462,7 @@ private fun MobileHeroCarousel(
         )
         // Pager is a gesture surface only: per-item click, focus restore, and
         // semantics; all visuals live in the detached layers around it.
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+        androidx.compose.foundation.pager.HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val media = items[page]
             val pageDescription = stringResource(
                 R.string.hero_carousel_description_touch, media.name, page + 1, items.size,
@@ -486,18 +488,8 @@ private fun MobileHeroCarousel(
                     fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                 } else {
                     (
-                        fadeIn(
-                            tween(
-                                HERO_CONTENT_FADE_MILLIS,
-                                delayMillis = HERO_CONTENT_FADE_MILLIS / 2,
-                            ),
-                        ) +
-                            slideInVertically(
-                                tween(
-                                    HERO_CONTENT_FADE_MILLIS,
-                                    delayMillis = HERO_CONTENT_FADE_MILLIS / 2,
-                                ),
-                            ) { height -> height / 10 }
+                        fadeIn(tween(HERO_CONTENT_FADE_MILLIS)) +
+                            slideInVertically(tween(HERO_CONTENT_FADE_MILLIS)) { height -> height / 16 }
                         ) togetherWith fadeOut(tween(HERO_CONTENT_FADE_MILLIS / 2))
                 }
             },
@@ -511,35 +503,42 @@ private fun MobileHeroCarousel(
                 onToggleLibrary = onToggleLibrary,
             )
         }
-        Row(
+        // Page indicator: dots morph continuously with the swipe fraction.
+        // Pager state is read inside the draw scope, so the gesture drives
+        // the dots without recomposing the carousel.
+        val activeDotColor = MaterialTheme.colorScheme.primary
+        val idleDotColor = Color.White.copy(alpha = 0.45f)
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            repeat(items.size) { index ->
-                val active = index == pagerState.currentPage
-                val width by animateDpAsState(
-                    targetValue = if (active) 18.dp else 6.dp,
-                    label = "hero indicator",
-                )
-                val dotColor by animateColorAsState(
-                    targetValue = if (active) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        Color.White.copy(alpha = 0.45f)
-                    },
-                    animationSpec = tween(HERO_CONTENT_FADE_MILLIS),
-                    label = "hero indicator color",
-                )
-                Box(
-                    Modifier
-                        .size(width, 6.dp)
-                        .clip(CircleShape)
-                        .background(dotColor),
-                )
-            }
-        }
+                .padding(bottom = 16.dp)
+                .height(6.dp)
+                .fillMaxWidth()
+                .drawBehind {
+                    val dotHeight = 6.dp.toPx()
+                    val minDot = 6.dp.toPx()
+                    val maxDot = 18.dp.toPx()
+                    val gap = 6.dp.toPx()
+                    val position = pagerState.currentPage + pagerState.currentPageOffsetFraction
+                    val widths = FloatArray(items.size) { index ->
+                        val raw = (1f - (index - position).absoluteValue).coerceIn(0f, 1f)
+                        val eased = raw * raw * (3f - 2f * raw)
+                        minDot + (maxDot - minDot) * eased
+                    }
+                    var x = (size.width - (widths.sum() + gap * (items.size - 1))) / 2f
+                    widths.forEachIndexed { index, dotWidth ->
+                        val raw = (1f - (index - position).absoluteValue).coerceIn(0f, 1f)
+                        val eased = raw * raw * (3f - 2f * raw)
+                        drawRoundRect(
+                            color = lerp(idleDotColor, activeDotColor, eased),
+                            topLeft = Offset(x, 0f),
+                            size = Size(dotWidth, dotHeight),
+                            cornerRadius = CornerRadius(dotHeight / 2f),
+                        )
+                        x += dotWidth + gap
+                    }
+                },
+        )
     }
 }
 
