@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,7 +37,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,18 +63,21 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
+import coil3.compose.AsyncImage
 import com.lamphaus.app.ui.MediaArtwork
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -80,11 +88,13 @@ import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
+import com.lamphaus.app.ui.LocalArtworkResolver
 
 /** Resolved rows required before the home screen is revealed. */
 private const val HOME_REVEAL_READY_ROWS = 2
@@ -107,6 +117,8 @@ internal fun MobileHomeScreen(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onPlay: (MediaPreview) -> Unit,
+    inLibrary: (MediaPreview) -> Boolean,
+    onToggleLibrary: (MediaPreview) -> Unit,
 ) {
     val allMedia = state.allMedia
     // Same feature selection as the TV home: first five distinct catalog items.
@@ -202,6 +214,8 @@ internal fun MobileHomeScreen(
                         heroItems,
                         onMedia,
                         onPlay,
+                        inLibrary,
+                        onToggleLibrary,
                         restoreMediaKey,
                         onFocusRestored,
                     )
@@ -345,6 +359,8 @@ private fun MobileHeroCarousel(
     items: List<MediaPreview>,
     onMedia: (MediaPreview) -> Unit,
     onPlay: (MediaPreview) -> Unit,
+    inLibrary: (MediaPreview) -> Boolean,
+    onToggleLibrary: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
@@ -352,6 +368,7 @@ private fun MobileHeroCarousel(
     Box(Modifier.fillMaxWidth().height(400.dp)) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val media = items[page]
+            val saved = inLibrary(media)
             val pageDescription = stringResource(
                 R.string.hero_carousel_description_touch, media.name, page + 1, items.size,
             )
@@ -387,34 +404,64 @@ private fun MobileHeroCarousel(
                             ),
                         ),
                 )
-                Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp, vertical = 20.dp)) {
-                    Text(media.name, style = MaterialTheme.typography.headlineSmall, color = Color.White)
-                    MobileMetadataLine(
-                        presentation = media.metadataPresentation(maxGenres = 1),
-                        includeGenres = true,
-                        color = Color.White.copy(alpha = 0.88f),
-                    )
-                    media.description?.takeIf { it.isNotBlank() }?.let { description ->
+                val heroLogo = LocalArtworkResolver.current.resolve(media).media.logoUrl
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (heroLogo.isNullOrBlank()) {
                         Text(
-                            description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.76f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                            text = media.name,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                        )
+                    } else {
+                        AsyncImage(
+                            model = heroLogo,
+                            contentDescription = media.name,
+                            modifier = Modifier.heightIn(max = 64.dp),
+                            contentScale = ContentScale.Fit,
                         )
                     }
-                    Button(
-                        onClick = { onPlay(media) },
-                        modifier = Modifier.padding(top = 12.dp),
-                        shape = RoundedCornerShape(26.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MobileTokens.textPrimary,
-                            contentColor = Color.Black,
-                        ),
+                    MobileMetadataLine(
+                        presentation = media.metadataPresentation(maxGenres = 2),
+                        includeGenres = true,
+                        color = Color.White.copy(alpha = 0.88f),
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Row(
+                        Modifier.padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(28.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Outlined.PlayArrow, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
+                        HeroIconAction(
+                            icon = if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            label = stringResource(if (saved) R.string.saved else R.string.save),
+                            tint = if (saved) MaterialTheme.colorScheme.primary else Color.White,
+                            onClick = { onToggleLibrary(media) },
+                        )
+                        Button(
+                            onClick = { onPlay(media) },
+                            shape = RoundedCornerShape(26.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MobileTokens.textPrimary,
+                                contentColor = Color.Black,
+                            ),
+                        ) {
+                            Icon(Icons.Outlined.PlayArrow, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
+                        }
+                        HeroIconAction(
+                            icon = Icons.Outlined.Info,
+                            label = stringResource(R.string.info),
+                            tint = Color.White,
+                            onClick = { onMedia(media) },
+                        )
                     }
                 }
             }
@@ -436,6 +483,26 @@ private fun MobileHeroCarousel(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun HeroIconAction(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint)
+        Spacer(Modifier.height(2.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
     }
 }
 
@@ -470,73 +537,71 @@ private fun MobileContinueWatchingCard(
     onMedia: (MediaPreview) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val title = progress.episodeLabel ?: media.name
     val percent = (progress.fraction * 100).roundToInt()
-    val description = stringResource(R.string.media_card_description_progress, title, percent)
-    val remainingMillis = (progress.durationMillis - progress.positionMillis).coerceAtLeast(0)
-    val hours = remainingMillis / 3_600_000
-    val minutes = (remainingMillis % 3_600_000) / 60_000
-    val timeLeft = when {
-        hours > 0 -> "$hours h $minutes min"
-        minutes > 0 -> "$minutes min"
-        else -> null
+    val description = stringResource(R.string.media_card_description_progress, media.name, percent)
+    val typeLabel = when (media.type) {
+        MediaType.MOVIE -> stringResource(R.string.type_movie)
+        MediaType.SERIES -> stringResource(R.string.type_series)
+        MediaType.UNKNOWN -> null
     }
-    Box(
+    val metaLine = progress.episodeLabel
+        ?: listOfNotNull(media.releaseYear?.toString(), typeLabel).joinToString(" • ").takeIf { it.isNotBlank() }
+    Row(
         modifier
-            .width(220.dp)
-            .aspectRatio(16f / 9f)
+            .width(320.dp)
+            .height(104.dp)
             .clip(RoundedCornerShape(MobileTokens.radiusResume))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(role = Role.Button) { onMedia(media) }
             .semantics { contentDescription = description },
     ) {
-        MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.45f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.78f),
-                    ),
-                ),
-        )
-        timeLeft?.let { left ->
-            Text(
-                text = stringResource(R.string.continue_watching_time_left, left),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.62f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-            )
+        Box(Modifier.width(68.dp).fillMaxHeight()) {
+            MediaArtwork(media, Modifier.fillMaxSize())
         }
-        Text(
-            text = title,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 8.dp, end = 8.dp, bottom = 15.dp),
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = Color.White,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Box(
+        Column(
             Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .height(7.dp)
-                .background(Color.Black.copy(alpha = 0.55f)),
+                .weight(1f)
+                .fillMaxHeight()
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.Center,
         ) {
+            Text(
+                text = media.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = MobileTokens.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            metaLine?.let { line ->
+                Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MobileTokens.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Spacer(Modifier.height(10.dp))
             Box(
                 Modifier
-                    .fillMaxWidth(progress.fraction)
-                    .height(7.dp)
-                    .background(MaterialTheme.colorScheme.primary),
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White.copy(alpha = 0.18f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress.fraction)
+                        .fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+            }
+            Text(
+                text = stringResource(R.string.percent_watched, percent),
+                style = MaterialTheme.typography.labelSmall,
+                color = MobileTokens.textMuted,
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
     }

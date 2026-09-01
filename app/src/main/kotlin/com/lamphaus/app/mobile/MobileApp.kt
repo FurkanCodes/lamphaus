@@ -362,6 +362,8 @@ private fun MobileSignedInApp(
                                 onRetryHome = viewModel::retryHomeCatalogSections,
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
+                                inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
+                                onToggleLibrary = viewModel::addToLibrary,
                             )
 
                             MobileDestination.DISCOVER -> DiscoverScreen(
