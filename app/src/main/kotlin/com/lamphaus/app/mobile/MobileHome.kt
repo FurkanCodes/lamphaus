@@ -762,19 +762,6 @@ private fun MobileContinueWatchingCard(
             },
     ) {
         MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
-        IconButton(
-            onClick = { onOpenMenu(target) },
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(4.dp)
-                .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(50)),
-        ) {
-            Icon(
-                Icons.Outlined.MoreVert,
-                contentDescription = stringResource(R.string.content_menu_more),
-                tint = Color.White,
-            )
-        }
         if (progress.completed) {
             SelectionCheckmark(
                 selected = true,
@@ -990,21 +977,6 @@ private fun PosterCard(
             },
     ) {
         MediaArtwork(media, Modifier.fillMaxSize())
-        if (menuTarget != null && onOpenMenu != null) {
-            IconButton(
-                onClick = { onOpenMenu(menuTarget) },
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(4.dp)
-                    .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(50)),
-            ) {
-                Icon(
-                    Icons.Outlined.MoreVert,
-                    contentDescription = stringResource(R.string.content_menu_more),
-                    tint = Color.White,
-                )
-            }
-        }
         if (completed) {
             SelectionCheckmark(
                 selected = true,

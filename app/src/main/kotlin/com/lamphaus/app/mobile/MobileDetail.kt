@@ -933,26 +933,6 @@ internal fun EpisodeRow(
                 }
             }
         }
-        IconButton(
-            onClick = {
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                onOpenMenu(
-                    ContentMenuTarget(
-                        media = media,
-                        episode = episode,
-                        progress = progress,
-                        origin = ContentMenuOrigin.EPISODE,
-                    ),
-                )
-            },
-            modifier = Modifier.size(48.dp),
-        ) {
-            Icon(
-                Icons.Outlined.MoreVert,
-                contentDescription = stringResource(R.string.content_menu_more),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 
