@@ -44,6 +44,10 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -70,6 +74,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -78,11 +83,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.core.model.PairedDevice
+import com.lamphaus.core.model.NextEpisodePolicy
+import com.lamphaus.core.model.NextEpisodeThresholdMode
+import com.lamphaus.core.model.PlaybackSettings
+import java.util.Locale
 import com.lamphaus.core.model.ProfileKind
 
 internal enum class SettingsSection(
@@ -197,10 +207,115 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                         viewModel.setPlaybackSettings(playback.copy(nextEpisodeEnabled = it))
                     },
                 )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                NextEpisodeThresholdControls(
+                    playback = playback,
+                    onUpdate = viewModel::setPlaybackSettings,
+                )
             }
         }
     }
 }
+
+/**
+ * Threshold mode and value for the next-episode card on titles without
+ * credits timestamps (MOB-SET-02/05). Visible but disabled while Next
+ * Episode is off; the slider snaps to 0.5 increments and commits on release.
+ */
+@Composable
+private fun NextEpisodeThresholdControls(
+    playback: PlaybackSettings,
+    onUpdate: (PlaybackSettings) -> Unit,
+) {
+    val enabled = playback.nextEpisodeEnabled
+    val range = when (playback.nextEpisodeThresholdMode) {
+        NextEpisodeThresholdMode.PERCENTAGE -> NextEpisodePolicy.PERCENT_MIN..NextEpisodePolicy.PERCENT_MAX
+        NextEpisodeThresholdMode.MINUTES_BEFORE_END ->
+            NextEpisodePolicy.MINUTES_MIN..NextEpisodePolicy.MINUTES_MAX
+    }
+    val committed = when (playback.nextEpisodeThresholdMode) {
+        NextEpisodeThresholdMode.PERCENTAGE -> playback.nextEpisodeThresholdPercent
+        NextEpisodeThresholdMode.MINUTES_BEFORE_END -> playback.nextEpisodeThresholdMinutesBeforeEnd
+    }
+    var draft by remember(playback.nextEpisodeThresholdMode, committed) { mutableStateOf(committed) }
+    val valueLabel = thresholdValueLabel(draft)
+    val displayValue = when (playback.nextEpisodeThresholdMode) {
+        NextEpisodeThresholdMode.PERCENTAGE ->
+            stringResource(R.string.next_episode_threshold_percent_value, valueLabel)
+        NextEpisodeThresholdMode.MINUTES_BEFORE_END ->
+            stringResource(R.string.next_episode_threshold_minutes_value, valueLabel)
+    }
+
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(
+            text = stringResource(R.string.next_episode_threshold_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = MobileTokens.textMuted,
+            modifier = Modifier.alpha(if (enabled) 1f else 0.38f),
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            SegmentedButton(
+                selected =
+                    playback.nextEpisodeThresholdMode == NextEpisodeThresholdMode.PERCENTAGE,
+                onClick = {
+                    onUpdate(
+                        playback.copy(nextEpisodeThresholdMode = NextEpisodeThresholdMode.PERCENTAGE),
+                    )
+                },
+                enabled = enabled,
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+            ) {
+                Text(stringResource(R.string.next_episode_threshold_percentage))
+            }
+            SegmentedButton(
+                selected =
+                    playback.nextEpisodeThresholdMode == NextEpisodeThresholdMode.MINUTES_BEFORE_END,
+                onClick = {
+                    onUpdate(
+                        playback.copy(
+                            nextEpisodeThresholdMode = NextEpisodeThresholdMode.MINUTES_BEFORE_END,
+                        ),
+                    )
+                },
+                enabled = enabled,
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+            ) {
+                Text(stringResource(R.string.next_episode_threshold_time_remaining))
+            }
+        }
+        Slider(
+            value = draft,
+            onValueChange = { draft = it },
+            onValueChangeFinished = {
+                onUpdate(
+                    when (playback.nextEpisodeThresholdMode) {
+                        NextEpisodeThresholdMode.PERCENTAGE -> playback.copy(
+                            nextEpisodeThresholdPercent = NextEpisodePolicy.clampedPercent(draft),
+                        )
+                        NextEpisodeThresholdMode.MINUTES_BEFORE_END -> playback.copy(
+                            nextEpisodeThresholdMinutesBeforeEnd =
+                                NextEpisodePolicy.clampedMinutesBeforeEnd(draft),
+                        )
+                    },
+                )
+            },
+            valueRange = range.start..range.endInclusive,
+            steps = ((range.endInclusive - range.start) / 0.5f).toInt() - 1,
+            enabled = enabled,
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { stateDescription = displayValue },
+        )
+        Text(
+            text = displayValue,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.align(Alignment.CenterHorizontally).alpha(if (enabled) 1f else 0.38f),
+        )
+    }
+}
+
+private fun thresholdValueLabel(value: Float): String =
+    java.lang.String.format(Locale.getDefault(), if (value % 1f == 0f) "%.0f" else "%.1f", value)
 
 @Composable
 private fun PlaybackSettingRow(

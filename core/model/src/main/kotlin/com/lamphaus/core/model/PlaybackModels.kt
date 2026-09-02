@@ -10,11 +10,18 @@ data class PlaybackSource(
     val subtitles: List<SubtitleTrack> = emptyList(),
 )
 
+/** Fallback mode for the next-episode card on titles without credits timestamps. */
+@Serializable
+enum class NextEpisodeThresholdMode { PERCENTAGE, MINUTES_BEFORE_END }
+
 @Serializable
 data class PlaybackSettings(
     val skipIntroEnabled: Boolean = true,
     val skipEndingEnabled: Boolean = true,
     val nextEpisodeEnabled: Boolean = true,
+    val nextEpisodeThresholdMode: NextEpisodeThresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
+    val nextEpisodeThresholdPercent: Float = 98f,
+    val nextEpisodeThresholdMinutesBeforeEnd: Float = 2f,
 )
 
 @Serializable
@@ -51,15 +58,23 @@ data class PlaybackRequest(
     val preview: MediaPreview? = null,
 )
 
-fun List<Episode>.nextEpisodeAfter(current: Episode?, nowEpochMillis: Long = System.currentTimeMillis()): Episode? {
+/**
+ * Immediate chronological successor of [current] regardless of release
+ * status: unaired episodes are returned as-is so callers can surface their
+ * release state through [Episode.hasAired] instead of silently skipping
+ * ahead to a later episode.
+ */
+fun List<Episode>.nextEpisodeAfter(current: Episode?): Episode? {
     if (current == null) return null
     val ordered = playbackOrder()
     val currentIndex = ordered.indexOfFirst { it.id == current.id }
     if (currentIndex < 0) return null
-    return ordered.drop(currentIndex + 1).firstOrNull { candidate ->
-        candidate.releasedAtEpochMillis?.let { it <= nowEpochMillis } ?: true
-    }
+    return ordered.getOrNull(currentIndex + 1)
 }
+
+/** A missing or unparseable release date counts as aired. */
+fun Episode.hasAired(nowEpochMillis: Long = System.currentTimeMillis()): Boolean =
+    releasedAtEpochMillis?.let { it <= nowEpochMillis } ?: true
 
 fun List<Episode>.playbackQueueFrom(current: Episode?, maximumSize: Int = 50): List<Episode> {
     if (current == null || maximumSize <= 0) return emptyList()

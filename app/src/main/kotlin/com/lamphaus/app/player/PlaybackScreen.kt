@@ -1,7 +1,18 @@
 package com.lamphaus.app.player
 
+import android.content.res.Configuration
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -23,6 +34,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -64,6 +80,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -86,22 +105,28 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.SpoilerContent
+import com.lamphaus.app.ui.rememberReducedMotion
+import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSegment
 import com.lamphaus.core.model.PlaybackSegmentType
 import com.lamphaus.core.model.PlaybackSettings
+import com.lamphaus.core.model.NextEpisodePolicy
+import com.lamphaus.core.model.SpoilerProtectionSettings
+import com.lamphaus.core.model.hasAired
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-private val PlayerBackground = Color(0xFF121316)
-private val PlayerOnSurface = Color(0xFFE3E2E6)
-private val PlayerOnSurfaceMuted = Color(0xFFC4C6CF)
-private val PlayerSurface = Color(0xFF292A2D)
-private val PlayerFocused = Color(0xFFE3E2E6)
-private val PlayerFocusedContent = Color(0xFF2F3033)
-private val PlayerPrimary = Color(0xFFA8C8FF)
-private val PlayerFont = FontFamily(
+internal val PlayerBackground = Color(0xFF121316)
+internal val PlayerOnSurface = Color(0xFFE3E2E6)
+internal val PlayerOnSurfaceMuted = Color(0xFFC4C6CF)
+internal val PlayerSurface = Color(0xFF292A2D)
+internal val PlayerFocused = Color(0xFFE3E2E6)
+internal val PlayerFocusedContent = Color(0xFF2F3033)
+internal val PlayerPrimary = Color(0xFFA8C8FF)
+internal val PlayerFont = FontFamily(
     Font(R.font.inter_regular, FontWeight.Normal),
     Font(R.font.inter_medium, FontWeight.Medium),
     Font(R.font.inter_semi_bold, FontWeight.SemiBold),
@@ -144,6 +169,9 @@ internal fun PlaybackScreen(
     onOpenExternally: () -> Unit,
     onNextEpisode: () -> Unit,
     onDismissNextEpisodeMessage: () -> Unit,
+    spoilerProtection: SpoilerProtectionSettings,
+    nextEpisodeDismissed: Boolean,
+    onDismissNextEpisodeCard: () -> Unit,
     onPlayerViewLayout: (android.view.View) -> Unit,
 ) {
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
@@ -153,6 +181,12 @@ internal fun PlaybackScreen(
     var controlsFocusVersion by remember { mutableLongStateOf(0L) }
     var interactionVersion by remember { mutableLongStateOf(0L) }
     val rootFocus = remember { FocusRequester() }
+    val reducedMotion = rememberReducedMotion()
+    val windowWidthDp = with(LocalDensity.current) {
+        LocalWindowInfo.current.containerSize.width.toDp()
+    }
+    val wideLayout = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE ||
+        windowWidthDp >= 600.dp
     val activeSegment = segments.firstOrNull { segment ->
         val enabled = when (segment.type) {
             PlaybackSegmentType.INTRO -> settings.skipIntroEnabled
@@ -161,9 +195,23 @@ internal fun PlaybackScreen(
         val end = segment.endMillis ?: snapshot.durationMillis.takeIf { it > 0 } ?: Long.MAX_VALUE
         enabled && snapshot.positionMillis in segment.startMillis until end
     }
-    val nextEpisodeVisible = settings.nextEpisodeEnabled &&
-        request.nextEpisode != null &&
-        snapshot.isNearEnding(activeSegment?.type == PlaybackSegmentType.ENDING)
+    val nextEpisode = request.nextEpisode
+    val timingReady = NextEpisodePolicy.shouldShowCard(
+        positionMillis = snapshot.positionMillis,
+        durationMillis = snapshot.durationMillis,
+        segments = segments,
+        thresholdMode = settings.nextEpisodeThresholdMode,
+        thresholdPercent = settings.nextEpisodeThresholdPercent,
+        thresholdMinutesBeforeEnd = settings.nextEpisodeThresholdMinutesBeforeEnd,
+    )
+    val nextEpisodeReady = settings.nextEpisodeEnabled &&
+        nextEpisode != null &&
+        nextEpisode.hasAired() &&
+        timingReady
+    // The card is mobile-only; TV keeps its existing cue pill.
+    val nextEpisodeCardVisible = nextEpisodeReady && !isTelevision && !nextEpisodeDismissed
+    val nextEpisodeSkipInCard = nextEpisodeCardVisible && !wideLayout &&
+        activeSegment?.type == PlaybackSegmentType.ENDING
 
     fun revealControls() {
         controlsVisible = true
@@ -214,6 +262,7 @@ internal fun PlaybackScreen(
     BackHandler {
         when {
             panel != null -> closePanel()
+            nextEpisodeCardVisible -> onDismissNextEpisodeCard()
             controlsVisible -> controlsVisible = false
             else -> onExit()
         }
@@ -335,7 +384,7 @@ internal fun PlaybackScreen(
                 onReplay = { player?.seekTo(0); player?.play() },
                 onSeekBack = { player?.seekBack() },
                 onSeekForward = { player?.seekForward() },
-                canPlayNext = settings.nextEpisodeEnabled && request.nextEpisode != null,
+                canPlayNext = settings.nextEpisodeEnabled && nextEpisode != null && nextEpisode.hasAired(),
                 nextEpisodeLoading = nextEpisodeLoading,
                 onNextEpisode = onNextEpisode,
                 focusPanel = returnFocusPanel,
@@ -348,28 +397,83 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (activeSegment != null || nextEpisodeVisible || nextEpisodeMessage != null) {
+        val visibleSegment = if (nextEpisodeSkipInCard) null else activeSegment
+        val skipSegment: () -> Unit = {
+            when (activeSegment?.type) {
+                PlaybackSegmentType.INTRO -> activeSegment.endMillis?.let { player?.seekTo(it) }
+                PlaybackSegmentType.ENDING -> {
+                    (activeSegment.endMillis ?: snapshot.durationMillis.takeIf { it > 0 })
+                        ?.let { player?.seekTo(it) }
+                }
+                null -> Unit
+            }
+        }
+        if (
+            visibleSegment != null ||
+            (nextEpisodeReady && isTelevision) ||
+            (nextEpisodeMessage != null && !nextEpisodeCardVisible)
+        ) {
             PlaybackCueActions(
-                modifier = Modifier.align(Alignment.BottomCenter),
-                segment = activeSegment,
-                showNextEpisode = nextEpisodeVisible,
+                modifier = when {
+                    nextEpisodeCardVisible && wideLayout -> Modifier.align(Alignment.BottomStart)
+                    else -> Modifier.align(Alignment.BottomCenter)
+                },
+                horizontalAlignment = if (nextEpisodeCardVisible && wideLayout) {
+                    Alignment.Start
+                } else {
+                    Alignment.End
+                },
+                segment = visibleSegment,
+                showNextEpisode = nextEpisodeReady && isTelevision,
                 loadingNextEpisode = nextEpisodeLoading,
-                message = nextEpisodeMessage,
+                message = if (nextEpisodeCardVisible) null else nextEpisodeMessage,
                 controlsVisible = controlsVisible,
                 isTelevision = isTelevision,
-                onSkip = {
-                    when (activeSegment?.type) {
-                        PlaybackSegmentType.INTRO -> activeSegment.endMillis?.let { player?.seekTo(it) }
-                        PlaybackSegmentType.ENDING -> {
-                            (activeSegment.endMillis ?: snapshot.durationMillis.takeIf { it > 0 })
-                                ?.let { player?.seekTo(it) }
-                        }
-                        null -> Unit
-                    }
-                },
+                onSkip = skipSegment,
                 onNextEpisode = onNextEpisode,
                 onDismissMessage = onDismissNextEpisodeMessage,
             )
+        }
+        AnimatedVisibility(
+            visible = nextEpisodeCardVisible,
+            enter = when {
+                reducedMotion -> EnterTransition.None
+                wideLayout -> slideInHorizontally(tween(220)) { it } + fadeIn(tween(220))
+                else -> slideInVertically(tween(220)) { it } + fadeIn(tween(220))
+            },
+            exit = when {
+                reducedMotion -> ExitTransition.None
+                wideLayout -> slideOutHorizontally(tween(160)) { it } + fadeOut(tween(160))
+                else -> slideOutVertically(tween(160)) { it } + fadeOut(tween(160))
+            },
+            modifier = when {
+                wideLayout -> Modifier.align(Alignment.BottomEnd).padding(horizontal = 16.dp)
+                else -> Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp)
+            }.windowInsetsPadding(
+                WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                ),
+            ),
+        ) {
+            nextEpisode?.let { current ->
+                NextEpisodeCard(
+                    episode = current,
+                    loading = nextEpisodeLoading,
+                    failureMessage = nextEpisodeMessage,
+                    blurArtwork = spoilerProtection.shouldBlur(
+                        SpoilerContent.EPISODE_ARTWORK,
+                        watched = false,
+                    ),
+                    wide = wideLayout,
+                    showSkipCredits = nextEpisodeSkipInCard,
+                    onPlayNext = onNextEpisode,
+                    onSkipCredits = skipSegment,
+                    onDismiss = onDismissNextEpisodeCard,
+                    modifier = Modifier.padding(
+                        bottom = if (controlsVisible) 190.dp else 28.dp,
+                    ),
+                )
+            }
         }
 
         snapshot.errorMessage?.let { message ->
@@ -516,6 +620,7 @@ private fun PlayerControls(
 @Composable
 private fun PlaybackCueActions(
     modifier: Modifier = Modifier,
+    horizontalAlignment: Alignment.Horizontal = Alignment.End,
     segment: PlaybackSegment?,
     showNextEpisode: Boolean,
     loadingNextEpisode: Boolean,
@@ -531,7 +636,7 @@ private fun PlaybackCueActions(
             .fillMaxWidth()
             .padding(horizontal = if (isTelevision) 56.dp else 20.dp)
             .padding(bottom = if (controlsVisible) 190.dp else 28.dp),
-        horizontalAlignment = Alignment.End,
+        horizontalAlignment = horizontalAlignment,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         message?.let {
@@ -576,13 +681,6 @@ private fun PlaybackCueActions(
     }
 }
 
-private fun PlayerSnapshot.isNearEnding(endingSegmentActive: Boolean): Boolean {
-    if (endingSegmentActive) return true
-    if (durationMillis <= 0) return false
-    val remaining = (durationMillis - positionMillis).coerceAtLeast(0)
-    val fraction = positionMillis.toDouble() / durationMillis.toDouble()
-    return remaining <= 2 * 60_000L || fraction >= 0.97
-}
 
 @Composable
 private fun PlayerTitle(request: PlaybackRequest, isTelevision: Boolean, modifier: Modifier = Modifier) {

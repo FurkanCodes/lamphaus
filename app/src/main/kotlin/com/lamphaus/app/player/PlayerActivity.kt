@@ -37,9 +37,11 @@ import com.lamphaus.core.model.PlaybackSource
 import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderSubscription
+import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.WatchProgress
+import com.lamphaus.core.model.hasAired
 import com.lamphaus.core.model.nextEpisodeAfter
 import com.lamphaus.core.player.LamphausPlaybackService
 import com.lamphaus.core.player.PlaybackHeaderRegistry
@@ -68,10 +70,13 @@ class PlayerActivity : ComponentActivity() {
     private val segmentsState = mutableStateOf<List<PlaybackSegment>>(emptyList())
     private val nextEpisodeLoadingState = mutableStateOf(false)
     private val nextEpisodeMessageState = mutableStateOf<String?>(null)
+    private val spoilerProtectionState = mutableStateOf(SpoilerProtectionSettings())
+    private val nextEpisodeDismissedVideoId = mutableStateOf<String?>(null)
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var request: PlaybackRequest? = null
     private var progressPulseJob: Job? = null
     private var segmentLookupJob: Job? = null
+    private var nextEpisodeResolutionJob: Job? = null
 
     /** Position of the last progress write; guards against redundant periodic saves. */
     @Volatile
@@ -104,6 +109,7 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             container.preferences.settings.collectLatest { settings ->
                 playbackSettingsState.value = settings.playback
+                spoilerProtectionState.value = settings.spoilerProtection
                 loadSegments(requestState.value, settings.playback)
             }
         }
@@ -117,10 +123,14 @@ class PlayerActivity : ComponentActivity() {
                     segments = segmentsState.value,
                     nextEpisodeLoading = nextEpisodeLoadingState.value,
                     nextEpisodeMessage = nextEpisodeMessageState.value,
+                    spoilerProtection = spoilerProtectionState.value,
+                    nextEpisodeDismissed =
+                        nextEpisodeDismissedVideoId.value == currentRequest.videoId,
                     onExit = ::finish,
                     onOpenExternally = ::openExternally,
                     onNextEpisode = ::playNextEpisode,
                     onDismissNextEpisodeMessage = { nextEpisodeMessageState.value = null },
+                    onDismissNextEpisodeCard = ::dismissNextEpisodeCard,
                     onPlayerViewLayout = ::updatePipSourceRect,
                 )
             }
@@ -158,7 +168,7 @@ class PlayerActivity : ComponentActivity() {
         segmentLookupJob?.cancel()
         segmentsState.value = emptyList()
         val media = playback?.preview ?: return
-        if (!settings.skipIntroEnabled && !settings.skipEndingEnabled) return
+        if (!settings.skipIntroEnabled && !settings.skipEndingEnabled && !settings.nextEpisodeEnabled) return
         segmentLookupJob = lifecycleScope.launch {
             segmentsState.value = container.skipRepository.segments(media, playback.episode)
         }
@@ -166,9 +176,10 @@ class PlayerActivity : ComponentActivity() {
 
     private fun playNextEpisode() {
         if (nextEpisodeLoadingState.value || request?.nextEpisode == null) return
+        if (request?.nextEpisode?.hasAired() == false) return
         nextEpisodeLoadingState.value = true
         nextEpisodeMessageState.value = null
-        lifecycleScope.launch {
+        nextEpisodeResolutionJob = lifecycleScope.launch {
             try {
                 val current = request
                 val next = current?.let { resolveNextPlayback(it) }
@@ -185,6 +196,18 @@ class PlayerActivity : ComponentActivity() {
                 nextEpisodeLoadingState.value = false
             }
         }
+    }
+
+    /**
+     * Dismisses the card for the current video and cancels any in-flight
+     * source resolution; it returns when the episode changes.
+     */
+    private fun dismissNextEpisodeCard() {
+        nextEpisodeDismissedVideoId.value = request?.videoId
+        nextEpisodeResolutionJob?.cancel()
+        nextEpisodeResolutionJob = null
+        nextEpisodeLoadingState.value = false
+        nextEpisodeMessageState.value = null
     }
 
     private suspend fun resolveNextPlayback(current: PlaybackRequest): PlaybackRequest? {
@@ -292,6 +315,7 @@ class PlayerActivity : ComponentActivity() {
         requestState.value = next
         lastSavedPositionMillis = -1L
         nextEpisodeMessageState.value = null
+        nextEpisodeDismissedVideoId.value = null
         loadSegments(next, playbackSettingsState.value)
         controller?.apply {
             setMediaItem(next.toMediaItem())

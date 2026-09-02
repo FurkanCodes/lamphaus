@@ -4,9 +4,12 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lamphaus.core.model.DiagnosticsConsent
+import com.lamphaus.core.model.NextEpisodePolicy
+import com.lamphaus.core.model.NextEpisodeThresholdMode
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import kotlinx.coroutines.flow.Flow
@@ -64,10 +67,13 @@ class UserPreferences(private val context: Context) {
                 blurEpisodeArtwork = values[SPOILER_BLUR_EPISODE_ARTWORK] ?: true,
                 blurEpisodeSynopsis = values[SPOILER_BLUR_EPISODE_SYNOPSIS] ?: true,
             ),
-            playback = PlaybackSettings(
-                skipIntroEnabled = values[PLAYBACK_SKIP_INTRO] ?: true,
-                skipEndingEnabled = values[PLAYBACK_SKIP_ENDING] ?: true,
-                nextEpisodeEnabled = values[PLAYBACK_NEXT_EPISODE] ?: true,
+            playback = playbackSettingsFromKeys(
+                skipIntro = values[PLAYBACK_SKIP_INTRO],
+                skipEnding = values[PLAYBACK_SKIP_ENDING],
+                nextEpisode = values[PLAYBACK_NEXT_EPISODE],
+                thresholdMode = values[PLAYBACK_NEXT_EPISODE_MODE],
+                thresholdPercent = values[PLAYBACK_NEXT_EPISODE_PERCENT],
+                thresholdMinutes = values[PLAYBACK_NEXT_EPISODE_MINUTES],
             ),
             updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
@@ -141,6 +147,9 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_SKIP_INTRO] = settings.skipIntroEnabled
             it[PLAYBACK_SKIP_ENDING] = settings.skipEndingEnabled
             it[PLAYBACK_NEXT_EPISODE] = settings.nextEpisodeEnabled
+            it[PLAYBACK_NEXT_EPISODE_MODE] = settings.nextEpisodeThresholdMode.name
+            it[PLAYBACK_NEXT_EPISODE_PERCENT] = settings.nextEpisodeThresholdPercent
+            it[PLAYBACK_NEXT_EPISODE_MINUTES] = settings.nextEpisodeThresholdMinutesBeforeEnd
         }
     }
 
@@ -196,6 +205,34 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_SKIP_INTRO = booleanPreferencesKey("playback_skip_intro")
         val PLAYBACK_SKIP_ENDING = booleanPreferencesKey("playback_skip_ending")
         val PLAYBACK_NEXT_EPISODE = booleanPreferencesKey("playback_next_episode")
+        val PLAYBACK_NEXT_EPISODE_MODE = stringPreferencesKey("playback_next_episode_mode")
+        val PLAYBACK_NEXT_EPISODE_PERCENT = floatPreferencesKey("playback_next_episode_percent")
+        val PLAYBACK_NEXT_EPISODE_MINUTES = floatPreferencesKey("playback_next_episode_minutes")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }
+
+/**
+ * Maps raw DataStore values into [PlaybackSettings]. Missing keys (older
+ * payloads) fall back to the shipped defaults, and the threshold floats are
+ * defensively clamped so corrupted or hand-edited values cannot produce an
+ * absurd trigger point.
+ */
+internal fun playbackSettingsFromKeys(
+    skipIntro: Boolean?,
+    skipEnding: Boolean?,
+    nextEpisode: Boolean?,
+    thresholdMode: String?,
+    thresholdPercent: Float?,
+    thresholdMinutes: Float?,
+): PlaybackSettings = PlaybackSettings(
+    skipIntroEnabled = skipIntro ?: true,
+    skipEndingEnabled = skipEnding ?: true,
+    nextEpisodeEnabled = nextEpisode ?: true,
+    nextEpisodeThresholdMode = thresholdMode
+        ?.let { mode -> runCatching { NextEpisodeThresholdMode.valueOf(mode) }.getOrNull() }
+        ?: NextEpisodeThresholdMode.PERCENTAGE,
+    nextEpisodeThresholdPercent = NextEpisodePolicy.clampedPercent(thresholdPercent ?: 98f),
+    nextEpisodeThresholdMinutesBeforeEnd =
+        NextEpisodePolicy.clampedMinutesBeforeEnd(thresholdMinutes ?: 2f),
+)
