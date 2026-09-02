@@ -9,7 +9,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.lamphaus.core.data.preferences.ThemePreference
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,7 +21,7 @@ class MobileSignInContentTest {
     @Test
     fun darkSignInKeepsPrimaryActionsAvailable() {
         compose.setContent {
-            LamphausMobileTheme(preference = ThemePreference.DARK, dynamicColor = false) {
+            LamphausMobileTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,

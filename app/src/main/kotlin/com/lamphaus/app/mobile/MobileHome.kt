@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -36,7 +35,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
@@ -52,17 +50,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.derivedStateOf
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -107,15 +101,6 @@ import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.rememberReducedMotion
-
-/** Resolved rows required before the home screen is revealed. */
-private const val HOME_REVEAL_READY_ROWS = 2
-
-/** Warm-up window so the first rows' images decode behind the cover. */
-private const val HOME_REVEAL_WARM_MILLIS = 900L
-
-/** Skeleton cover hard cap so slow or failed loads still reveal. */
-private const val HOME_REVEAL_MAX_WAIT_MILLIS = 8_000L
 
 /** Zoom-settle applied to hero artwork while it crossfades during a swipe. */
 private const val HERO_ARTWORK_ZOOM = 0.06f
@@ -170,35 +155,6 @@ internal fun MobileHomeScreen(
             .toList()
     }
     val listState = rememberLazyListState()
-    var revealed by rememberSaveable { mutableStateOf(false) }
-    val readyRows = state.sections.count { section -> section.items.isNotEmpty() }
-    val homeEmpty = !state.initialContentLoading &&
-        !state.homeCatalogBatch.loadingMore &&
-        !state.homeCatalogBatch.loadMoreFailed &&
-        !state.homeCatalogBatch.hasMore &&
-        state.providers.isEmpty() &&
-        state.sections.isEmpty()
-    // Content that was already resident (back navigation, warm process) skips
-    // the warm-up: images are cached and the screen can appear instantly.
-    val warmOnReady = remember { readyRows < HOME_REVEAL_READY_ROWS }
-    LaunchedEffect(readyRows, homeEmpty) {
-        if (revealed) return@LaunchedEffect
-        when {
-            homeEmpty -> revealed = true
-            readyRows >= HOME_REVEAL_READY_ROWS -> {
-                if (warmOnReady) {
-                    delay(HOME_REVEAL_WARM_MILLIS)
-                }
-                revealed = true
-            }
-        }
-    }
-    LaunchedEffect(Unit) {
-        if (!revealed) {
-            delay(HOME_REVEAL_MAX_WAIT_MILLIS)
-            revealed = true
-        }
-    }
     LaunchedEffect(
         listState,
         state.sections.size,
@@ -224,15 +180,10 @@ internal fun MobileHomeScreen(
             }
         }
     }
-    val contentAlpha by animateFloatAsState(
-        targetValue = if (revealed) 1f else 0f,
-        animationSpec = tween(220),
-        label = "home reveal",
-    )
     Box(Modifier.fillMaxSize().background(MobileTokens.black)) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize().alpha(contentAlpha),
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = navBarClearancePadding()),
             verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
         ) {
@@ -290,19 +241,6 @@ internal fun MobileHomeScreen(
                         MobileHomeCatalogLoadingSkeleton()
                     }
                 }
-            }
-        }
-        if (!revealed) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(MobileTokens.black)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {},
-            ) {
-                LoadingScreen()
             }
         }
     }

@@ -15,7 +15,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.lamphaus.app.ui.SpoilerBlurLayer
-import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -30,7 +29,7 @@ class MobileSpoilerProtectionTest {
     @Test
     fun hiddenLayerRemovesProtectedCopyFromSemantics() {
         compose.setContent {
-            LamphausMobileTheme(preference = ThemePreference.DARK, dynamicColor = false) {
+            LamphausMobileTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     SpoilerBlurLayer(
                         hidden = true,
@@ -52,7 +51,7 @@ class MobileSpoilerProtectionTest {
     fun episodeSpoilersDoNotBlockIndependentPlayAction() {
         var plays = 0
         compose.setContent {
-            LamphausMobileTheme(preference = ThemePreference.DARK, dynamicColor = false) {
+            LamphausMobileTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     EpisodeRow(
                         episode = SpoilerProtectionTestFixtures.episode,
@@ -67,7 +66,9 @@ class MobileSpoilerProtectionTest {
         compose.onAllNodesWithText("Secret overview").assertCountEquals(0)
         compose.onNodeWithText("Synopsis hidden").assertIsDisplayed()
         compose.onAllNodesWithText("Reveal spoilers").assertCountEquals(0)
-        compose.onNodeWithContentDescription("Play Secret episode")
+        // Spoiler protection hides artwork and synopsis but must not block
+        // the row's play action.
+        compose.onNodeWithText("Secret episode")
             .assertHasClickAction()
             .performClick()
 

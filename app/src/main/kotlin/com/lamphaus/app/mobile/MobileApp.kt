@@ -89,6 +89,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lamphaus.app.ui.isResumable
+import com.lamphaus.app.ui.rememberReducedMotion
+import kotlinx.coroutines.delay
 
 import androidx.compose.ui.unit.Dp
 import com.lamphaus.app.ui.ArtworkResolver
@@ -101,7 +103,7 @@ import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.app.R
 
-private enum class MobileDestination(
+internal enum class MobileDestination(
     @StringRes val labelRes: Int,
     val selectedIcon: ImageVector,
     val icon: ImageVector,
@@ -111,6 +113,15 @@ private enum class MobileDestination(
     LIBRARY(R.string.library, Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
     SEARCH(R.string.search, Icons.Filled.Search, Icons.Outlined.Search),
 }
+
+/** Rows with content required before the signed-in home is revealed. */
+private const val STARTUP_READY_ROWS = 2
+
+/** Warm-up window so the first rows' images decode behind the loading cover. */
+private const val STARTUP_WARM_MILLIS = 900L
+
+/** Hard cap so slow or failed home loads still reveal the app. */
+private const val STARTUP_MAX_WAIT_MILLIS = 8_000L
 
 @Composable
 fun MobileApp(
@@ -152,28 +163,57 @@ fun MobileApp(
                 viewModel.configurationLaunchHandled()
             }
         }
+        // Cold-start gate: the branded loading surface is the only thing
+        // rendered until authentication resolves and, for returning users,
+        // Home is meaningfully ready. The handoff happens exactly once and
+        // never regresses (SHR-PROD-04, SHR-ARC-05/06/09).
+        val reducedMotion = rememberReducedMotion()
+        val readyRows = state.sections.count { section -> section.items.isNotEmpty() }
+        val settledWithoutContent = homeStartupSettledWithoutContent(state)
+        val startupGate = remember {
+            MobileStartupGate(initiallyResident = readyRows >= STARTUP_READY_ROWS)
+        }
+        LaunchedEffect(state.account) {
+            startupGate.onAccountChanged(state.account)
+        }
+        LaunchedEffect(readyRows, settledWithoutContent, startupGate.awaitingContent) {
+            startupGate.onHomeContent(readyRows, settledWithoutContent)
+        }
+        LaunchedEffect(startupGate.contentReady) {
+            if (startupGate.contentReady) {
+                if (!startupGate.initiallyResident) {
+                    // Images need a decode window on a cold start; content
+                    // already resident in a warm process reveals immediately.
+                    delay(STARTUP_WARM_MILLIS)
+                }
+                startupGate.onWarmUpElapsed()
+            }
+        }
+        LaunchedEffect(startupGate.awaitingContent) {
+            if (startupGate.awaitingContent) {
+                delay(STARTUP_MAX_WAIT_MILLIS)
+                startupGate.onContentTimeout()
+            }
+        }
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
             contentColor = MaterialTheme.colorScheme.onBackground,
         ) {
             Box(Modifier.fillMaxSize()) {
-                AnimatedContent(
-                    targetState = state.account,
-                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
-                    label = "account",
-                ) { account ->
-                    when (account) {
-                        AccountState.Loading -> LoadingScreen()
-                        AccountState.SignedOut -> MobileSignInScreen(
+                MobileStartupSurface(
+                    phase = startupGate.phase,
+                    reducedMotion = reducedMotion,
+                    signIn = {
+                        MobileSignInScreen(
                             cloudConfigured = com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED,
                             onGoogleSignIn = onGoogleSignIn,
                             onEmailLink = onEmailLink,
                             onDevelopmentSession = viewModel::openDevelopmentSession,
                         )
-                        is AccountState.SignedIn -> MobileSignedInApp(state, viewModel, widthSizeClass)
-                    }
-                }
+                    },
+                    signedIn = { MobileSignedInApp(state, viewModel, widthSizeClass) },
+                )
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
             }
         }
@@ -208,6 +248,142 @@ internal fun LoadingScreen() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+    }
+}
+
+/** Cold-start rendering phases for the mobile host. */
+internal enum class MobileStartupPhase { Startup, SignedOut, SignedIn }
+
+/**
+ * One-shot cold-start gate (SHR-ARC-05/06/09). Holds the branded loading
+ * surface above the entire application until Home is meaningfully ready for
+ * a returning signed-in user, ends startup immediately when authentication
+ * resolves signed-out, and hands off exactly once: later transient
+ * AccountState.Loading emissions can never regress the UI to startup.
+ *
+ * The policy is snapshot state with no side effects or timing of its own, so
+ * it is unit testable on the JVM (SHR-ARC-15); the composable owns delays.
+ */
+internal class MobileStartupGate(initiallyResident: Boolean) {
+
+    /** Rendering phase; [MobileStartupPhase.Startup] shows only LoadingScreen. */
+    var phase by mutableStateOf(MobileStartupPhase.Startup)
+        private set
+
+    /** True once a signed-in account resolved and content is awaited. */
+    var awaitingContent by mutableStateOf(false)
+        private set
+
+    /** True once enough rows hold content; the warm-up effect follows. */
+    var contentReady by mutableStateOf(false)
+        private set
+
+    /**
+     * True when meaningful content predated startup (warm process): the
+     * artwork warm-up is skipped and the handoff is immediate.
+     */
+    val initiallyResident: Boolean = initiallyResident
+
+    /**
+     * Authentication resolution. Idempotent per state; a completed startup
+     * never regresses to [MobileStartupPhase.Startup] on transient Loading.
+     */
+    fun onAccountChanged(account: AccountState) {
+        if (phase != MobileStartupPhase.Startup) {
+            when (account) {
+                is AccountState.SignedIn -> phase = MobileStartupPhase.SignedIn
+                AccountState.SignedOut -> phase = MobileStartupPhase.SignedOut
+                AccountState.Loading -> Unit // keep the current phase
+            }
+            return
+        }
+        when (account) {
+            AccountState.Loading -> Unit // authentication still unresolved
+            AccountState.SignedOut -> phase = MobileStartupPhase.SignedOut
+            is AccountState.SignedIn -> awaitingContent = true
+        }
+    }
+
+    /** Home content observation while the signed-in gate is holding. */
+    fun onHomeContent(readyRows: Int, settledWithoutContent: Boolean) {
+        if (phase != MobileStartupPhase.Startup || !awaitingContent) return
+        if (readyRows >= STARTUP_READY_ROWS) contentReady = true
+        if (settledWithoutContent) complete()
+    }
+
+    /** Artwork warm-up finished after content readiness. */
+    fun onWarmUpElapsed() {
+        if (phase != MobileStartupPhase.Startup || !contentReady) return
+        complete()
+    }
+
+    /** Content timeout measured from signed-in resolution. */
+    fun onContentTimeout() {
+        if (phase != MobileStartupPhase.Startup || !awaitingContent) return
+        complete()
+    }
+
+    private fun complete() {
+        phase = MobileStartupPhase.SignedIn
+    }
+}
+
+/**
+ * Terminal states of Home's initial pipeline that carry no usable rows: an
+ * empty provider set with nothing left to load, a failed initial window, or
+ * every resolved section having failed its initial load. Startup reveals the
+ * app in each case so recovery stays local (SHR-PROD-04).
+ */
+internal fun homeStartupSettledWithoutContent(state: AppUiState): Boolean {
+    if (
+        state.initialContentLoading ||
+        state.homeCatalogBatch.loadingMore ||
+        state.sections.any(CatalogSection::initialLoading)
+    ) {
+        return false
+    }
+    if (state.sections.any { section -> section.items.isNotEmpty() }) return false
+    val terminalEmpty = state.providers.isEmpty() &&
+        state.sections.isEmpty() &&
+        !state.homeCatalogBatch.loadMoreFailed &&
+        !state.homeCatalogBatch.hasMore
+    val initialWindowFailed = state.homeCatalogBatch.loadMoreFailed
+    val allSectionsFailed = state.sections.isNotEmpty() &&
+        state.sections.all { section ->
+            !section.initialLoading && section.errorMessage != null
+        }
+    return terminalEmpty || initialWindowFailed || allSectionsFailed
+}
+
+/**
+ * Root phase surface: only the branded loading screen during startup, then a
+ * single fade into the sign-in or signed-in app. Normal motion keeps the
+ * existing account-switch fade timing (MOB-MOT-02); reduced motion makes the
+ * handoff instant (MOB-MOT-03).
+ */
+@Composable
+internal fun MobileStartupSurface(
+    phase: MobileStartupPhase,
+    reducedMotion: Boolean,
+    signIn: @Composable () -> Unit,
+    signedIn: @Composable () -> Unit,
+) {
+    AnimatedContent(
+        targetState = phase,
+        transitionSpec = {
+            if (reducedMotion) {
+                fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+            } else {
+                fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+            }
+        },
+        label = "startup",
+    ) { target ->
+        when (target) {
+            MobileStartupPhase.Startup -> LoadingScreen()
+            MobileStartupPhase.SignedOut -> signIn()
+            MobileStartupPhase.SignedIn -> signedIn()
         }
     }
 }
@@ -434,7 +610,7 @@ private fun MobileSignedInApp(
 }
 
 @Composable
-private fun MobileNavBar(
+internal fun MobileNavBar(
     destination: MobileDestination,
     onProfile: () -> Unit,
     onSelect: (MobileDestination) -> Unit,
