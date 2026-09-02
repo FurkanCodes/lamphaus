@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lamphaus.core.model.DiagnosticsConsent
+import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -25,6 +26,7 @@ data class UserSettings(
     val localOnlyArtworkKeys: Boolean = false,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
+    val playback: PlaybackSettings = PlaybackSettings(),
     val updatedAtEpochMillis: Long = 0,
 )
 
@@ -61,6 +63,11 @@ class UserPreferences(private val context: Context) {
                 enabled = values[SPOILER_PROTECTION_ENABLED] ?: true,
                 blurEpisodeArtwork = values[SPOILER_BLUR_EPISODE_ARTWORK] ?: true,
                 blurEpisodeSynopsis = values[SPOILER_BLUR_EPISODE_SYNOPSIS] ?: true,
+            ),
+            playback = PlaybackSettings(
+                skipIntroEnabled = values[PLAYBACK_SKIP_INTRO] ?: true,
+                skipEndingEnabled = values[PLAYBACK_SKIP_ENDING] ?: true,
+                nextEpisodeEnabled = values[PLAYBACK_NEXT_EPISODE] ?: true,
             ),
             updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
@@ -128,6 +135,15 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /** Playback behavior is device-local: phones and TVs may intentionally use different controls. */
+    suspend fun setPlaybackSettings(settings: PlaybackSettings) {
+        context.dataStore.edit {
+            it[PLAYBACK_SKIP_INTRO] = settings.skipIntroEnabled
+            it[PLAYBACK_SKIP_ENDING] = settings.skipEndingEnabled
+            it[PLAYBACK_NEXT_EPISODE] = settings.nextEpisodeEnabled
+        }
+    }
+
     /**
      * Adopts an inbound cloud row that won last-writer-wins locally. The row's
      * timestamp becomes the local one so older echoes keep losing.
@@ -177,6 +193,9 @@ class UserPreferences(private val context: Context) {
         val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")
         val SPOILER_BLUR_EPISODE_ARTWORK = booleanPreferencesKey("spoiler_blur_episode_artwork")
         val SPOILER_BLUR_EPISODE_SYNOPSIS = booleanPreferencesKey("spoiler_blur_episode_synopsis")
+        val PLAYBACK_SKIP_INTRO = booleanPreferencesKey("playback_skip_intro")
+        val PLAYBACK_SKIP_ENDING = booleanPreferencesKey("playback_skip_ending")
+        val PLAYBACK_NEXT_EPISODE = booleanPreferencesKey("playback_next_episode")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }

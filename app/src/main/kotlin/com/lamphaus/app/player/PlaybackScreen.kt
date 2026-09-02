@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -86,6 +87,9 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.lamphaus.app.R
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.PlaybackSegment
+import com.lamphaus.core.model.PlaybackSegmentType
+import com.lamphaus.core.model.PlaybackSettings
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -132,8 +136,14 @@ internal fun PlaybackScreen(
     request: PlaybackRequest,
     player: Player?,
     isTelevision: Boolean,
+    settings: PlaybackSettings,
+    segments: List<PlaybackSegment>,
+    nextEpisodeLoading: Boolean,
+    nextEpisodeMessage: String?,
     onExit: () -> Unit,
     onOpenExternally: () -> Unit,
+    onNextEpisode: () -> Unit,
+    onDismissNextEpisodeMessage: () -> Unit,
     onPlayerViewLayout: (android.view.View) -> Unit,
 ) {
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
@@ -143,6 +153,17 @@ internal fun PlaybackScreen(
     var controlsFocusVersion by remember { mutableLongStateOf(0L) }
     var interactionVersion by remember { mutableLongStateOf(0L) }
     val rootFocus = remember { FocusRequester() }
+    val activeSegment = segments.firstOrNull { segment ->
+        val enabled = when (segment.type) {
+            PlaybackSegmentType.INTRO -> settings.skipIntroEnabled
+            PlaybackSegmentType.ENDING -> settings.skipEndingEnabled
+        }
+        val end = segment.endMillis ?: snapshot.durationMillis.takeIf { it > 0 } ?: Long.MAX_VALUE
+        enabled && snapshot.positionMillis in segment.startMillis until end
+    }
+    val nextEpisodeVisible = settings.nextEpisodeEnabled &&
+        request.nextEpisode != null &&
+        snapshot.isNearEnding(activeSegment?.type == PlaybackSegmentType.ENDING)
 
     fun revealControls() {
         controlsVisible = true
@@ -314,6 +335,9 @@ internal fun PlaybackScreen(
                 onReplay = { player?.seekTo(0); player?.play() },
                 onSeekBack = { player?.seekBack() },
                 onSeekForward = { player?.seekForward() },
+                canPlayNext = settings.nextEpisodeEnabled && request.nextEpisode != null,
+                nextEpisodeLoading = nextEpisodeLoading,
+                onNextEpisode = onNextEpisode,
                 focusPanel = returnFocusPanel,
                 focusRequestVersion = controlsFocusVersion,
                 onPanel = {
@@ -321,6 +345,30 @@ internal fun PlaybackScreen(
                     panel = it
                     revealControls()
                 },
+            )
+        }
+
+        if (activeSegment != null || nextEpisodeVisible || nextEpisodeMessage != null) {
+            PlaybackCueActions(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                segment = activeSegment,
+                showNextEpisode = nextEpisodeVisible,
+                loadingNextEpisode = nextEpisodeLoading,
+                message = nextEpisodeMessage,
+                controlsVisible = controlsVisible,
+                isTelevision = isTelevision,
+                onSkip = {
+                    when (activeSegment?.type) {
+                        PlaybackSegmentType.INTRO -> activeSegment.endMillis?.let { player?.seekTo(it) }
+                        PlaybackSegmentType.ENDING -> {
+                            (activeSegment.endMillis ?: snapshot.durationMillis.takeIf { it > 0 })
+                                ?.let { player?.seekTo(it) }
+                        }
+                        null -> Unit
+                    }
+                },
+                onNextEpisode = onNextEpisode,
+                onDismissMessage = onDismissNextEpisodeMessage,
             )
         }
 
@@ -354,6 +402,9 @@ private fun PlayerControls(
     onReplay: () -> Unit,
     onSeekBack: () -> Unit,
     onSeekForward: () -> Unit,
+    canPlayNext: Boolean,
+    nextEpisodeLoading: Boolean,
+    onNextEpisode: () -> Unit,
     focusPanel: PlayerPanel?,
     focusRequestVersion: Long,
     onPanel: (PlayerPanel) -> Unit,
@@ -423,6 +474,12 @@ private fun PlayerControls(
                 PlayerActionButton(Icons.Rounded.FastForward, "Forward 10 seconds") {
                     onSeekForward(); onInteraction()
                 }
+                if (canPlayNext) {
+                    PlayerActionButton(Icons.Rounded.SkipNext, "Next episode") {
+                        if (!nextEpisodeLoading) onNextEpisode()
+                        onInteraction()
+                    }
+                }
                 if (wideLayout) {
                     PlayerTime(snapshot.positionMillis)
                     PlayerProgress(
@@ -454,6 +511,77 @@ private fun PlayerControls(
             }
         }
     }
+}
+
+@Composable
+private fun PlaybackCueActions(
+    modifier: Modifier = Modifier,
+    segment: PlaybackSegment?,
+    showNextEpisode: Boolean,
+    loadingNextEpisode: Boolean,
+    message: String?,
+    controlsVisible: Boolean,
+    isTelevision: Boolean,
+    onSkip: () -> Unit,
+    onNextEpisode: () -> Unit,
+    onDismissMessage: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (isTelevision) 56.dp else 20.dp)
+            .padding(bottom = if (controlsVisible) 190.dp else 28.dp),
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        message?.let {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(PlayerBackground.copy(alpha = 0.96f))
+                    .clickable(onClick = onDismissMessage)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(it, color = PlayerOnSurface, fontFamily = PlayerFont, fontSize = 14.sp)
+                Text("Dismiss", color = PlayerPrimary, fontFamily = PlayerFont, fontWeight = FontWeight.Medium)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            segment?.let {
+                PlayerTextButton(
+                    label = if (it.type == PlaybackSegmentType.INTRO) "Skip intro" else "Skip ending",
+                    onClick = onSkip,
+                )
+            }
+            if (showNextEpisode) {
+                if (loadingNextEpisode) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(PlayerSurface)
+                            .padding(horizontal = 22.dp, vertical = 12.dp),
+                    ) {
+                        CircularProgressIndicator(Modifier.size(20.dp), color = PlayerPrimary, strokeWidth = 2.dp)
+                    }
+                } else {
+                    PlayerTextButton(
+                        label = "Next episode",
+                        onClick = onNextEpisode,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun PlayerSnapshot.isNearEnding(endingSegmentActive: Boolean): Boolean {
+    if (endingSegmentActive) return true
+    if (durationMillis <= 0) return false
+    val remaining = (durationMillis - positionMillis).coerceAtLeast(0)
+    val fraction = positionMillis.toDouble() / durationMillis.toDouble()
+    return remaining <= 2 * 60_000L || fraction >= 0.97
 }
 
 @Composable

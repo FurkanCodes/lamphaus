@@ -41,6 +41,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
@@ -90,6 +91,7 @@ internal enum class SettingsSection(
 ) {
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     ADDONS(R.string.addons, Icons.Outlined.Extension),
+    PLAYBACK(R.string.playback, Icons.Outlined.PlayCircle),
     PAIRED_DEVICES(R.string.paired_devices, Icons.Outlined.Tv),
     SPOILER_PROTECTION(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ARTWORK(R.string.artwork, Icons.Outlined.Image),
@@ -123,6 +125,7 @@ internal fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, on
             null -> SettingsRootMenu(onSelect = { section = it })
             SettingsSection.PROFILES -> SettingsProfilesPage(state, viewModel)
             SettingsSection.ADDONS -> SettingsAddonsPage(state, viewModel)
+            SettingsSection.PLAYBACK -> SettingsPlaybackPage(state, viewModel)
             SettingsSection.PAIRED_DEVICES -> SettingsPairedDevicesPage(state, viewModel)
             SettingsSection.SPOILER_PROTECTION -> SettingsSpoilerPage(state, viewModel)
             SettingsSection.ARTWORK -> SettingsArtworkPage(state, viewModel)
@@ -137,6 +140,7 @@ private fun SettingsRootMenu(onSelect: (SettingsSection) -> Unit) {
     val sections = buildList {
         add(SettingsSection.PROFILES)
         add(SettingsSection.ADDONS)
+        add(SettingsSection.PLAYBACK)
         if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
             add(SettingsSection.PAIRED_DEVICES)
         }
@@ -159,6 +163,59 @@ private fun SettingsRootMenu(onSelect: (SettingsSection) -> Unit) {
             SettingsMenuList(sections = sections, onSelect = onSelect)
         }
     }
+}
+
+@Composable
+private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
+    val playback = state.playbackSettings
+    SettingsPage(title = stringResource(R.string.playback)) {
+        item {
+            SettingsCard(stringResource(R.string.episode_playback)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.skip_intro),
+                    description = stringResource(R.string.skip_intro_description),
+                    checked = playback.skipIntroEnabled,
+                    onCheckedChange = {
+                        viewModel.setPlaybackSettings(playback.copy(skipIntroEnabled = it))
+                    },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.skip_ending),
+                    description = stringResource(R.string.skip_ending_description),
+                    checked = playback.skipEndingEnabled,
+                    onCheckedChange = {
+                        viewModel.setPlaybackSettings(playback.copy(skipEndingEnabled = it))
+                    },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.next_episode),
+                    description = stringResource(R.string.next_episode_description),
+                    checked = playback.nextEpisodeEnabled,
+                    onCheckedChange = {
+                        viewModel.setPlaybackSettings(playback.copy(nextEpisodeEnabled = it))
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackSettingRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(description) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = onCheckedChange) },
+        modifier = Modifier.semantics(mergeDescendants = true) {},
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
 }
 
 @Composable

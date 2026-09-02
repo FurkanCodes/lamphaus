@@ -24,6 +24,7 @@ import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
 import com.lamphaus.core.data.local.LamphausDatabase
 import com.lamphaus.core.data.preferences.UserPreferences
+import com.lamphaus.core.data.playback.IntroDbSkipRepository
 import com.lamphaus.core.data.repository.LibraryRepository
 import com.lamphaus.core.data.repository.RoomLibraryRepository
 import com.lamphaus.core.data.security.AndroidKeystoreStringCipher
@@ -64,6 +65,7 @@ class AppContainer(context: Context) {
         )?.takeIf { it.length >= 8 }
 
     val preferences = UserPreferences(context)
+    val skipRepository = IntroDbSkipRepository()
 
     /**
      * Application-lifetime scope for work that must outlive any single screen.

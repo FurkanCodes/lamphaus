@@ -61,6 +61,15 @@
     <string name="ken_burns_effect">Animate TV hero artwork</string>
     <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
     <string name="spoiler_protection">Spoiler protection</string>
+    <string name="playback">Playback</string>
+    <string name="episode_playback">Episode playback</string>
+    <string name="skip_intro">Skip intro</string>
+    <string name="skip_intro_description">Show a skip button when exact intro timestamps are available.</string>
+    <string name="skip_ending">Skip ending</string>
+    <string name="skip_ending_description">Show a skip button when exact credits timestamps are available.</string>
+    <string name="next_episode">Next episode</string>
+    <string name="next_episode_description">Offer the next released episode near the end of playback.</string>
+    <string name="next_episode_source_unavailable">The next episode has no playable source from your installed add-ons.</string>
     <string name="spoiler_protection_description">Blur unwatched episode artwork and synopses.</string>
     <string name="protect_spoilers">Protect spoilers</string>
     <string name="blur_episode_artwork">Blur episode artwork</string>

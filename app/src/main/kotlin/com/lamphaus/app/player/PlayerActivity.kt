@@ -18,6 +18,7 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -28,26 +29,49 @@ import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.R
 import com.lamphaus.core.data.cloud.AccountState
+import com.lamphaus.core.model.Episode
+import com.lamphaus.core.model.PlaybackSegment
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.PlaybackSettings
+import com.lamphaus.core.model.PlaybackSource
+import com.lamphaus.core.model.ProviderManifest
+import com.lamphaus.core.model.ProviderResult
+import com.lamphaus.core.model.ProviderSubscription
+import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.WatchProgress
+import com.lamphaus.core.model.nextEpisodeAfter
 import com.lamphaus.core.player.LamphausPlaybackService
 import com.lamphaus.core.player.PlaybackHeaderRegistry
 import com.lamphaus.core.player.toMediaItem
+import com.lamphaus.app.ui.SourceResolution
+import com.lamphaus.app.ui.resolveSource
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class PlayerActivity : ComponentActivity() {
     private val container by lazy { (application as LamphausApplication).container }
     private val controllerState = mutableStateOf<MediaController?>(null)
+    private val requestState = mutableStateOf<PlaybackRequest?>(null)
+    private val playbackSettingsState = mutableStateOf(PlaybackSettings())
+    private val segmentsState = mutableStateOf<List<PlaybackSegment>>(emptyList())
+    private val nextEpisodeLoadingState = mutableStateOf(false)
+    private val nextEpisodeMessageState = mutableStateOf<String?>(null)
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var request: PlaybackRequest? = null
     private var progressPulseJob: Job? = null
+    private var segmentLookupJob: Job? = null
 
     /** Position of the last progress write; guards against redundant periodic saves. */
     @Volatile
@@ -64,6 +88,7 @@ class PlayerActivity : ComponentActivity() {
             finish()
             return
         }
+        requestState.value = playback
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -76,15 +101,29 @@ class PlayerActivity : ComponentActivity() {
         // heap for demuxing high-bitrate sources, while artwork remains available on disk.
         SingletonImageLoader.get(this).memoryCache?.clear()
         connect(playback)
+        lifecycleScope.launch {
+            container.preferences.settings.collectLatest { settings ->
+                playbackSettingsState.value = settings.playback
+                loadSegments(requestState.value, settings.playback)
+            }
+        }
         setContent {
-            PlaybackScreen(
-                request = playback,
-                player = controllerState.value,
-                isTelevision = isTelevision,
-                onExit = ::finish,
-                onOpenExternally = ::openExternally,
-                onPlayerViewLayout = ::updatePipSourceRect,
-            )
+            requestState.value?.let { currentRequest ->
+                PlaybackScreen(
+                    request = currentRequest,
+                    player = controllerState.value,
+                    isTelevision = isTelevision,
+                    settings = playbackSettingsState.value,
+                    segments = segmentsState.value,
+                    nextEpisodeLoading = nextEpisodeLoadingState.value,
+                    nextEpisodeMessage = nextEpisodeMessageState.value,
+                    onExit = ::finish,
+                    onOpenExternally = ::openExternally,
+                    onNextEpisode = ::playNextEpisode,
+                    onDismissNextEpisodeMessage = { nextEpisodeMessageState.value = null },
+                    onPlayerViewLayout = ::updatePipSourceRect,
+                )
+            }
         }
     }
 
@@ -113,6 +152,152 @@ class PlayerActivity : ComponentActivity() {
             },
             ContextCompat.getMainExecutor(this),
         )
+    }
+
+    private fun loadSegments(playback: PlaybackRequest?, settings: PlaybackSettings) {
+        segmentLookupJob?.cancel()
+        segmentsState.value = emptyList()
+        val media = playback?.preview ?: return
+        if (!settings.skipIntroEnabled && !settings.skipEndingEnabled) return
+        segmentLookupJob = lifecycleScope.launch {
+            segmentsState.value = container.skipRepository.segments(media, playback.episode)
+        }
+    }
+
+    private fun playNextEpisode() {
+        if (nextEpisodeLoadingState.value || request?.nextEpisode == null) return
+        nextEpisodeLoadingState.value = true
+        nextEpisodeMessageState.value = null
+        lifecycleScope.launch {
+            try {
+                val current = request
+                val next = current?.let { resolveNextPlayback(it) }
+                if (current == null || next == null) {
+                    nextEpisodeMessageState.value = getString(R.string.next_episode_source_unavailable)
+                } else {
+                    switchPlayback(current, next)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                nextEpisodeMessageState.value = getString(R.string.next_episode_source_unavailable)
+            } finally {
+                nextEpisodeLoadingState.value = false
+            }
+        }
+    }
+
+    private suspend fun resolveNextPlayback(current: PlaybackRequest): PlaybackRequest? {
+        val media = current.preview ?: return null
+        val next = current.nextEpisode ?: return null
+        val providers = container.libraryRepository.providers().first()
+            .filter(ProviderSubscription::enabled)
+            .sortedBy(ProviderSubscription::sortOrder)
+        val resolvedProviders = supervisorScope {
+            providers.map { subscription ->
+                async {
+                    val manifest = container.providerClient.manifest(subscription.manifestUrl)
+                    ResolvedPlaybackProvider(
+                        subscription,
+                        (manifest as? ProviderResult.Success)?.value,
+                    )
+                }
+            }.awaitAll()
+        }
+        val fetchedStreams = supervisorScope {
+            resolvedProviders.mapNotNull { provider ->
+                val manifest = provider.manifest ?: return@mapNotNull null
+                if (!container.providerAggregator.supports(manifest, "stream", media.rawType, next.id)) {
+                    return@mapNotNull null
+                }
+                async {
+                    (container.providerClient.streams(
+                        provider.subscription.manifestUrl,
+                        provider.subscription.id,
+                        media.rawType,
+                        next.id,
+                    ) as? ProviderResult.Success)?.value.orEmpty()
+                }
+            }.awaitAll().flatten()
+        }
+        val playable = (next.streams + fetchedStreams).distinctBy { candidate ->
+            listOf(candidate.providerId, candidate.url, candidate.externalUrl, candidate.infoHash).joinToString("|")
+        }.mapNotNull { source ->
+            val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal
+            resolution?.let { source to it.url }
+        }
+        val selected = playable.minWithOrNull(
+            compareBy<Pair<StreamCandidate, String>> {
+                if (it.first.providerId == current.sourceProviderId) 0 else 1
+            }.thenBy {
+                if (current.sourceBingeGroup != null && it.first.bingeGroup == current.sourceBingeGroup) 0 else 1
+            },
+        ) ?: return null
+        val source = selected.first
+        val subtitles = loadSubtitlesForNext(media.rawType, next.id, source, resolvedProviders)
+        return current.copy(
+            videoId = next.id,
+            subtitle = next.episodeLabel(),
+            source = PlaybackSource(
+                uri = selected.second,
+                mimeType = source.mimeType ?: selected.second.inferMimeType(),
+                headers = source.headers,
+                subtitles = (source.subtitles + subtitles).distinctBy { "${it.language}|${it.url}|${it.id}" },
+            ),
+            startPositionMillis = 0,
+            episode = next,
+            nextEpisode = current.episodeQueue.nextEpisodeAfter(next),
+            sourceProviderId = source.providerId,
+            sourceBingeGroup = source.bingeGroup,
+        )
+    }
+
+    private suspend fun loadSubtitlesForNext(
+        rawType: String,
+        videoId: String,
+        source: StreamCandidate,
+        providers: List<ResolvedPlaybackProvider>,
+    ): List<SubtitleTrack> {
+        val extras = buildMap {
+            source.videoHash?.let { put("videoHash", it) }
+            source.videoSize?.let { put("videoSize", it.toString()) }
+            source.filename?.let { put("filename", it) }
+        }
+        return supervisorScope {
+            providers.mapNotNull { provider ->
+                val manifest = provider.manifest ?: return@mapNotNull null
+                if (!container.providerAggregator.supports(manifest, "subtitles", rawType, videoId)) {
+                    return@mapNotNull null
+                }
+                async {
+                    (container.providerClient.subtitles(
+                        provider.subscription.manifestUrl,
+                        rawType,
+                        videoId,
+                        extras,
+                    ) as? ProviderResult.Success)?.value.orEmpty()
+                }
+            }.awaitAll().flatten()
+        }
+    }
+
+    private fun switchPlayback(current: PlaybackRequest, next: PlaybackRequest) {
+        saveProgress(final = true)
+        PlaybackHeaderRegistry.end(current.source.uri, current.source.subtitles.map { it.url })
+        PlaybackHeaderRegistry.begin(next.source.uri, next.source.headers)
+        next.source.subtitles.forEach { subtitle ->
+            PlaybackHeaderRegistry.put(subtitle.url, subtitle.headers)
+        }
+        request = next
+        requestState.value = next
+        lastSavedPositionMillis = -1L
+        nextEpisodeMessageState.value = null
+        loadSegments(next, playbackSettingsState.value)
+        controller?.apply {
+            setMediaItem(next.toMediaItem())
+            prepare()
+            play()
+        }
     }
 
     override fun onUserLeaveHint() {
@@ -159,6 +344,8 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         progressPulseJob?.cancel()
         progressPulseJob = null
+        segmentLookupJob?.cancel()
+        segmentLookupJob = null
         val playback = request
         if (playback != null) {
             PlaybackHeaderRegistry.end(playback.source.uri, playback.source.subtitles.map { it.url })
@@ -263,4 +450,26 @@ private fun String.isAllowedPlaybackUri(): Boolean {
     if (!BuildConfig.DEBUG) return false
     val uri = runCatching { URI(this) }.getOrNull() ?: return false
     return uri.scheme.equals("http", ignoreCase = true) && uri.host in setOf("localhost", "127.0.0.1", "10.0.2.2")
+}
+
+private data class ResolvedPlaybackProvider(
+    val subscription: ProviderSubscription,
+    val manifest: ProviderManifest?,
+)
+
+private fun Episode.episodeLabel(): String = listOfNotNull(
+    season?.let { "S$it" },
+    episode?.let { "E$it" },
+    title.takeIf(String::isNotBlank),
+).joinToString(" · ")
+
+private fun String.inferMimeType(): String? = when {
+    contains(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
+    contains(".mpd", ignoreCase = true) -> "application/dash+xml"
+    contains(".ism", ignoreCase = true) -> "application/vnd.ms-sstr+xml"
+    contains(".mkv", ignoreCase = true) -> "video/x-matroska"
+    contains(".webm", ignoreCase = true) -> "video/webm"
+    contains(".ts", ignoreCase = true) -> "video/mp2t"
+    contains(".mp4", ignoreCase = true) -> "video/mp4"
+    else -> null
 }

@@ -27,6 +27,7 @@ import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.PlaybackSource
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.StreamCandidate
@@ -34,6 +35,8 @@ import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.nextEpisodeAfter
+import com.lamphaus.core.model.playbackQueueFrom
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
@@ -143,6 +146,7 @@ class AppViewModel(
                     localOnlyArtworkKeys = settings.localOnlyArtworkKeys,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
+                    playbackSettings = settings.playback,
                 )
             }.collectLatest { snapshot ->
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
@@ -194,6 +198,7 @@ class AppViewModel(
                         localOnlyArtworkKeys = snapshot.localOnlyArtworkKeys,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
+                        playbackSettings = snapshot.playbackSettings,
                         initialContentLoading = if (accountChanged || nextUserId == null) {
                             true
                         } else {
@@ -1138,6 +1143,21 @@ class AppViewModel(
                     val tracks = loadSubtitles(picker.media, videoId, source)
                     val start = state.value.progress.firstOrNull { it.videoId == videoId }?.positionMillis ?: 0
                     val episode = picker.episode
+                    val episodeQueue = state.value.selectedDetail
+                        ?.takeIf { it.preview.stableKey == picker.media.stableKey }
+                        ?.episodes
+                        .orEmpty()
+                        .playbackQueueFrom(episode)
+                        .map { queued ->
+                            queued.copy(
+                                overview = null,
+                                thumbnailUrl = null,
+                                streams = queued.streams
+                                    .filter(StreamCandidate::isPlayableInternally)
+                                    .take(8)
+                                    .map(StreamCandidate::compactForPlaybackQueue),
+                            )
+                        }
                     val episodeLabel = episode?.let { ep ->
                         listOfNotNull(
                             ep.season?.let { season -> "S$season" },
@@ -1162,6 +1182,11 @@ class AppViewModel(
                                     subtitles = (source.subtitles + tracks).distinctBy { "${it.language}|${it.url}|${it.id}" },
                                 ),
                                 startPositionMillis = start,
+                                episode = episode,
+                                nextEpisode = episodeQueue.nextEpisodeAfter(episode),
+                                episodeQueue = episodeQueue,
+                                sourceProviderId = source.providerId,
+                                sourceBingeGroup = source.bingeGroup,
                             ),
                             sourcePicker = null,
                         )
@@ -1379,6 +1404,10 @@ class AppViewModel(
     fun setSpoilerProtection(settings: SpoilerProtectionSettings) = viewModelScope.launch {
         container.preferences.setSpoilerProtection(settings)
         pushSyncedSettings()
+    }
+
+    fun setPlaybackSettings(settings: PlaybackSettings) = viewModelScope.launch {
+        container.preferences.setPlaybackSettings(settings)
     }
 
 
@@ -2003,6 +2032,7 @@ class AppViewModel(
         val localOnlyArtworkKeys: Boolean,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
+        val playbackSettings: PlaybackSettings,
     )
 
     companion object {
@@ -2044,6 +2074,17 @@ private fun String.providerConfigurationUrl(): String? {
     }
     return URI("https", null, uri.host, uri.port, configurationPath, null, null).toString()
 }
+
+private fun StreamCandidate.compactForPlaybackQueue() = StreamCandidate(
+    providerId = providerId,
+    name = name,
+    title = title,
+    url = url,
+    mimeType = mimeType,
+    bingeGroup = bingeGroup,
+    headers = headers,
+    subtitles = subtitles,
+)
 
 private fun String.inferMimeType(): String? = when {
     contains(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
