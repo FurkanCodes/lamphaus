@@ -64,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -118,6 +119,16 @@ private const val HOME_REVEAL_MAX_WAIT_MILLIS = 8_000L
 
 /** Zoom-settle applied to hero artwork while it crossfades during a swipe. */
 private const val HERO_ARTWORK_ZOOM = 0.06f
+
+/** Soft bottom fade carried by each hero artwork layer; it transforms with the layer. */
+private val HERO_LAYER_FADE_STOPS = arrayOf(
+    0.50f to Color.Transparent,
+    0.72f to Color.Black.copy(alpha = 0.32f),
+    1f to Color.Black.copy(alpha = 0.58f),
+)
+
+/** Fixed bottom gradient height ending in opaque black behind the title and dots. */
+private val HERO_BOTTOM_ANCHOR_HEIGHT = 120.dp
 
 /** Crossfade timing for the detached hero title block (MOB-MOT-02: 150-250ms). */
 private const val HERO_CONTENT_FADE_MILLIS = 220
@@ -386,25 +397,26 @@ private fun MobileHeroCarousel(
     if (items.isEmpty()) return
     val pagerState = rememberPagerState { items.size }
     val reducedMotion = rememberReducedMotion()
-    Box(Modifier.fillMaxWidth().height(400.dp)) {
-        // Artwork stage: fixed full-bleed layers crossfaded by the swipe
-        // fraction. Nothing translates with the pager, so artwork never
-        // overflows its bounds or misaligns with the scrims above it.
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(400.dp)
+            .clipToBounds(),
+    ) {
+        // Artwork stage: each full-bleed layer carries its own soft bottom
+        // fade inside one graphics layer, so the swipe alpha and zoom always
+        // transform image and fade together and the fade can never drift off
+        // its artwork (MOB-CLR-07, MOB-GFX-05). Nothing translates with the
+        // pager, and the viewport is clipped so compounded scaling stays
+        // inside the hero.
         val settledIndex = pagerState.currentPage.coerceIn(0, items.lastIndex)
-        KenBurnsArtwork(
+        val swipeProgress = { pagerState.currentPageOffsetFraction.absoluteValue }
+        HeroArtworkLayer(
             media = items[settledIndex],
             enabled = kenBurnsEnabled,
             reducedMotion = reducedMotion,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    if (!reducedMotion) {
-                        val zoom = 1f + HERO_ARTWORK_ZOOM *
-                            pagerState.currentPageOffsetFraction.absoluteValue
-                        scaleX = zoom
-                        scaleY = zoom
-                    }
-                },
+            layerTransform = { heroSettledLayerTransform(swipeProgress(), reducedMotion) },
+            modifier = Modifier.fillMaxSize(),
         )
         // Neighbor layer mounts only while a swipe is in progress; its alpha
         // and zoom mirror the settled layer so the roles swap without a pop.
@@ -419,37 +431,18 @@ private fun MobileHeroCarousel(
             }
         }
         neighborIndex?.let { neighbor ->
-            KenBurnsArtwork(
+            HeroArtworkLayer(
                 media = items[neighbor],
                 enabled = kenBurnsEnabled,
                 reducedMotion = reducedMotion,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val progress = pagerState.currentPageOffsetFraction.absoluteValue
-                        alpha = progress
-                        if (!reducedMotion) {
-                            val zoom = 1f + HERO_ARTWORK_ZOOM * (1f - progress)
-                            scaleX = zoom
-                            scaleY = zoom
-                        }
-                    },
+                layerTransform = { heroNeighborLayerTransform(swipeProgress(), reducedMotion) },
+                modifier = Modifier.fillMaxSize(),
             )
         }
-        // Static scrims: aligned with the stage at all times, unlike the old
-        // per-page scrims that slid at pager speed under lagging artwork.
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.50f to Color.Transparent,
-                            1f to MobileTokens.black,
-                        ),
-                    ),
-                ),
-        )
+        // Fixed protections above the transformed layers: the top status-bar
+        // guard, plus a short bottom gradient ending in opaque black so the
+        // title, actions, and dots never sit on a moving brightness seam and
+        // the scrims cannot breathe during a swipe.
         Box(
             Modifier
                 .fillMaxSize()
@@ -458,9 +451,19 @@ private fun MobileHeroCarousel(
                         colorStops = arrayOf(
                             0f to MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
                             0.16f to Color.Transparent,
-                            0.34f to Color.Transparent,
-                            0.68f to MaterialTheme.colorScheme.scrim.copy(alpha = 0.50f),
                         ),
+                    ),
+                ),
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(HERO_BOTTOM_ANCHOR_HEIGHT)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        1f to MobileTokens.black,
                     ),
                 ),
         )
@@ -543,6 +546,64 @@ private fun MobileHeroCarousel(
         )
     }
 }
+
+/**
+ * One hero carousel artwork layer: the image and its soft bottom fade wrapped
+ * in a single graphics layer, so the swipe alpha and zoom always transform
+ * both together and the fade can never drift off its artwork (MOB-CLR-07,
+ * MOB-GFX-05). Reduced motion drops the shared swipe zoom for the whole layer
+ * at once while the crossfade survives (MOB-MOT-03).
+ */
+@Composable
+private fun HeroArtworkLayer(
+    media: MediaPreview,
+    enabled: Boolean,
+    reducedMotion: Boolean,
+    layerTransform: () -> HeroLayerTransform,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.heroLayerTransform(layerTransform)) {
+        KenBurnsArtwork(
+            media = media,
+            enabled = enabled,
+            reducedMotion = reducedMotion,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(*HERO_LAYER_FADE_STOPS)),
+        )
+    }
+}
+
+/** Alpha and scale shared by a hero artwork layer and its attached fade. */
+internal data class HeroLayerTransform(
+    val alpha: Float,
+    val scale: Float,
+)
+
+/** Settled page: fully opaque, zooming up while the neighbor layer arrives. */
+internal fun heroSettledLayerTransform(progress: Float, reducedMotion: Boolean): HeroLayerTransform =
+    HeroLayerTransform(
+        alpha = 1f,
+        scale = if (reducedMotion) 1f else 1f + HERO_ARTWORK_ZOOM * progress,
+    )
+
+/** Incoming neighbor: fades in with the swipe while its zoom settles downward. */
+internal fun heroNeighborLayerTransform(progress: Float, reducedMotion: Boolean): HeroLayerTransform =
+    HeroLayerTransform(
+        alpha = progress,
+        scale = if (reducedMotion) 1f else 1f + HERO_ARTWORK_ZOOM * (1f - progress),
+    )
+
+private fun Modifier.heroLayerTransform(layerTransform: () -> HeroLayerTransform): Modifier =
+    graphicsLayer {
+        val layer = layerTransform()
+        alpha = layer.alpha
+        scaleX = layer.scale
+        scaleY = layer.scale
+    }
 
 /**
  * Title, metadata, and actions for the settled hero page. Lives outside the
