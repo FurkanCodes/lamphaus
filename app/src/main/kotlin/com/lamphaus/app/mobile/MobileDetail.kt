@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
 
 import androidx.compose.foundation.lazy.LazyRow
@@ -71,6 +73,11 @@ import androidx.compose.ui.unit.dp
 
 import androidx.core.text.HtmlCompat
 import com.lamphaus.app.ui.artworkImageUrl
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.material.icons.outlined.MoreVert
+import com.lamphaus.app.ui.ContentMenuTarget
+import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.ArtworkEditorState
 import coil3.compose.AsyncImage
@@ -110,12 +117,19 @@ internal fun MobileDetailScreen(
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
+    progress: List<WatchProgress>,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
 ) {
     if (detail == null) return
     val artworkResolver = LocalArtworkResolver.current
     val resolvedPreview = remember(detail.preview, artworkResolver) {
         artworkResolver.resolve(detail.preview).media
     }
+    val detailMenuTarget = ContentMenuTarget(
+        media = detail.preview,
+        progress = progress.firstOrNull { it.videoId == detail.preview.id },
+        origin = ContentMenuOrigin.DETAIL,
+    )
 
     val seasons = remember(detail) { detail.episodes.mapNotNull { it.season }.distinct().sorted() }
     var selectedSeason by rememberSaveable(detail.preview.stableKey) { mutableStateOf(seasons.firstOrNull()) }
@@ -151,6 +165,7 @@ internal fun MobileDetailScreen(
                 onPlay = onPlay,
                 onLibrary = onLibrary,
                 onEditArtwork = onEditArtwork,
+                onOpenMenu = { onOpenMenu(detailMenuTarget) },
             )
             val fullGenres = detail.preview.metadataPresentation(maxGenres = Int.MAX_VALUE).genres
             if (fullGenres.isNotEmpty()) {
@@ -175,10 +190,13 @@ internal fun MobileDetailScreen(
                 item { info() }
                 items(detail.episodes, key = { it.id }) { episode ->
                     EpisodeRow(
+                        media = detail.preview,
                         episode = episode,
                         watched = episode.id in watchedEpisodeIds,
                         spoilerProtection = spoilerProtection,
+                        progress = progress.firstOrNull { it.videoId == episode.id },
                         onPlay = onPlay,
+                        onOpenMenu = onOpenMenu,
                     )
                 }
             }
@@ -202,6 +220,7 @@ internal fun MobileDetailScreen(
                     onPlay = onPlay,
                     onLibrary = onLibrary,
                     onEditArtwork = onEditArtwork,
+                    onOpenMenu = { onOpenMenu(detailMenuTarget) },
                 )
             }
             detail.preview.description
@@ -234,10 +253,13 @@ internal fun MobileDetailScreen(
             items(visibleEpisodes, key = { it.id }) { episode ->
                 Box(Modifier.padding(horizontal = MobileTokens.spacingScreen)) {
                     EpisodeRow(
+                        media = detail.preview,
                         episode = episode,
                         watched = episode.id in watchedEpisodeIds,
                         spoilerProtection = spoilerProtection,
+                        progress = progress.firstOrNull { it.videoId == episode.id },
                         onPlay = onPlay,
+                        onOpenMenu = onOpenMenu,
                     )
                 }
             }
@@ -272,6 +294,7 @@ private fun MobileDetailHero(
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     Box(Modifier.fillMaxWidth().height(480.dp)) {
         MediaArtwork(preview, Modifier.fillMaxSize(), preferBackdrop = true)
@@ -341,6 +364,7 @@ private fun MobileDetailHero(
                 onPlay = onPlay,
                 onLibrary = onLibrary,
                 onEditArtwork = onEditArtwork,
+                onOpenMenu = onOpenMenu,
             )
         }
     }
@@ -354,6 +378,7 @@ internal fun MobileDetailActions(
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
+    onOpenMenu: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth(),
@@ -414,6 +439,18 @@ internal fun MobileDetailActions(
             Icon(
                 Icons.Outlined.Edit,
                 contentDescription = stringResource(R.string.edit_artwork),
+                tint = Color.White,
+            )
+        }
+        IconButton(
+            onClick = onOpenMenu,
+            modifier = Modifier
+                .size(48.dp)
+                .background(MobileTokens.surfaceRaised.copy(alpha = 0.68f), CircleShape),
+        ) {
+            Icon(
+                Icons.Outlined.MoreVert,
+                contentDescription = stringResource(R.string.content_menu_more),
                 tint = Color.White,
             )
         }
@@ -771,12 +808,16 @@ internal fun MobilePersonChips(@StringRes labelRes: Int, names: List<String>) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun EpisodeRow(
     episode: com.lamphaus.core.model.Episode,
+    media: MediaPreview,
     watched: Boolean,
     spoilerProtection: SpoilerProtectionSettings,
+    progress: WatchProgress?,
     onPlay: (com.lamphaus.core.model.Episode?) -> Unit,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
 ) {
     val number = episode.numberParts()
     val artworkHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched)
@@ -797,11 +838,26 @@ internal fun EpisodeRow(
         numberLabel.isNotEmpty() -> numberLabel
         else -> airDate ?: ""
     }
+    val haptics = LocalHapticFeedback.current
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(MobileTokens.radiusCard))
-            .clickable(role = Role.Button) { onPlay(episode) }
+            .combinedClickable(
+                role = Role.Button,
+                onClick = { onPlay(episode) },
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onOpenMenu(
+                        ContentMenuTarget(
+                            media = media,
+                            episode = episode,
+                            progress = progress,
+                            origin = ContentMenuOrigin.EPISODE,
+                        ),
+                    )
+                },
+            )
             .semantics { stateDescription = watchedDescription }
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -876,6 +932,26 @@ internal fun EpisodeRow(
                     )
                 }
             }
+        }
+        IconButton(
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onOpenMenu(
+                    ContentMenuTarget(
+                        media = media,
+                        episode = episode,
+                        progress = progress,
+                        origin = ContentMenuOrigin.EPISODE,
+                    ),
+                )
+            },
+            modifier = Modifier.size(48.dp),
+        ) {
+            Icon(
+                Icons.Outlined.MoreVert,
+                contentDescription = stringResource(R.string.content_menu_more),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

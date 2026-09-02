@@ -18,6 +18,8 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
 import com.lamphaus.core.model.Episode
+import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -42,8 +44,10 @@ class TvSpoilerProtectionTest {
                     ),
                 ) {
                     TvEpisodeCard(
+                        media = media,
                         episode = episode,
                         watched = false,
+                        progress = null,
                         spoilerProtection = SpoilerProtectionSettings(),
                         fallbackArtworkUrl = null,
                         onClick = { playCount++ },
@@ -75,5 +79,6 @@ class TvSpoilerProtectionTest {
             episode = 1,
             overview = "Secret overview",
         )
+        val media = MediaPreview("series-1", MediaType.SERIES, "series", "Series")
     }
 }

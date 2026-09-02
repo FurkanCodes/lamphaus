@@ -61,3 +61,18 @@ data class WatchProgressEntity(
     val episodeLabel: String? = null,
 )
 
+/**
+ * Keys confirmed by the last successful cloud snapshot. Persisting this set
+ * lets reconciliation distinguish a remote deletion from a local row whose
+ * upload has not succeeded yet.
+ */
+@Entity(
+    tableName = "cloud_sync_keys",
+    primaryKeys = ["profileId", "collection", "itemKey"],
+    indices = [Index(value = ["profileId", "collection"])],
+)
+data class CloudSyncKeyEntity(
+    val profileId: String,
+    val collection: String,
+    val itemKey: String,
+)

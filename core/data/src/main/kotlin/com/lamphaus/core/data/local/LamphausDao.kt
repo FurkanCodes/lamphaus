@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -51,6 +52,41 @@ interface LamphausDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProgress(progress: WatchProgressEntity)
 
+    /** Serializes the read/write pair so concurrent final saves cannot clear completion. */
+    @Transaction
+    suspend fun upsertProgressSticky(progress: WatchProgressEntity): WatchProgressEntity {
+        val effective = if (progressEntry(progress.profileId, progress.videoId)?.completed == true) {
+            progress.copy(completed = true)
+        } else {
+            progress
+        }
+        upsertProgress(effective)
+        return effective
+    }
+
+    @Query("SELECT * FROM watch_progress WHERE profileId = :profileId AND videoId = :videoId LIMIT 1")
+    suspend fun progressEntry(profileId: String, videoId: String): WatchProgressEntity?
+
+    @Query("DELETE FROM watch_progress WHERE profileId = :profileId AND videoId = :videoId")
+    suspend fun removeProgress(profileId: String, videoId: String)
+
+    @Query("SELECT itemKey FROM cloud_sync_keys WHERE profileId = :profileId AND collection = :collection")
+    suspend fun cloudSyncKeys(profileId: String, collection: String): List<String>
+
+    @Query("DELETE FROM cloud_sync_keys WHERE profileId = :profileId AND collection = :collection")
+    suspend fun clearCloudSyncKeys(profileId: String, collection: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCloudSyncKeys(keys: List<CloudSyncKeyEntity>)
+
+    @Transaction
+    suspend fun replaceCloudSyncKeys(profileId: String, collection: String, keys: Set<String>) {
+        clearCloudSyncKeys(profileId, collection)
+        if (keys.isNotEmpty()) {
+            insertCloudSyncKeys(keys.map { CloudSyncKeyEntity(profileId, collection, it) })
+        }
+    }
+
     @Query("DELETE FROM profiles")
     suspend fun clearProfiles()
 
@@ -62,5 +98,7 @@ interface LamphausDao {
 
     @Query("DELETE FROM watch_progress")
     suspend fun clearProgress()
-}
 
+    @Query("DELETE FROM cloud_sync_keys")
+    suspend fun clearAllCloudSyncKeys()
+}

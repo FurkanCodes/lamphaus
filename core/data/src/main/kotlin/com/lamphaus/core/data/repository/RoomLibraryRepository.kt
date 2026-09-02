@@ -103,13 +103,33 @@ class RoomLibraryRepository(
         rows.map { it.toModel() }
     }
 
-    override suspend fun saveProgress(progress: WatchProgress) {
-        dao.upsertProgress(progress.toEntity())
+    override suspend fun saveProgress(progress: WatchProgress): WatchProgress {
+        // The DAO transaction makes completion sticky even when periodic,
+        // natural-end, and onStop saves race each other.
+        return dao.upsertProgressSticky(progress.toEntity()).toModel()
     }
+
+    override suspend fun progressEntry(profileId: String, videoId: String): WatchProgress? =
+        dao.progressEntry(profileId, videoId)?.toModel()
+
+    override suspend fun removeProgress(profileId: String, videoId: String) =
+        dao.removeProgress(profileId, videoId)
+
+    override suspend fun cloudSyncKeys(
+        profileId: String,
+        collection: CloudSyncCollection,
+    ): Set<String> = dao.cloudSyncKeys(profileId, collection.name).toSet()
+
+    override suspend fun replaceCloudSyncKeys(
+        profileId: String,
+        collection: CloudSyncCollection,
+        keys: Set<String>,
+    ) = dao.replaceCloudSyncKeys(profileId, collection.name, keys)
 
     override suspend fun clearLocalAccountData() {
         dao.clearProgress()
         dao.clearLibrary()
+        dao.clearAllCloudSyncKeys()
         dao.clearProviders()
         dao.clearProfiles()
     }

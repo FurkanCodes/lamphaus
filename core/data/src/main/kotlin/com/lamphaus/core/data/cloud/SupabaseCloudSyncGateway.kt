@@ -74,6 +74,10 @@ class SupabaseCloudSyncGateway(
             .withSessionRecovery(sessionRecovery)
             .map { rows -> rows.map { it.toModel() } }
             .recoverWithEmpty()
+    // Library and progress deliberately do NOT degrade to empty emissions:
+    // realtime consumers reconcile deletions against these rows, and an empty
+    // list from a network failure must never look like an authoritative wipe.
+    // Consumers retry flow errors without reconciling a failed round.
     override fun library(userId: String, profileId: String): Flow<List<LibraryEntry>> =
         supabase.from(TABLE_LIBRARY)
             .selectAsFlow(
@@ -82,7 +86,7 @@ class SupabaseCloudSyncGateway(
             )
             .withSessionRecovery(sessionRecovery)
             .map { rows -> rows.map { it.toModel(json) } }
-            .recoverWithEmpty()
+
     override fun progress(userId: String, profileId: String): Flow<List<WatchProgress>> =
         supabase.from(TABLE_PROGRESS)
             .selectAsFlow(
@@ -91,7 +95,6 @@ class SupabaseCloudSyncGateway(
             )
             .withSessionRecovery(sessionRecovery)
             .map { rows -> rows.map { it.toModel(json) } }
-            .recoverWithEmpty()
     override suspend fun saveProfile(userId: String, profile: Profile): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
             supabase.from(TABLE_PROFILES)
@@ -108,6 +111,37 @@ class SupabaseCloudSyncGateway(
         sessionRecovery.withAuthRetry {
             supabase.from(TABLE_PROGRESS)
                 .upsert(listOf(WatchProgressRow.of(userId, progress, json))) { onConflict = "profile_id,video_id" }
+        }
+    }
+    override suspend fun deleteLibraryEntry(
+        userId: String,
+        profileId: String,
+        mediaKey: String,
+    ): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.from(TABLE_LIBRARY).delete {
+                filter {
+                    eq("user_id", userId)
+                    eq("profile_id", profileId)
+                    eq("media_key", mediaKey)
+                }
+            }
+        }
+    }
+
+    override suspend fun deleteProgress(
+        userId: String,
+        profileId: String,
+        videoId: String,
+    ): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.from(TABLE_PROGRESS).delete {
+                filter {
+                    eq("user_id", userId)
+                    eq("profile_id", profileId)
+                    eq("video_id", videoId)
+                }
+            }
         }
     }
     override fun settings(userId: String): Flow<SyncedSettings?> =

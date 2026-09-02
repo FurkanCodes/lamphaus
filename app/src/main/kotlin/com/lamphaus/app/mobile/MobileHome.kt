@@ -10,6 +10,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,10 +43,12 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material3.Button
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -69,6 +73,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -101,6 +109,12 @@ import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.rememberReducedMotion
+import com.lamphaus.app.ui.ContentMenuAction
+import com.lamphaus.app.ui.ContentMenuOrigin
+import com.lamphaus.app.ui.ContentMenuTarget
+import com.lamphaus.app.ui.SelectionCheckmark
+import com.lamphaus.app.ui.menuActions
+import com.lamphaus.core.model.MediaType
 
 /** Zoom-settle applied to hero artwork while it crossfades during a swipe. */
 private const val HERO_ARTWORK_ZOOM = 0.06f
@@ -132,6 +146,8 @@ internal fun MobileHomeScreen(
     onPlay: (MediaPreview) -> Unit,
     inLibrary: (MediaPreview) -> Boolean,
     onToggleLibrary: (MediaPreview) -> Unit,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
+    onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     val allMedia = state.allMedia
     // Same feature selection as the TV home: first five distinct catalog items.
@@ -153,6 +169,10 @@ internal fun MobileHomeScreen(
                 media to progress
             }
             .toList()
+    }
+    val progressByVideo = remember(state.progress) { state.progress.associateBy { it.videoId } }
+    val completedVideoIds = remember(state.progress) {
+        state.progress.filter { it.completed }.mapTo(mutableSetOf()) { it.videoId }
     }
     val listState = rememberLazyListState()
     LaunchedEffect(
@@ -211,7 +231,13 @@ internal fun MobileHomeScreen(
             }
             if (continueWatching.isNotEmpty()) {
                 item(key = "continue-watching") {
-                    MobileContinueWatchingRow(continueWatching, onMedia)
+                    MobileContinueWatchingRow(
+                        continueWatching,
+                        onMedia,
+                        inLibrary,
+                        onOpenMenu,
+                        onMenuAction,
+                    )
                 }
             }
             if (
@@ -225,7 +251,19 @@ internal fun MobileHomeScreen(
                 item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
             }
             items(state.sections, key = CatalogSection::id) { section ->
-                CatalogRow(section, onMedia, onLoadMore, onRetry, restoreMediaKey, onFocusRestored)
+                CatalogRow(
+                    section,
+                    onMedia,
+                    onLoadMore,
+                    onRetry,
+                    restoreMediaKey,
+                    onFocusRestored,
+                    progressByVideo,
+                    completedVideoIds,
+                    inLibrary,
+                    onOpenMenu,
+                    onMenuAction,
+                )
             }
             when {
                 state.homeCatalogBatch.loadMoreFailed -> item(key = "home-catalog-retry") {
@@ -641,6 +679,9 @@ private fun HeroIconAction(
 private fun MobileContinueWatchingRow(
     items: List<Pair<MediaPreview, WatchProgress>>,
     onMedia: (MediaPreview) -> Unit,
+    inLibrary: (MediaPreview) -> Boolean,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
+    onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
@@ -655,7 +696,14 @@ private fun MobileContinueWatchingRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(items, key = { it.first.stableKey }) { (media, progress) ->
-                MobileContinueWatchingCard(media, progress, onMedia)
+                MobileContinueWatchingCard(
+                    media,
+                    progress,
+                    onMedia,
+                    inLibrary(media),
+                    onOpenMenu,
+                    onMenuAction,
+                )
             }
         }
     }
@@ -666,8 +714,18 @@ private fun MobileContinueWatchingCard(
     media: MediaPreview,
     progress: WatchProgress,
     onMedia: (MediaPreview) -> Unit,
+    inLibrary: Boolean,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
+    onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val target = ContentMenuTarget(
+        media = media,
+        progress = progress,
+        origin = ContentMenuOrigin.CONTINUE_WATCHING,
+    )
+    val haptics = LocalHapticFeedback.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val title = progress.episodeLabel ?: media.name
     val percent = (progress.fraction * 100).roundToInt()
     val description = stringResource(R.string.media_card_description_progress, title, percent)
@@ -685,10 +743,46 @@ private fun MobileContinueWatchingCard(
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(MobileTokens.radiusResume))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(role = Role.Button) { onMedia(media) }
-            .semantics { contentDescription = description },
+            .combinedClickable(
+                role = Role.Button,
+                onClick = { onMedia(media) },
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onOpenMenu(target)
+                },
+            )
+            .semantics {
+                contentDescription = description
+                customActions = target.menuActions().map { action ->
+                    CustomAccessibilityAction(action.menuLabel(target, inLibrary, context)) {
+                        onMenuAction(target, action)
+                        true
+                    }
+                }
+            },
     ) {
         MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
+        IconButton(
+            onClick = { onOpenMenu(target) },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(4.dp)
+                .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(50)),
+        ) {
+            Icon(
+                Icons.Outlined.MoreVert,
+                contentDescription = stringResource(R.string.content_menu_more),
+                tint = Color.White,
+            )
+        }
+        if (progress.completed) {
+            SelectionCheckmark(
+                selected = true,
+                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+            )
+        }
         Box(
             Modifier
                 .fillMaxSize()
@@ -767,6 +861,11 @@ internal fun CatalogRow(
     onRetry: (String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    progressByVideo: Map<String, WatchProgress>,
+    completedVideoIds: Set<String>,
+    inLibrary: (MediaPreview) -> Boolean,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
+    onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.padding(horizontal = 16.dp)) {
@@ -801,10 +900,16 @@ internal fun CatalogRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(section.items, key = MediaPreview::stableKey) { media ->
+                    val menuTarget = ContentMenuTarget(media, progress = progressByVideo[media.id])
                     PosterCard(
                         media = media,
                         onMedia = onMedia,
                         modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
+                        menuTarget = menuTarget,
+                        onOpenMenu = onOpenMenu,
+                        onMenuAction = onMenuAction,
+                        inLibrary = inLibrary(media),
+                        completed = media.type == MediaType.MOVIE && media.id in completedVideoIds,
                     )
                 }
                 if (section.supportsSkip && (section.hasMore || section.loadingMore || section.loadMoreError != null)) {
@@ -826,8 +931,18 @@ internal fun CatalogRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, modifier: Modifier = Modifier) {
+private fun PosterCard(
+    media: MediaPreview,
+    onMedia: (MediaPreview) -> Unit,
+    modifier: Modifier = Modifier,
+    menuTarget: ContentMenuTarget? = null,
+    onOpenMenu: ((ContentMenuTarget) -> Unit)? = null,
+    onMenuAction: ((ContentMenuTarget, ContentMenuAction) -> Unit)? = null,
+    inLibrary: Boolean = false,
+    completed: Boolean = false,
+) {
     val landscape = media.posterShape.equals("landscape", ignoreCase = true) ||
         (media.posterUrl.isNullOrBlank() && !media.backgroundUrl.isNullOrBlank())
     // Artwork carries the emotion: no name or metadata text on the card,
@@ -837,16 +952,67 @@ private fun PosterCard(media: MediaPreview, onMedia: (MediaPreview) -> Unit, mod
     val cardDescription = ratingText
         ?.let { stringResource(R.string.media_card_description_rating, media.name, it) }
         ?: media.name
+    val haptics = LocalHapticFeedback.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Direct accessibility actions mirror the sheet; when no action handler
+    // is available, an explicit More action still reaches the menu so
+    // long-press is never the only route (MOB-A11Y-03).
+    val accessibilityActions = when {
+        menuTarget != null && onMenuAction != null -> menuTarget.menuActions().map { action ->
+            CustomAccessibilityAction(action.menuLabel(menuTarget, inLibrary, context)) {
+                onMenuAction(menuTarget, action); true
+            }
+        }
+        menuTarget != null && onOpenMenu != null -> listOf(
+            CustomAccessibilityAction(stringResource(R.string.content_menu_more)) {
+                onOpenMenu(menuTarget); true
+            },
+        )
+        else -> emptyList()
+    }
     Box(
         modifier
             .width(if (landscape) 220.dp else 138.dp)
             .aspectRatio(if (landscape) 16f / 9f else 2f / 3f)
             .clip(RoundedCornerShape(MobileTokens.radiusCard))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(role = Role.Button) { onMedia(media) }
-            .semantics { contentDescription = cardDescription },
+            .combinedClickable(
+                role = Role.Button,
+                onClick = { onMedia(media) },
+                onLongClick = menuTarget?.let { target -> {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onOpenMenu?.invoke(target)
+                } },
+            )
+            .semantics {
+                contentDescription = cardDescription
+                customActions = accessibilityActions
+            },
     ) {
         MediaArtwork(media, Modifier.fillMaxSize())
+        if (menuTarget != null && onOpenMenu != null) {
+            IconButton(
+                onClick = { onOpenMenu(menuTarget) },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(50)),
+            ) {
+                Icon(
+                    Icons.Outlined.MoreVert,
+                    contentDescription = stringResource(R.string.content_menu_more),
+                    tint = Color.White,
+                )
+            }
+        }
+        if (completed) {
+            SelectionCheckmark(
+                selected = true,
+                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+            )
+        }
         ratingText?.let { rating ->
             Row(
                 modifier = Modifier
@@ -901,6 +1067,11 @@ internal fun MediaGrid(
     section: CatalogSection? = null,
     onLoadMore: (String) -> Unit = {},
     onRetry: (String) -> Unit = {},
+    progressByVideo: Map<String, WatchProgress> = emptyMap(),
+    completedVideoIds: Set<String> = emptySet(),
+    inLibrary: (MediaPreview) -> Boolean = { false },
+    onOpenMenu: ((ContentMenuTarget) -> Unit)? = null,
+    onMenuAction: ((ContentMenuTarget, ContentMenuAction) -> Unit)? = null,
 ) {
     if (media.isEmpty() && section?.supportsSkip != true) {
         EmptyProviders(Modifier.padding(24.dp))
@@ -925,6 +1096,11 @@ internal fun MediaGrid(
                 modifier = Modifier
                     .fillMaxWidth()
                     .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
+                menuTarget = ContentMenuTarget(item, progress = progressByVideo[item.id]),
+                onOpenMenu = onOpenMenu,
+                onMenuAction = onMenuAction,
+                inLibrary = inLibrary(item),
+                completed = item.type == MediaType.MOVIE && item.id in completedVideoIds,
             )
         }
         if (section?.supportsSkip == true && (section.hasMore || section.loadingMore || section.loadMoreError != null)) {

@@ -28,11 +28,21 @@ internal fun SelectionCheckmark(
     selectedContentColor: Color,
     modifier: Modifier = Modifier,
 ) {
+    // Reduced motion swaps the reveal for an instant state change (MOB-MOT-03).
+    val reducedMotion = rememberReducedMotion()
     AnimatedVisibility(
         visible = selected,
         modifier = modifier,
-        enter = fadeIn(tween(140)) + scaleIn(tween(180), initialScale = 0.72f),
-        exit = fadeOut(tween(90)) + scaleOut(tween(90), targetScale = 0.72f),
+        enter = if (reducedMotion) {
+            fadeIn(tween(0)) + scaleIn(tween(0), initialScale = 1f)
+        } else {
+            fadeIn(tween(140)) + scaleIn(tween(180), initialScale = 0.72f)
+        },
+        exit = if (reducedMotion) {
+            fadeOut(tween(0)) + scaleOut(tween(0), targetScale = 1f)
+        } else {
+            fadeOut(tween(90)) + scaleOut(tween(90), targetScale = 0.72f)
+        },
     ) {
         Box(
             modifier = Modifier

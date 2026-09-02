@@ -2,6 +2,7 @@ package com.lamphaus.app.ui
 
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.preferences.ThemePreference
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkCandidates
 import com.lamphaus.core.model.ArtworkOverride
@@ -84,6 +85,7 @@ data class CatalogBrowseState(
 data class SourcePickerState(
     val media: MediaPreview,
     val episode: Episode? = null,
+    val startFromBeginning: Boolean = false,
     val sources: List<StreamCandidate> = emptyList(),
     val providerLabels: Map<String, String> = emptyMap(),
     val failures: Map<String, String> = emptyMap(),
@@ -97,6 +99,66 @@ data class SourcePickerState(
         get() = selectedProviderId?.let { id -> sources.filter { it.providerId == id } } ?: sources
 
     fun selectProvider(providerId: String?) = copy(selectedProviderId = providerId)
+}
+
+/** A poster, Continue Watching row, or episode card opened as a context menu. */
+data class ContentMenuTarget(
+    val media: MediaPreview,
+    /** Progress row backing this menu (Continue Watching rows; poster/card lookups). */
+    val progress: WatchProgress? = null,
+    /** Known episode metadata (detail episode cards); null for posters. */
+    val episode: Episode? = null,
+    /** Distinguishes row-specific actions without coupling the shared model to either renderer. */
+    val origin: ContentMenuOrigin = ContentMenuOrigin.POSTER,
+)
+
+enum class ContentMenuOrigin {
+    POSTER,
+    CONTINUE_WATCHING,
+    EPISODE,
+    DETAIL,
+}
+
+sealed interface ContentMenuAction {
+    data object ViewDetails : ContentMenuAction
+    data object ToggleLibrary : ContentMenuAction
+    data object MarkWatched : ContentMenuAction
+    data object MarkUnwatched : ContentMenuAction
+    data object RemoveFromContinueWatching : ContentMenuAction
+    data object StartFromBeginning : ContentMenuAction
+}
+
+data class ContentMenuState(
+    val target: ContentMenuTarget? = null,
+    /** Episode metadata resolution is running for a Start-from-beginning action. */
+    val resolving: Boolean = false,
+    /** Resolution failed; the menu offers a local Retry instead of playing. */
+    val resolutionError: Boolean = false,
+)
+
+/**
+ * Action matrix per menu target (SHR-ARC-14: one model, platform renderers).
+ * Movie posters get watched controls; series posters deliberately do not,
+ * and only rows with progress offer Start from beginning.
+ */
+fun ContentMenuTarget.menuActions(): List<ContentMenuAction> = buildList {
+    add(ContentMenuAction.ViewDetails)
+    add(ContentMenuAction.ToggleLibrary)
+    when {
+        origin == ContentMenuOrigin.CONTINUE_WATCHING -> {
+            add(if (progress?.completed == true) ContentMenuAction.MarkUnwatched else ContentMenuAction.MarkWatched)
+            add(ContentMenuAction.StartFromBeginning)
+            add(ContentMenuAction.RemoveFromContinueWatching)
+        }
+        episode != null -> {
+            add(if (progress?.completed == true) ContentMenuAction.MarkUnwatched else ContentMenuAction.MarkWatched)
+            if (progress != null) add(ContentMenuAction.StartFromBeginning)
+        }
+        media.type == MediaType.MOVIE -> {
+            add(if (progress?.completed == true) ContentMenuAction.MarkUnwatched else ContentMenuAction.MarkWatched)
+            if (progress != null) add(ContentMenuAction.StartFromBeginning)
+        }
+    }
 }
 
 data class HomeCatalogBatchState(
@@ -134,6 +196,7 @@ data class AppUiState(
     val lastArtworkLookupFailures: Map<ArtworkProviderId, Long> = emptyMap(),
     val artworkProviderCatalogError: String? = null,
     val sourcePicker: SourcePickerState? = null,
+    val contentMenu: ContentMenuState = ContentMenuState(),
     val pairingSession: PairingSession? = null,
     val playbackRequest: PlaybackRequest? = null,
     val externalPlaybackUrl: String? = null,

@@ -43,7 +43,11 @@ class AppContainer(context: Context) {
         LamphausDatabase::class.java,
         "lamphaus.db",
     )
-        .addMigrations(LamphausDatabase.MIGRATION_1_2, LamphausDatabase.MIGRATION_2_3)
+        .addMigrations(
+            LamphausDatabase.MIGRATION_1_2,
+            LamphausDatabase.MIGRATION_2_3,
+            LamphausDatabase.MIGRATION_3_4,
+        )
         .fallbackToDestructiveMigrationOnDowngrade()
         .build()
 

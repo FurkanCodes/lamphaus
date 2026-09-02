@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.AppContainer
+import com.lamphaus.core.data.repository.reconcileLibrary
+import com.lamphaus.core.data.repository.reconcileProgress
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
 import com.lamphaus.core.data.cloud.CloudNotConfiguredException
@@ -41,6 +43,7 @@ import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
 import java.net.URI
+import com.lamphaus.core.model.WatchProgress
 import java.util.Calendar
 import java.security.MessageDigest
 
@@ -63,6 +66,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
@@ -74,6 +78,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 
+private const val CONTENT_RESOLVE_TIMEOUT_MILLIS = 15_000L
+private const val CLOUD_SYNC_LOG_TAG = "Lamphaus.Sync"
 private val DEVICE_BINDING_BACKOFF_MILLIS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
 private const val ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE =
     "Artwork keys aren't configured. Add a provider key in Settings > Artwork."
@@ -741,7 +747,181 @@ class AppViewModel(
     }
 
     fun removeFromLibrary(mediaKey: String) = viewModelScope.launch {
-        state.value.activeProfileId?.let { container.libraryRepository.removeLibrary(it, mediaKey) }
+        val profileId = state.value.activeProfileId ?: return@launch
+        container.libraryRepository.removeLibrary(profileId, mediaKey)
+        (state.value.account as? AccountState.SignedIn)?.userId
+            ?.let { container.cloudSyncGateway.deleteLibraryEntry(it, profileId, mediaKey) }
+            ?.onFailure { showMessage("Could not sync the Library removal.") }
+    }
+
+    fun openContentMenu(target: ContentMenuTarget) = mutableState.update {
+        it.copy(contentMenu = ContentMenuState(target = target.withCurrentProgress(it.progress)))
+    }
+
+    fun dismissContentMenu() = mutableState.update { it.copy(contentMenu = ContentMenuState()) }
+
+    /**
+     * One entry point for every context-menu action on both platforms
+     * (SHR-ARC-06). Hold actions close the menu after a successful local
+     * mutation and surface the platform message surface.
+     */
+    fun onContentMenuAction(action: ContentMenuAction) {
+        val target = state.value.contentMenu.target ?: return
+        performContentMenuAction(target, action)
+    }
+
+    /** Executes accessibility actions without depending on a sheet/dialog being open. */
+    fun onContentMenuAction(target: ContentMenuTarget, action: ContentMenuAction) {
+        performContentMenuAction(target.withCurrentProgress(state.value.progress), action)
+    }
+
+    private fun performContentMenuAction(target: ContentMenuTarget, action: ContentMenuAction) = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId
+        when (action) {
+            ContentMenuAction.ViewDetails -> {
+                dismissContentMenu()
+                loadDetail(target.media)
+            }
+            is ContentMenuAction.ToggleLibrary -> {
+                val inLibrary = state.value.library.any { it.mediaKey == target.media.stableKey }
+                if (inLibrary) {
+                    container.libraryRepository.removeLibrary(profileId, target.media.stableKey)
+                    dismissContentMenu()
+                    showMessage("Removed from Library.")
+                    userId?.let {
+                        container.cloudSyncGateway.deleteLibraryEntry(it, profileId, target.media.stableKey)
+                            .onFailure { showMessage("Could not sync the Library removal.") }
+                    }
+                } else {
+                    val now = System.currentTimeMillis()
+                    val entry = LibraryEntry(profileId, target.media.stableKey, target.media, now, now)
+                    container.libraryRepository.saveLibrary(entry)
+                    dismissContentMenu()
+                    showMessage("Added to Library.")
+                    userId?.let {
+                        container.cloudSyncGateway.saveLibrary(it, entry)
+                            .onFailure { showMessage("Could not sync the Library addition.") }
+                    }
+                }
+            }
+            ContentMenuAction.MarkWatched -> {
+                val stored = container.libraryRepository.saveProgress(watchedProgress(target, profileId))
+                dismissContentMenu()
+                showMessage("Marked as watched.")
+                userId?.let {
+                    container.cloudSyncGateway.saveProgress(it, stored)
+                        .onFailure { showMessage("Could not sync watched status.") }
+                }
+            }
+            ContentMenuAction.MarkUnwatched -> {
+                val videoId = deleteProgressRow(target, profileId)
+                dismissContentMenu()
+                showMessage("Marked as unwatched.")
+                userId?.let {
+                    container.cloudSyncGateway.deleteProgress(it, profileId, videoId)
+                        .onFailure { showMessage("Could not sync the removal.") }
+                }
+            }
+            ContentMenuAction.RemoveFromContinueWatching -> {
+                val videoId = deleteProgressRow(target, profileId)
+                dismissContentMenu()
+                showMessage("Removed from Continue Watching.")
+                userId?.let {
+                    container.cloudSyncGateway.deleteProgress(it, profileId, videoId)
+                        .onFailure { showMessage("Could not sync the removal.") }
+                }
+            }
+            ContentMenuAction.StartFromBeginning -> startFromBeginning(target)
+        }
+    }
+
+    private fun ContentMenuTarget.withCurrentProgress(progressRows: List<WatchProgress>): ContentMenuTarget {
+        if (progress != null) return this
+        val videoId = episode?.id ?: media.id.takeIf { media.type == MediaType.MOVIE }
+        return copy(progress = videoId?.let { id -> progressRows.firstOrNull { it.videoId == id } })
+    }
+
+    private fun watchedProgress(target: ContentMenuTarget, profileId: String): WatchProgress {
+        val videoId = target.progress?.videoId ?: target.episode?.id ?: target.media.id
+        return WatchProgress(
+            profileId = profileId,
+            mediaKey = target.media.stableKey,
+            videoId = videoId,
+            positionMillis = 0,
+            durationMillis = 0,
+            completed = true,
+            updatedAtEpochMillis = System.currentTimeMillis(),
+            preview = target.media,
+            episodeLabel = target.progress?.episodeLabel
+                ?: target.episode?.let { episode ->
+                    listOfNotNull(
+                        episode.season?.let { season -> "S$season" },
+                        episode.episode?.let { number -> "E$number" },
+                        episode.title.takeIf(String::isNotBlank),
+                    ).joinToString(" · ")
+                },
+        )
+    }
+
+    private suspend fun deleteProgressRow(
+        target: ContentMenuTarget,
+        profileId: String,
+    ): String {
+        val videoId = target.progress?.videoId ?: target.episode?.id ?: target.media.id
+        container.libraryRepository.removeProgress(profileId, videoId)
+        return videoId
+    }
+
+    /**
+     * Start-over plays the saved video from zero without touching the
+     * completed badge. Episodes resolve the saved videoId back to episode
+     * metadata first; a failed resolution keeps the menu open in a retry
+     * state instead of playing the wrong episode (MOB-CMP-09).
+     */
+    private suspend fun startFromBeginning(target: ContentMenuTarget) {
+        val videoId = target.progress?.videoId
+        if (target.media.type == MediaType.MOVIE && target.episode == null) {
+            dismissContentMenu()
+            openSources(target.media, startFromBeginning = true)
+            return
+        }
+        target.episode?.let { episode ->
+            dismissContentMenu()
+            openSources(target.media, episode, startFromBeginning = true)
+            return
+        }
+        if (videoId == null) return
+        mutableState.update {
+            it.copy(contentMenu = it.contentMenu.copy(target = target, resolving = true, resolutionError = false))
+        }
+        val episode = resolveEpisodeForVideo(target.media, videoId)
+        if (episode == null) {
+            mutableState.update {
+                it.copy(contentMenu = it.contentMenu.copy(resolving = false, resolutionError = true))
+            }
+            return
+        }
+        dismissContentMenu()
+        openSources(target.media, episode, startFromBeginning = true)
+    }
+
+    private suspend fun resolveEpisodeForVideo(media: MediaPreview, videoId: String): Episode? {
+        val loaded = state.value.selectedDetail
+            ?.takeIf { it.preview.stableKey == media.stableKey }
+            ?.episodes
+            ?.firstOrNull { it.id == videoId }
+        if (loaded != null) return loaded
+        loadDetail(media)
+        val deadline = System.currentTimeMillis() + CONTENT_RESOLVE_TIMEOUT_MILLIS
+        while (System.currentTimeMillis() < deadline) {
+            delay(150)
+            if (state.value.selectedDetail?.preview?.stableKey != media.stableKey) return null
+            if (!state.value.refreshing) {
+                return state.value.selectedDetail?.episodes?.firstOrNull { it.id == videoId }
+            }
+        }
+        return null
     }
 
     fun loadDetail(media: MediaPreview) {
@@ -1027,7 +1207,7 @@ class AppViewModel(
     }
 
     /** Loads every compatible stream provider. This intentionally does not select or launch a source. */
-    fun openSources(media: MediaPreview, episode: Episode? = null) {
+    fun openSources(media: MediaPreview, episode: Episode? = null, startFromBeginning: Boolean = false) {
         sourceJob?.cancel()
         sourceJob = viewModelScope.launch {
             if (media.id.startsWith("fixture:")) {
@@ -1038,7 +1218,11 @@ class AppViewModel(
             mutableState.update {
                 it.copy(
                     refreshing = true,
-                    sourcePicker = SourcePickerState(media = media, episode = episode),
+                    sourcePicker = SourcePickerState(
+                        media = media,
+                        episode = episode,
+                        startFromBeginning = startFromBeginning,
+                    ),
                 )
             }
             val embedded = episode?.streams.orEmpty().ifEmpty {
@@ -1052,6 +1236,7 @@ class AppViewModel(
                         sourcePicker = SourcePickerState(
                             media = media,
                             episode = episode,
+                            startFromBeginning = startFromBeginning,
                             sources = embedded,
                             providerLabels = embedded.associate { source ->
                                 source.providerId to (providerNames[source.providerId] ?: source.providerId)
@@ -1117,6 +1302,7 @@ class AppViewModel(
                     sourcePicker = SourcePickerState(
                         media = media,
                         episode = episode,
+                        startFromBeginning = startFromBeginning,
                         sources = streams,
                         providerLabels = labels,
                         failures = failures,
@@ -1141,7 +1327,14 @@ class AppViewModel(
                     mutableState.update { it.copy(sourcePicker = it.sourcePicker?.copy(loading = true)) }
                     val videoId = picker.episode?.id ?: picker.media.id
                     val tracks = loadSubtitles(picker.media, videoId, source)
-                    val start = state.value.progress.firstOrNull { it.videoId == videoId }?.positionMillis ?: 0
+                    val existingProgress = state.value.progress.firstOrNull { it.videoId == videoId }
+                    val start = when {
+                        picker.startFromBeginning -> 0
+                        // Completed content restarts from the beginning; the
+                        // completed badge itself survives until Mark unwatched.
+                        existingProgress?.completed == true -> 0
+                        else -> existingProgress?.positionMillis ?: 0
+                    }
                     val episode = picker.episode
                     val episodeQueue = state.value.selectedDetail
                         ?.takeIf { it.preview.stableKey == picker.media.stableKey }
@@ -2004,14 +2197,24 @@ class AppViewModel(
 
     private fun CoroutineScope.launchProfileChannels(userId: String, profileId: String): Job = launch {
         launch {
-            container.cloudSyncGateway.library(userId, profileId).collect { entries ->
-                entries.forEach { container.libraryRepository.saveLibrary(it) }
-            }
+            container.cloudSyncGateway.library(userId, profileId)
+                .retryWhen { throwable, attempt ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(CLOUD_SYNC_LOG_TAG, "Library sync round failed; keeping local rows", throwable)
+                    delay(((attempt + 1).coerceAtMost(30)) * 1_000L)
+                    true
+                }
+                .collect { entries -> container.libraryRepository.reconcileLibrary(profileId, entries) }
         }
         launch {
-            container.cloudSyncGateway.progress(userId, profileId).collect { progress ->
-                progress.forEach { container.libraryRepository.saveProgress(it) }
-            }
+            container.cloudSyncGateway.progress(userId, profileId)
+                .retryWhen { throwable, attempt ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(CLOUD_SYNC_LOG_TAG, "Progress sync round failed; keeping local rows", throwable)
+                    delay(((attempt + 1).coerceAtMost(30)) * 1_000L)
+                    true
+                }
+                .collect { progress -> container.libraryRepository.reconcileProgress(profileId, progress) }
         }
     }
 

@@ -9,8 +9,9 @@ import androidx.room.RoomDatabase
         ProviderEntity::class,
         LibraryEntity::class,
         WatchProgressEntity::class,
+        CloudSyncKeyEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class LamphausDatabase : RoomDatabase() {
@@ -30,6 +31,25 @@ abstract class LamphausDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE watch_progress ADD COLUMN episodeLabel TEXT")
             }
         }
+
+        /** v4: remember cloud-confirmed keys so remote deletes cannot erase unsynced local rows. */
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS cloud_sync_keys (
+                        profileId TEXT NOT NULL,
+                        collection TEXT NOT NULL,
+                        itemKey TEXT NOT NULL,
+                        PRIMARY KEY(profileId, collection, itemKey)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_cloud_sync_keys_profileId_collection " +
+                        "ON cloud_sync_keys(profileId, collection)",
+                )
+            }
+        }
     }
 }
-

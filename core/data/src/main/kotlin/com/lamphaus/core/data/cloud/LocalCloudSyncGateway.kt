@@ -20,7 +20,11 @@ class LocalCloudSyncGateway : CloudSyncGateway {
     override fun settings(userId: String): Flow<SyncedSettings?> = emptyFlow()
     override suspend fun saveProfile(userId: String, profile: Profile) = Result.success(Unit)
     override suspend fun saveLibrary(userId: String, entry: LibraryEntry) = Result.success(Unit)
+    override suspend fun deleteLibraryEntry(userId: String, profileId: String, mediaKey: String) =
+        Result.success(Unit)
     override suspend fun saveProgress(userId: String, progress: WatchProgress) = Result.success(Unit)
+    override suspend fun deleteProgress(userId: String, profileId: String, videoId: String) =
+        Result.success(Unit)
     override suspend fun saveSettings(userId: String, settings: SyncedSettings) = Result.success(Unit)
     override suspend fun saveProvider(userId: String, provider: ProviderSubscription) = Result.success(Unit)
     override suspend fun deleteProvider(userId: String, providerId: String) = Result.success(Unit)

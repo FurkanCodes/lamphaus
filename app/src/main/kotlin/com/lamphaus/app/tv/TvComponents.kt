@@ -42,7 +42,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.text.input.VisualTransformation
@@ -89,6 +91,10 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.core.text.HtmlCompat
 import com.lamphaus.app.R
+import androidx.compose.runtime.rememberCoroutineScope
+import com.lamphaus.app.ui.SelectionCheckmark
+import com.lamphaus.app.ui.ContentMenuOrigin
+import com.lamphaus.app.ui.ContentMenuTarget
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.rememberReducedMotion
@@ -403,6 +409,35 @@ private fun TvTopNavigationItem(
         }
     }
 }
+/**
+ * Hold-to-open-menu key handling for TV content cards (TV-FND-02): a short
+ * Select stays a click; holding Select/Menu opens the context menu exactly
+ * once and consumes the release click.
+ */
+internal fun Modifier.tvSelectHoldMenu(tracker: SelectHoldTracker?): Modifier =
+    onPreviewKeyEvent { event ->
+        if (tracker == null) return@onPreviewKeyEvent false
+        when (event.key) {
+            Key.DirectionCenter, Key.Enter -> when (event.type) {
+                KeyEventType.KeyDown -> tracker.onKeyDown()
+                KeyEventType.KeyUp -> tracker.onKeyUp()
+                else -> false
+            }
+            Key.Menu -> when (event.type) {
+                KeyEventType.KeyDown -> tracker.onMenuKeyDown()
+                KeyEventType.KeyUp -> tracker.onKeyUp()
+                else -> false
+            }
+            else -> false
+        }
+    }
+
+internal data class TvContentMenuEnvironment(
+    val completedVideoIds: Set<String> = emptySet(),
+    val onRequest: ((ContentMenuTarget, FocusRequester) -> Unit)? = null,
+)
+
+internal val LocalTvContentMenuEnvironment = staticCompositionLocalOf { TvContentMenuEnvironment() }
 
 @Composable
 internal fun TvMediaCard(
@@ -415,8 +450,25 @@ internal fun TvMediaCard(
     compactLandscape: Boolean = false,
     watchProgress: Float? = null,
     showRating: Boolean = false,
+    onMenuRequest: ((FocusRequester) -> Unit)? = null,
+    completed: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val cardFocus = remember { FocusRequester() }
+    val menuEnvironment = LocalTvContentMenuEnvironment.current
+    val defaultMenuRequest = menuEnvironment.onRequest?.let { request ->
+        { focus: FocusRequester ->
+            request(ContentMenuTarget(media = media, origin = ContentMenuOrigin.POSTER), focus)
+        }
+    }
+    val effectiveMenuRequest = onMenuRequest ?: defaultMenuRequest
+    val currentMenuRequest by rememberUpdatedState(effectiveMenuRequest)
+    val holdTracker = remember(scope, cardFocus) {
+        SelectHoldTracker(scope) { currentMenuRequest?.invoke(cardFocus) }
+    }.takeIf { effectiveMenuRequest != null }
+    val effectivelyCompleted = completed ||
+        (media.type == com.lamphaus.core.model.MediaType.MOVIE && media.id in menuEnvironment.completedVideoIds)
     val reducedMotion = rememberReducedMotion()
     val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
     val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
@@ -454,6 +506,8 @@ internal fun TvMediaCard(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
+            .tvSelectHoldMenu(holdTracker)
+            .focusRequester(cardFocus)
             .clickable(role = Role.Button, onClick = onClick)
             .focusable()
             .semantics { contentDescription = cardDescription },
@@ -526,16 +580,16 @@ internal fun TvMediaCard(
                             .fillMaxWidth(progress)
                             .height(4.dp)
                             .background(TvFocusTokens.beam),
-                    ) {
-                        Box(
-                            Modifier
-                                .align(Alignment.CenterEnd)
-                                .width(2.dp)
-                                .height(4.dp)
-                                .background(Color.White),
-                        )
-                    }
+                    )
                 }
+            }
+            if (effectivelyCompleted) {
+                SelectionCheckmark(
+                    selected = true,
+                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                    selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                )
             }
         }
         if (showLabel) {
@@ -565,8 +619,29 @@ internal fun TvContinueWatchingCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
+    onMenuRequest: ((FocusRequester) -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val cardFocus = remember { FocusRequester() }
+    val menuEnvironment = LocalTvContentMenuEnvironment.current
+    val defaultMenuRequest = menuEnvironment.onRequest?.let { request ->
+        { focus: FocusRequester ->
+            request(
+                ContentMenuTarget(
+                    media = media,
+                    progress = progress,
+                    origin = ContentMenuOrigin.CONTINUE_WATCHING,
+                ),
+                focus,
+            )
+        }
+    }
+    val effectiveMenuRequest = onMenuRequest ?: defaultMenuRequest
+    val currentMenuRequest by rememberUpdatedState(effectiveMenuRequest)
+    val holdTracker = remember(scope, cardFocus) {
+        SelectHoldTracker(scope) { currentMenuRequest?.invoke(cardFocus) }
+    }.takeIf { effectiveMenuRequest != null }
     val reducedMotion = rememberReducedMotion()
     val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
     val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
@@ -594,6 +669,8 @@ internal fun TvContinueWatchingCard(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
+            .tvSelectHoldMenu(holdTracker)
+            .focusRequester(cardFocus)
             .clickable(role = Role.Button, onClick = onClick)
             .focusable()
             .semantics { contentDescription = cardDescription },
@@ -648,6 +725,14 @@ internal fun TvContinueWatchingCard(
                     color = Color.White,
                 )
             }
+            if (progress.completed) {
+                SelectionCheckmark(
+                    selected = true,
+                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                    selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                )
+            }
             Text(
                 text = title,
                 modifier = Modifier
@@ -670,15 +755,7 @@ internal fun TvContinueWatchingCard(
                         .fillMaxWidth(progress.fraction)
                         .height(7.dp)
                         .background(TvFocusTokens.beam),
-                ) {
-                    Box(
-                        Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(3.dp)
-                            .height(7.dp)
-                            .background(Color.White),
-                    )
-                }
+                )
             }
         }
     }

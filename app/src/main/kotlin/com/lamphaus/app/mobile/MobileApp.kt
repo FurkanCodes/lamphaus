@@ -91,6 +91,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.rememberReducedMotion
 import kotlinx.coroutines.delay
+import com.lamphaus.app.ui.ContentMenuAction
+import com.lamphaus.app.ui.ContentMenuTarget
 
 import androidx.compose.ui.unit.Dp
 import com.lamphaus.app.ui.ArtworkResolver
@@ -215,6 +217,14 @@ fun MobileApp(
                     signedIn = { MobileSignedInApp(state, viewModel, widthSizeClass) },
                 )
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+                MobileContentMenuSheet(
+                    menu = state.contentMenu,
+                    inLibrary = state.contentMenu.target?.let { target ->
+                        state.library.any { it.mediaKey == target.media.stableKey }
+                    } == true,
+                    onDismiss = viewModel::dismissContentMenu,
+                    onAction = viewModel::onContentMenuAction,
+                )
             }
         }
         }
@@ -506,6 +516,8 @@ private fun MobileSignedInApp(
                 onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
                 onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
                 onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
+                progress = state.progress,
+                onOpenMenu = viewModel::openContentMenu,
             )
         }
         settingsOpen -> {
@@ -540,6 +552,8 @@ private fun MobileSignedInApp(
                                 onFocusRestored = { pendingMediaKey = null },
                                 inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
                                 onToggleLibrary = viewModel::addToLibrary,
+                                onMenuAction = viewModel::onContentMenuAction,
+                                onOpenMenu = viewModel::openContentMenu,
                             )
 
                             MobileDestination.DISCOVER -> DiscoverScreen(
@@ -547,12 +561,16 @@ private fun MobileSignedInApp(
                                 onMedia = openMedia,
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
+                                onOpenMenu = viewModel::openContentMenu,
+                                onMenuAction = viewModel::onContentMenuAction,
                             )
                             MobileDestination.LIBRARY -> LibraryScreen(
                                 state = state,
                                 onMedia = openMedia,
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
+                                onOpenMenu = viewModel::openContentMenu,
+                                onMenuAction = viewModel::onContentMenuAction,
                             )
                             MobileDestination.SEARCH -> SearchScreen(
                                 state = state,
@@ -567,6 +585,8 @@ private fun MobileSignedInApp(
                                 onMedia = openMedia,
                                 restoreMediaKey = pendingMediaKey,
                                 onFocusRestored = { pendingMediaKey = null },
+                                onOpenMenu = viewModel::openContentMenu,
+                                onMenuAction = viewModel::onContentMenuAction,
                             )
                         }
                         }
@@ -720,6 +740,8 @@ private fun DiscoverScreen(
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
+    onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
         MobileScreenHeader(stringResource(R.string.discover))
@@ -729,6 +751,11 @@ private fun DiscoverScreen(
                 onMedia = onMedia,
                 restoreMediaKey = restoreMediaKey,
                 onFocusRestored = onFocusRestored,
+                progressByVideo = state.progress.associateBy { it.videoId },
+                completedVideoIds = state.progress.filter { it.completed }.mapTo(mutableSetOf()) { it.videoId },
+                inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
+                onOpenMenu = onOpenMenu,
+                onMenuAction = onMenuAction,
             )
         }
     }
@@ -740,6 +767,8 @@ private fun LibraryScreen(
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
+    onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     val media = state.library.map { it.preview }
     Column(Modifier.fillMaxSize()) {
@@ -757,7 +786,17 @@ private fun LibraryScreen(
             }
         } else {
             Box(Modifier.weight(1f)) {
-                MediaGrid(media, onMedia, restoreMediaKey, onFocusRestored)
+                MediaGrid(
+                    media,
+                    onMedia,
+                    restoreMediaKey,
+                    onFocusRestored,
+                    progressByVideo = state.progress.associateBy { it.videoId },
+                    completedVideoIds = state.progress.filter { it.completed }.mapTo(mutableSetOf()) { it.videoId },
+                    inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
+                    onOpenMenu = onOpenMenu,
+                    onMenuAction = onMenuAction,
+                )
             }
         }
     }
@@ -777,6 +816,8 @@ private fun SearchScreen(
     onMedia: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
+    onOpenMenu: (ContentMenuTarget) -> Unit,
+    onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(query) { onSearch(query) }
@@ -853,6 +894,11 @@ private fun SearchScreen(
                         section = result,
                         onLoadMore = { onLoadMore() },
                         onRetry = { onRetry() },
+                        progressByVideo = state.progress.associateBy { it.videoId },
+                        completedVideoIds = state.progress.filter { it.completed }.mapTo(mutableSetOf()) { it.videoId },
+                        inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
+                        onOpenMenu = onOpenMenu,
+                        onMenuAction = onMenuAction,
                     )
                     else -> EmptyProviders(Modifier.padding(24.dp))
                 }
@@ -864,7 +910,19 @@ private fun SearchScreen(
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = navBarClearancePadding()), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 items(state.searchSections, key = CatalogSection::id) { section ->
-                    CatalogRow(section, onMedia, onCatalogLoadMore, onCatalogRetry, restoreMediaKey, onFocusRestored)
+                    CatalogRow(
+                        section,
+                        onMedia,
+                        onCatalogLoadMore,
+                        onCatalogRetry,
+                        restoreMediaKey,
+                        onFocusRestored,
+                        progressByVideo = state.progress.associateBy { it.videoId },
+                        completedVideoIds = state.progress.filter { it.completed }.mapTo(mutableSetOf()) { it.videoId },
+                        inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
+                        onOpenMenu = onOpenMenu,
+                        onMenuAction = onMenuAction,
+                    )
                 }
             }
         }

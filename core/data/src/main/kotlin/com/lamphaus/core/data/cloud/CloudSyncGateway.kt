@@ -21,7 +21,9 @@ interface CloudSyncGateway {
 
     suspend fun saveProfile(userId: String, profile: Profile): Result<Unit>
     suspend fun saveLibrary(userId: String, entry: LibraryEntry): Result<Unit>
+    suspend fun deleteLibraryEntry(userId: String, profileId: String, mediaKey: String): Result<Unit>
     suspend fun saveProgress(userId: String, progress: WatchProgress): Result<Unit>
+    suspend fun deleteProgress(userId: String, profileId: String, videoId: String): Result<Unit>
     suspend fun saveSettings(userId: String, settings: SyncedSettings): Result<Unit>
     suspend fun saveProvider(userId: String, provider: ProviderSubscription): Result<Unit>
     suspend fun deleteProvider(userId: String, providerId: String): Result<Unit>

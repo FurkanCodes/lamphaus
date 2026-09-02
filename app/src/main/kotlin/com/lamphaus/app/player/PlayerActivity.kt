@@ -28,6 +28,7 @@ import android.util.Log
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.R
+import com.lamphaus.core.model.CompletionPolicy
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.PlaybackSegment
@@ -152,7 +153,9 @@ class PlayerActivity : ComponentActivity() {
                     mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
                     mediaController.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
-                            if (playbackState == Player.STATE_ENDED) saveProgress(final = true)
+                            if (playbackState == Player.STATE_ENDED) {
+                                saveProgress(final = true, naturalEnd = true)
+                            }
                         }
                     })
                     mediaController.prepare()
@@ -168,7 +171,6 @@ class PlayerActivity : ComponentActivity() {
         segmentLookupJob?.cancel()
         segmentsState.value = emptyList()
         val media = playback?.preview ?: return
-        if (!settings.skipIntroEnabled && !settings.skipEndingEnabled && !settings.nextEpisodeEnabled) return
         segmentLookupJob = lifecycleScope.launch {
             segmentsState.value = container.skipRepository.segments(media, playback.episode)
         }
@@ -403,7 +405,7 @@ class PlayerActivity : ComponentActivity() {
      * onDestroy cancels lifecycleScope before a launched write can finish,
      * silently dropping the save.
      */
-    private fun saveProgress(final: Boolean) {
+    private fun saveProgress(final: Boolean, naturalEnd: Boolean = false) {
         val playback = request ?: run {
             Log.d(PROGRESS_LOG_TAG, "save skipped: no playback request")
             return
@@ -414,7 +416,7 @@ class PlayerActivity : ComponentActivity() {
         }
         val position = current.currentPosition.coerceAtLeast(0)
         val duration = current.duration.coerceAtLeast(0)
-        if (duration <= 0) {
+        if (duration <= 0 && !naturalEnd) {
             Log.d(PROGRESS_LOG_TAG, "save skipped: duration unknown ($duration)")
             return
         }
@@ -427,18 +429,25 @@ class PlayerActivity : ComponentActivity() {
                 Log.d(PROGRESS_LOG_TAG, "save skipped: no active profile")
                 return@launch
             }
-            val progress = WatchProgress(
-                profileId = profileId,
-                mediaKey = playback.mediaKey,
-                videoId = playback.videoId,
+            val completed = CompletionPolicy.isComplete(
                 positionMillis = position,
                 durationMillis = duration,
-                completed = position.toDouble() / duration >= 0.95,
-                updatedAtEpochMillis = System.currentTimeMillis(),
-                preview = playback.preview,
-                episodeLabel = playback.subtitle?.takeIf { it.isNotBlank() },
+                naturalEnd = naturalEnd,
+                endingSegments = segmentsState.value,
             )
-            container.libraryRepository.saveProgress(progress)
+            val progress = container.libraryRepository.saveProgress(
+                WatchProgress(
+                    profileId = profileId,
+                    mediaKey = playback.mediaKey,
+                    videoId = playback.videoId,
+                    positionMillis = position,
+                    durationMillis = duration,
+                    completed = completed,
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                    preview = playback.preview,
+                    episodeLabel = playback.subtitle?.takeIf { it.isNotBlank() },
+                ),
+            )
             Log.d(
                 PROGRESS_LOG_TAG,
                 "saved locally media=${progress.mediaKey} position=${progress.positionMillis}ms " +

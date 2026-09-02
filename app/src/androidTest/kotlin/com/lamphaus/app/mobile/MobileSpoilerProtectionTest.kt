@@ -55,9 +55,12 @@ class MobileSpoilerProtectionTest {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     EpisodeRow(
                         episode = SpoilerProtectionTestFixtures.episode,
+                        media = SpoilerProtectionTestFixtures.media,
                         watched = false,
                         spoilerProtection = SpoilerProtectionSettings(),
+                        progress = null,
                         onPlay = { plays++ },
+                        onOpenMenu = {},
                     )
                 }
             }
@@ -77,6 +80,12 @@ class MobileSpoilerProtectionTest {
 }
 
 private object SpoilerProtectionTestFixtures {
+    val media = com.lamphaus.core.model.MediaPreview(
+        id = "series-1",
+        type = com.lamphaus.core.model.MediaType.SERIES,
+        rawType = "series",
+        name = "Series",
+    )
     val episode = com.lamphaus.core.model.Episode(
         id = "episode-1",
         title = "Secret episode",

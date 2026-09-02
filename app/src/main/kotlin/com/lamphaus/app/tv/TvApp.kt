@@ -53,7 +53,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Person
@@ -61,6 +63,7 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -70,6 +73,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -130,6 +136,10 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.CINEMETA_PROVIDER_ID
+import com.lamphaus.app.ui.ContentMenuAction
+import com.lamphaus.app.ui.ContentMenuOrigin
+import com.lamphaus.app.ui.ContentMenuState
+import com.lamphaus.app.ui.ContentMenuTarget
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.MediaMetadataPresentation
 import com.lamphaus.app.ui.SelectionCheckmark
@@ -147,6 +157,7 @@ import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.app.ui.isRenderableHomeCatalogSection
+import com.lamphaus.app.ui.menuActions
 
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.ArtworkAsset
@@ -175,11 +186,35 @@ fun TvApp(
     onExternalPlay: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var menuReturnFocus by remember { mutableStateOf<FocusRequester?>(null) }
+    var restoreMenuFocus by remember { mutableStateOf(false) }
+    var suppressMenuOpeningKey by remember { mutableStateOf(false) }
+    val completedVideoIds = remember(state.progress) {
+        state.progress.asSequence().filter { it.completed }.map { it.videoId }.toSet()
+    }
+    LaunchedEffect(state.contentMenu.target, restoreMenuFocus) {
+        if (state.contentMenu.target == null && restoreMenuFocus) {
+            restoreMenuFocus = false
+            withFrameNanos { }
+            menuReturnFocus?.let { requester -> runCatching { requester.requestFocus() } }
+            menuReturnFocus = null
+        }
+    }
     LamphausTvTheme {
         val artworkResolver = remember(state.artworkOverrides) {
             ArtworkResolver(state.artworkOverrides.associateBy { it.mediaKey })
         }
-        CompositionLocalProvider(LocalArtworkResolver provides artworkResolver) {
+        CompositionLocalProvider(
+            LocalArtworkResolver provides artworkResolver,
+            LocalTvContentMenuEnvironment provides TvContentMenuEnvironment(
+                completedVideoIds = completedVideoIds,
+                onRequest = { target, returnFocus ->
+                    menuReturnFocus = returnFocus
+                    suppressMenuOpeningKey = true
+                    viewModel.openContentMenu(target)
+                },
+            ),
+        ) {
         LaunchedEffect(state.playbackRequest) {
             state.playbackRequest?.let {
                 onPlay(it)
@@ -205,7 +240,21 @@ fun TvApp(
                 contentColor = MaterialTheme.colorScheme.onBackground,
             ),
         ) {
-            Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .onPreviewKeyEvent { event ->
+                        val opensMenu = event.key == Key.DirectionCenter ||
+                            event.key == Key.Enter ||
+                            event.key == Key.Menu
+                        if (suppressMenuOpeningKey && opensMenu) {
+                            if (event.type == KeyEventType.KeyUp) suppressMenuOpeningKey = false
+                            true
+                        } else {
+                            false
+                        }
+                    },
+            ) {
                 when (state.account) {
                     AccountState.Loading -> TvLoading()
                     AccountState.SignedOut -> TvPairingScreen(state, viewModel)
@@ -234,10 +283,182 @@ fun TvApp(
                         )
                     }
                 }
+                if (state.account is AccountState.SignedIn && state.contentMenu.target != null) {
+                    TvContentMenuDialog(
+                        menu = state.contentMenu,
+                        inLibrary = state.contentMenu.target?.let { target ->
+                            state.library.any { it.mediaKey == target.media.stableKey }
+                        } == true,
+                        suppressOpeningKey = suppressMenuOpeningKey,
+                        onOpeningKeyReleased = { suppressMenuOpeningKey = false },
+                        onDismiss = {
+                            suppressMenuOpeningKey = false
+                            restoreMenuFocus = true
+                            viewModel.dismissContentMenu()
+                        },
+                        onAction = { action ->
+                            restoreMenuFocus = action == ContentMenuAction.ToggleLibrary ||
+                                action == ContentMenuAction.MarkWatched ||
+                                action == ContentMenuAction.MarkUnwatched ||
+                                action == ContentMenuAction.RemoveFromContinueWatching
+                            viewModel.onContentMenuAction(action)
+                        },
+                    )
+                }
             }
         }
         }
     }
+}
+
+/** Centered, D-pad-first renderer for the shared content-menu model. */
+@Composable
+private fun TvContentMenuDialog(
+    menu: ContentMenuState,
+    inLibrary: Boolean,
+    suppressOpeningKey: Boolean,
+    onOpeningKeyReleased: () -> Unit,
+    onDismiss: () -> Unit,
+    onAction: (ContentMenuAction) -> Unit,
+) {
+    val target = menu.target ?: return
+    val actions = target.menuActions()
+    val firstActionFocus = remember(target.media.stableKey, target.progress?.videoId) { FocusRequester() }
+    LaunchedEffect(target.media.stableKey, target.progress?.videoId, menu.resolving) {
+        if (!menu.resolving) {
+            withFrameNanos { }
+            firstActionFocus.requestFocus()
+        }
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .width(520.dp)
+                .onPreviewKeyEvent { event ->
+                    val opensMenu = event.key == Key.DirectionCenter ||
+                        event.key == Key.Enter ||
+                        event.key == Key.Menu
+                    if (suppressOpeningKey && opensMenu) {
+                        if (event.type == KeyEventType.KeyUp) onOpeningKeyReleased()
+                        true
+                    } else {
+                        false
+                    }
+                },
+            shape = TvShapeTokens.hero,
+            colors = SurfaceDefaults.colors(
+                containerColor = TvSurfaceTokens.elevated,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(width = 80.dp, height = 120.dp)
+                            .clip(TvShapeTokens.card)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    ) {
+                        MediaArtwork(target.media, Modifier.fillMaxSize())
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = target.media.name,
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        target.progress?.episodeLabel?.let { label ->
+                            Text(
+                                text = label,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                if (menu.resolving) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Text(stringResource(R.string.content_menu_resolving))
+                    }
+                }
+                if (menu.resolutionError) {
+                    Text(
+                        text = stringResource(R.string.content_menu_resolution_failed),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TvAction(
+                        label = stringResource(R.string.retry),
+                        icon = Icons.Outlined.Refresh,
+                        onClick = { onAction(ContentMenuAction.StartFromBeginning) },
+                    )
+                }
+                actions.forEachIndexed { index, action ->
+                    TvAction(
+                        label = tvContentMenuLabel(action, target, inLibrary),
+                        icon = tvContentMenuIcon(action, inLibrary),
+                        enabled = !menu.resolving,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(if (index == 0) Modifier.focusRequester(firstActionFocus) else Modifier),
+                        onClick = { onAction(action) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun tvContentMenuLabel(
+    action: ContentMenuAction,
+    target: ContentMenuTarget,
+    inLibrary: Boolean,
+): String = when (action) {
+    ContentMenuAction.ViewDetails -> stringResource(
+        if (target.episode != null ||
+            target.origin == ContentMenuOrigin.CONTINUE_WATCHING && target.media.type == MediaType.SERIES
+        ) {
+            R.string.content_menu_view_series_details
+        } else {
+            R.string.content_menu_view_details
+        },
+    )
+    ContentMenuAction.ToggleLibrary -> stringResource(
+        if (inLibrary) R.string.content_menu_remove_library else R.string.content_menu_add_library,
+    )
+    ContentMenuAction.MarkWatched -> stringResource(
+        if (target.episode != null) R.string.content_menu_mark_episode_watched else R.string.content_menu_mark_watched,
+    )
+    ContentMenuAction.MarkUnwatched -> stringResource(R.string.content_menu_mark_unwatched)
+    ContentMenuAction.RemoveFromContinueWatching -> stringResource(R.string.content_menu_remove_continue)
+    ContentMenuAction.StartFromBeginning -> stringResource(R.string.content_menu_start_beginning)
+}
+
+private fun tvContentMenuIcon(action: ContentMenuAction, inLibrary: Boolean): ImageVector = when (action) {
+    ContentMenuAction.ViewDetails -> Icons.Outlined.Info
+    ContentMenuAction.ToggleLibrary -> if (inLibrary) Icons.Outlined.Check else Icons.Outlined.BookmarkBorder
+    ContentMenuAction.MarkWatched -> Icons.Outlined.Check
+    ContentMenuAction.MarkUnwatched -> Icons.Outlined.Close
+    ContentMenuAction.RemoveFromContinueWatching -> Icons.Outlined.Delete
+    ContentMenuAction.StartFromBeginning -> Icons.Outlined.Replay
 }
 
 @Composable
@@ -498,6 +719,7 @@ private fun TvSignedIn(
             inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
             watchedEpisodeIds = watchedEpisodeIds,
             spoilerProtection = state.spoilerProtection,
+            progress = state.progress,
             onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
             onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
             onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
@@ -1811,6 +2033,7 @@ private fun TvDetailScreen(
     inLibrary: Boolean,
     watchedEpisodeIds: Set<String>,
     spoilerProtection: SpoilerProtectionSettings,
+    progress: List<WatchProgress>,
     onPlay: (Episode?) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
@@ -2000,8 +2223,10 @@ private fun TvDetailScreen(
                     ) {
                         items(visibleEpisodes, key = Episode::id) { episode ->
                             TvEpisodeCard(
+                                media = detail.preview,
                                 episode = episode,
                                 watched = episode.id in watchedEpisodeIds,
+                                progress = progress.firstOrNull { it.videoId == episode.id },
                                 spoilerProtection = spoilerProtection,
                                 fallbackArtworkUrl = detail.preview.backgroundUrl ?: detail.preview.posterUrl,
                                 onClick = { onPlay(episode) },
@@ -2317,13 +2542,30 @@ private fun TvArtworkProviderMessages(results: List<ArtworkProviderResult>) {
 
 @Composable
 internal fun TvEpisodeCard(
+    media: MediaPreview,
     episode: Episode,
     watched: Boolean,
+    progress: WatchProgress?,
     spoilerProtection: SpoilerProtectionSettings,
     fallbackArtworkUrl: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scope = rememberCoroutineScope()
+    val cardFocus = remember { FocusRequester() }
+    val menuRequest = LocalTvContentMenuEnvironment.current.onRequest
+    val currentMenuRequest by rememberUpdatedState(menuRequest)
+    val menuTarget = remember(media, episode, progress) {
+        ContentMenuTarget(
+            media = media,
+            progress = progress,
+            episode = episode,
+            origin = ContentMenuOrigin.EPISODE,
+        )
+    }
+    val holdTracker = remember(scope, cardFocus, menuTarget) {
+        SelectHoldTracker(scope) { currentMenuRequest?.invoke(menuTarget, cardFocus) }
+    }.takeIf { menuRequest != null }
     val artworkUrl = episode.thumbnailUrl ?: fallbackArtworkUrl
     val number = episode.numberParts()
     val artworkHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched)
@@ -2334,6 +2576,8 @@ internal fun TvEpisodeCard(
         onClick = onClick,
         modifier = Modifier
             .then(modifier)
+            .tvSelectHoldMenu(holdTracker)
+            .focusRequester(cardFocus)
             .width(TvLayoutTokens.landscapeCardWidth)
             .height(TvLayoutTokens.landscapeCardHeight)
             .semantics {
