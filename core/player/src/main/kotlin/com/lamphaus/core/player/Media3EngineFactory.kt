@@ -3,7 +3,12 @@ package com.lamphaus.core.player
 import android.content.Context
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.audio.AudioCapabilities
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import com.lamphaus.core.model.AudioOutputMode
+import com.lamphaus.core.player.audio.DelayAudioProcessor
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
@@ -31,10 +36,13 @@ object Media3EngineFactory {
      */
     @Volatile
     var deviceConfig: DevicePlaybackConfig = DevicePlaybackConfig()
-        set(value) {
-            field = value
-            PlaybackEngineConfigHolder.config = value
-        }
+
+    /**
+     * Shared audio-delay processor for the session player. One player runs at
+     * a time per service, and route changes flush the pipeline, so a single
+     * instance gives live per-route delay without touching playback.
+     */
+    val audioDelayProcessor = DelayAudioProcessor()
 
     fun createPlayer(context: Context, config: DevicePlaybackConfig = deviceConfig): ExoPlayer {
         val httpDataSource = DefaultHttpDataSource.Factory()
@@ -46,7 +54,28 @@ object Media3EngineFactory {
             val headers = PlaybackHeaderRegistry.get(dataSpec.uri.toString())
             if (headers.isEmpty()) dataSpec else dataSpec.withRequestHeaders(dataSpec.httpRequestHeaders + headers)
         }
-        val renderersFactory = DefaultRenderersFactory(context)
+        // Audio output policy (plan §2): AUTO reads the route's real
+        // capabilities so passthrough happens only when the receiver can
+        // carry the bitstream; FORCE_DECODE restricts capabilities to PCM.
+        // FORCE_PASSTHROUGH still respects actual capability — a device
+        // cannot carry a format it cannot carry.
+        val audioCapabilities = when (config.audioOutputMode) {
+            AudioOutputMode.FORCE_DECODE -> AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES
+            AudioOutputMode.AUTO, AudioOutputMode.FORCE_PASSTHROUGH ->
+                AudioCapabilities.getCapabilities(context)
+        }
+        val renderersFactory = object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): AudioSink =
+                DefaultAudioSink.Builder(context)
+                    .setAudioCapabilities(audioCapabilities)
+                    .setAudioProcessors(arrayOf(audioDelayProcessor))
+                    .setEnableAudioTrackPlaybackParams(true)
+                    .build()
+        }
             .setEnableDecoderFallback(true)
             .setExtensionRendererMode(
                 when (config.decoderPriority) {

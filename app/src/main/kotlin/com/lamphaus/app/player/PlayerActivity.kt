@@ -1,6 +1,9 @@
 package com.lamphaus.app.player
 
 import android.app.PictureInPictureParams
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -19,6 +22,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -45,6 +50,7 @@ import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.hasAired
 import com.lamphaus.core.model.nextEpisodeAfter
 import com.lamphaus.core.player.LamphausPlaybackService
+import com.lamphaus.core.player.Media3EngineFactory
 import com.lamphaus.core.player.PlaybackHeaderRegistry
 import com.lamphaus.core.player.toMediaItem
 import com.lamphaus.app.ui.SourceResolution
@@ -63,6 +69,7 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+@androidx.media3.common.util.UnstableApi
 class PlayerActivity : ComponentActivity() {
     private val container by lazy { (application as LamphausApplication).container }
     private val controllerState = mutableStateOf<MediaController?>(null)
@@ -78,6 +85,9 @@ class PlayerActivity : ComponentActivity() {
     private var progressPulseJob: Job? = null
     private var segmentLookupJob: Job? = null
     private var nextEpisodeResolutionJob: Job? = null
+    private var displayModeController: PlaybackDisplayModeController? = null
+    private var displayTickJob: Job? = null
+    private var audioRouteFingerprint: String? = null
 
     /** Position of the last progress write; guards against redundant periodic saves. */
     @Volatile
@@ -106,6 +116,13 @@ class PlayerActivity : ComponentActivity() {
         // Browsing can leave several 4K backdrops in Coil's memory cache. Playback needs that
         // heap for demuxing high-bitrate sources, while artwork remains available on disk.
         SingletonImageLoader.get(this).memoryCache?.clear()
+        if (isTelevision) {
+            displayModeController = PlaybackDisplayModeController(
+                activity = this@PlayerActivity,
+                configProvider = { Media3EngineFactory.deviceConfig },
+            )
+        }
+        registerAudioRouteListener()
         connect(playback)
         lifecycleScope.launch {
             container.preferences.settings.collectLatest { settings ->
@@ -154,8 +171,24 @@ class PlayerActivity : ComponentActivity() {
                     mediaController.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             if (playbackState == Player.STATE_ENDED) {
+                                displayModeController?.restore()
                                 saveProgress(final = true, naturalEnd = true)
                             }
+                        }
+
+                        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                            val frameRate = mediaController.currentTracks.groups
+                                .asSequence()
+                                .filter { it.type == C.TRACK_TYPE_VIDEO }
+                                .flatMap { group -> (0 until group.length).asSequence().map(group::getTrackFormat) }
+                                .firstOrNull { it.frameRate > 0f }
+                                ?.frameRate
+                                ?: return
+                            displayModeController?.onVideoFormat(videoSize.width, videoSize.height, frameRate)
+                        }
+
+                        override fun onPlayerError(error: PlaybackException) {
+                            displayModeController?.restore()
                         }
                     })
                     mediaController.prepare()
@@ -368,6 +401,9 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        displayModeController?.restore()
+        displayTickJob?.cancel()
+        displayTickJob = null
         progressPulseJob?.cancel()
         progressPulseJob = null
         segmentLookupJob?.cancel()
@@ -395,6 +431,53 @@ class PlayerActivity : ComponentActivity() {
                 delay(PROGRESS_SAVE_INTERVAL_MILLIS)
                 saveProgress(final = false)
             }
+        }
+        // The 2s format-stability gate ticks faster than progress saves.
+        displayTickJob?.cancel()
+        displayTickJob = lifecycleScope.launch(Dispatchers.Main.immediate) {
+            while (true) {
+                delay(DISPLAY_TICK_INTERVAL_MILLIS)
+                displayModeController?.tick(DISPLAY_TICK_INTERVAL_MILLIS)
+            }
+        }
+    }
+
+    /**
+     * Audio routes carry a per-route audio delay (plan §2): the route set is
+     * fingerprinted (device types + names, never addresses) and the stored
+     * delay re-applies whenever that route returns. No stream URLs or
+     * credentials are involved (SHR-PROD-06).
+     */
+    private fun registerAudioRouteListener() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val listener = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = onRoutesChanged()
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = onRoutesChanged()
+
+            private fun onRoutesChanged() {
+                val fingerprint = audioRouteFingerprint(audioManager)
+                audioRouteFingerprint = fingerprint
+                container.applicationScope.launch {
+                    val settings = container.playbackPreferencesRepository.audioRouteSettings(fingerprint)
+                    Media3EngineFactory.audioDelayProcessor.delayMillis = settings.audioDelayMillis
+                }
+            }
+        }
+        audioManager.registerAudioDeviceCallback(listener, null)
+    }
+
+    /** Applies and remembers the delay for the current route (audio panel entry point). */
+    fun updateAudioRouteDelay(millis: Long) {
+        Media3EngineFactory.audioDelayProcessor.delayMillis = millis
+        val fingerprint = audioRouteFingerprint ?: return
+        container.applicationScope.launch {
+            container.playbackPreferencesRepository.saveAudioRouteSettings(
+                com.lamphaus.core.model.AudioRouteSettings(
+                    routeFingerprint = fingerprint,
+                    audioDelayMillis = millis,
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                ),
+            )
         }
     }
 
@@ -471,6 +554,7 @@ class PlayerActivity : ComponentActivity() {
 
         /** Minimum playback advance between periodic progress writes. */
         private const val PROGRESS_SAVE_DELTA_MILLIS = 5_000L
+        private const val DISPLAY_TICK_INTERVAL_MILLIS = 500L
         private val JSON = Json { ignoreUnknownKeys = true }
 
         fun intent(context: Context, request: PlaybackRequest): Intent =
@@ -505,4 +589,15 @@ private fun String.inferMimeType(): String? = when {
     contains(".ts", ignoreCase = true) -> "video/mp2t"
     contains(".mp4", ignoreCase = true) -> "video/mp4"
     else -> null
+}
+
+/** Stable fingerprint of the current output route set (types + product names). */
+private fun audioRouteFingerprint(audioManager: AudioManager): String {
+    val routes = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        .sortedBy { it.type }
+        .joinToString("|") { device -> "${device.type}:${device.productName}" }
+    return java.security.MessageDigest.getInstance("SHA-256")
+        .digest(routes.toByteArray())
+        .joinToString("") { "%02x".format(it) }
+        .take(16)
 }

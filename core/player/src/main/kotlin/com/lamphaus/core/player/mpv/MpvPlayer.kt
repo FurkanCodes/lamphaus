@@ -13,6 +13,8 @@ import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import com.lamphaus.core.model.AudioOutputDecision
+import com.lamphaus.core.model.DolbyVisionAction
 import com.lamphaus.core.player.EngineHandoffState
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -135,6 +137,45 @@ class MpvPlayer(
     fun setAudioDelayMillis(millis: Long) {
         audioDelayMillis = millis
         MpvLibrary.setPropertyString(handle, "audio-delay", (millis / 1000.0).toString())
+    }
+
+    /**
+     * Applies the resolved Dolby Vision action (plan §2). Native and P7
+     * conversion need no configuration: mediacodec_embed passes the stream
+     * untouched, and mpv/libplacebo handles DV mapping when built with
+     * libdovi. Only the tone-map action changes engine configuration —
+     * mediacodec_embed cannot tone-map, so the GPU path takes over.
+     */
+    fun applyDolbyVisionAction(action: DolbyVisionAction) {
+        when (action) {
+            DolbyVisionAction.TONE_MAP_TO_SDR -> {
+                MpvLibrary.setOptionString(handle, "vo", "gpu")
+                MpvLibrary.setOptionString(handle, "gpu-context", "android")
+                MpvLibrary.setOptionString(handle, "tone-mapping", "bt.2446a")
+                MpvLibrary.setOptionString(handle, "target-colorspace-hint", "yes")
+            }
+            DolbyVisionAction.NATIVE,
+            DolbyVisionAction.CONVERT_PROFILE7_TO_81,
+            DolbyVisionAction.HDR10_BASE_LAYER,
+            DolbyVisionAction.DISABLED,
+            -> Unit
+        }
+    }
+
+    /** Applies the audio output decision (plan §2): bitstream vs decode path. */
+    fun applyAudioOutput(decision: AudioOutputDecision) {
+        when (decision) {
+            is AudioOutputDecision.Passthrough ->
+                MpvLibrary.setPropertyString(handle, "audio-spdif", "ac3,dts,eac3,truehd")
+            is AudioOutputDecision.Decode -> {
+                MpvLibrary.setPropertyString(handle, "audio-spdif", "")
+                MpvLibrary.setPropertyString(
+                    handle,
+                    "audio-channels",
+                    if (decision.toStereo) "stereo" else "original",
+                )
+            }
+        }
     }
 
     fun selectAudioTrack(mpvTrackId: String) = selectTrack("aid", mpvTrackId)
