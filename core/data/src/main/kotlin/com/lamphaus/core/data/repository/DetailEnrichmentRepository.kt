@@ -31,6 +31,13 @@ interface DetailEnrichmentRepository {
         media: MediaPreview,
         force: Boolean = false,
     ): Result<Unit>
+
+    /**
+     * Drops every cached row. Credential changes (artwork TMDB key, integration
+     * credentials, enabled rating sources) change what the edge would return;
+     * a 12h-TTL cache would otherwise serve stale empty sections (SHR-ARC-05).
+     */
+    suspend fun invalidate()
 }
 
 class DefaultDetailEnrichmentRepository(
@@ -42,6 +49,10 @@ class DefaultDetailEnrichmentRepository(
 
     override fun observe(mediaKey: String): Flow<DetailEnrichment?> =
         dao.observeDetailEnrichment(mediaKey).map { it?.decodeOrNull() }
+
+    override suspend fun invalidate() {
+        dao.clearDetailEnrichment()
+    }
 
     override suspend fun refresh(
         media: MediaPreview,

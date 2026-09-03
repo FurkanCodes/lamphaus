@@ -23,6 +23,7 @@ class DetailEnrichmentRepositoryTest {
         val flow = MutableStateFlow<DetailEnrichmentEntity?>(null)
         var upserts = 0
         var prunedOlderThan: Long? = null
+        var cleared = 0
 
         override fun observeDetailEnrichment(mediaKey: String): Flow<DetailEnrichmentEntity?> = flow
 
@@ -36,6 +37,12 @@ class DetailEnrichmentRepositoryTest {
 
         override suspend fun pruneDetailEnrichment(olderThanEpochMillis: Long) {
             prunedOlderThan = olderThanEpochMillis
+        }
+
+        override suspend fun clearDetailEnrichment() {
+            cleared += 1
+            rows.clear()
+            flow.value = null
         }
     }
 
@@ -156,5 +163,19 @@ class DetailEnrichmentRepositoryTest {
         repository(dao, remote).refresh(media())
 
         assertEquals(now - 30L * 24 * 60 * 60 * 1000, dao.prunedOlderThan)
+    }
+
+    @Test
+    fun `invalidate drops every cached row`() = runTest {
+        val dao = FakeDetailEnrichmentDao()
+        val repository = repository(dao, FakeRemote(Result.success(enrichment("imdb:tt0133093"))))
+
+        repository.refresh(media())
+        assertEquals(1, dao.rows.size)
+
+        repository.invalidate()
+
+        assertNull(dao.rows["imdb:tt0133093"])
+        assertEquals(1, dao.cleared)
     }
 }

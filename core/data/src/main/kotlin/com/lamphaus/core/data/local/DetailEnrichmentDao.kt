@@ -19,4 +19,7 @@ interface DetailEnrichmentDao {
 
     @Query("DELETE FROM detail_enrichment WHERE fetchedAtEpochMillis < :olderThanEpochMillis")
     suspend fun pruneDetailEnrichment(olderThanEpochMillis: Long)
+
+    @Query("DELETE FROM detail_enrichment")
+    suspend fun clearDetailEnrichment()
 }
