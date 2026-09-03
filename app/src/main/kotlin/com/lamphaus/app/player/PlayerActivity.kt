@@ -86,6 +86,9 @@ class PlayerActivity : ComponentActivity() {
     private var segmentLookupJob: Job? = null
     private var nextEpisodeResolutionJob: Job? = null
     private var displayModeController: PlaybackDisplayModeController? = null
+    private val sidecarLoader = com.lamphaus.core.player.SidecarSubtitleLoader()
+    private var subtitleCues: List<com.lamphaus.core.model.SubtitleCue> = emptyList()
+    private var uiPlayer: Player? = null
     private var displayTickJob: Job? = null
     private var audioRouteFingerprint: String? = null
 
@@ -135,7 +138,7 @@ class PlayerActivity : ComponentActivity() {
             requestState.value?.let { currentRequest ->
                 PlaybackScreen(
                     request = currentRequest,
-                    player = controllerState.value,
+                    player = uiPlayer ?: controllerState.value,
                     isTelevision = isTelevision,
                     settings = playbackSettingsState.value,
                     segments = segmentsState.value,
@@ -166,6 +169,8 @@ class PlayerActivity : ComponentActivity() {
         future.addListener(
             {
                 runCatching { future.get() }.onSuccess { mediaController ->
+                    val delayed = com.lamphaus.core.player.DelayedCuePlayer(mediaController)
+                    uiPlayer = delayed
                     controllerState.value = mediaController
                     mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
                     mediaController.addListener(object : Player.Listener {
@@ -194,6 +199,19 @@ class PlayerActivity : ComponentActivity() {
                     mediaController.prepare()
                     mediaController.play()
                     startProgressPulse()
+                    // Restore the remembered subtitle timing for this source (plan §4).
+                    lifecycleScope.launch {
+                        val signedIn = container.accountGateway.state.value as? AccountState.SignedIn ?: return@launch
+                        val fingerprint = playback.source.uri.substringBefore('?').hashCode().toString(16)
+                        val selection = container.playbackPreferencesRepository.sourceSelection(
+                            signedIn.userId,
+                            playback.mediaKey,
+                            fingerprint,
+                        )
+                        selection?.takeIf { it.subtitleDelayMillis != 0L }?.let {
+                            applySubtitleDelay(it.subtitleDelayMillis)
+                        }
+                    }
                 }
             },
             ContextCompat.getMainExecutor(this),
@@ -466,6 +484,68 @@ class PlayerActivity : ComponentActivity() {
         audioManager.registerAudioDeviceCallback(listener, null)
     }
 
+    /**
+     * Sync by line (plan §4): loads the active sidecar, and applies the
+     * computed shift when the viewer presses Sync on a line. Text sidecars
+     * only — bitmap subtitles keep manual timing.
+     */
+    fun loadSidecarCues(onResult: (List<com.lamphaus.core.model.SubtitleCue>) -> Unit) {
+        val sidecar = request?.source?.subtitles
+            ?.firstOrNull { track ->
+                val format = track.format?.lowercase().orEmpty()
+                format in setOf("srt", "vtt", "ttml", "ssa", "ass") ||
+                    track.url.substringBefore('?').let { url ->
+                        url.endsWith(".srt") || url.endsWith(".vtt") || url.endsWith(".ttml") ||
+                            url.endsWith(".ssa") || url.endsWith(".ass")
+                    }
+            }
+            ?: run {
+                onResult(emptyList())
+                return
+            }
+        lifecycleScope.launch {
+            subtitleCues = sidecarLoader.load(sidecar.url) ?: emptyList()
+            onResult(subtitleCues)
+        }
+    }
+
+    fun applySyncByLine(cueStartMillis: Long) {
+        val position = controller?.currentPosition ?: return
+        applySubtitleDelay(
+            com.lamphaus.core.model.syncByLineDelayMillis(
+                capturedVideoTimeMillis = position,
+                selectedCueStartMillis = cueStartMillis,
+            ),
+        )
+    }
+
+    /**
+     * Applies subtitle timing to the active engine without restarting
+     * playback (plan §4) and remembers it per profile/video/source.
+     */
+    fun applySubtitleDelay(delayMillis: Long) {
+        (uiPlayer as? com.lamphaus.core.player.DelayedCuePlayer)?.delayMillis = delayMillis
+        controller?.sendCustomCommand(
+            androidx.media3.session.SessionCommand(
+                ACTION_SET_SUBTITLE_DELAY,
+                android.os.Bundle().apply { putLong(EXTRA_DELAY_MILLIS, delayMillis) },
+            ),
+            android.os.Bundle.EMPTY,
+        )
+        val playback = request ?: return
+        val userId = (container.accountGateway.state.value as? AccountState.SignedIn)?.userId ?: return
+        container.applicationScope.launch {
+            container.playbackPreferencesRepository.saveSourceSelection(
+                com.lamphaus.core.model.SourcePlaybackSelection(
+                    profileId = userId,
+                    mediaKey = playback.mediaKey,
+                    sourceFingerprint = playback.source.uri.substringBefore('?').hashCode().toString(16),
+                    subtitleDelayMillis = delayMillis,
+                ),
+            )
+        }
+    }
+
     /** Applies and remembers the delay for the current route (audio panel entry point). */
     fun updateAudioRouteDelay(millis: Long) {
         Media3EngineFactory.audioDelayProcessor.delayMillis = millis
@@ -555,6 +635,8 @@ class PlayerActivity : ComponentActivity() {
         /** Minimum playback advance between periodic progress writes. */
         private const val PROGRESS_SAVE_DELTA_MILLIS = 5_000L
         private const val DISPLAY_TICK_INTERVAL_MILLIS = 500L
+        private const val ACTION_SET_SUBTITLE_DELAY = "lamphaus.playback.SET_SUBTITLE_DELAY"
+        private const val EXTRA_DELAY_MILLIS = "delay_millis"
         private val JSON = Json { ignoreUnknownKeys = true }
 
         fun intent(context: Context, request: PlaybackRequest): Intent =

@@ -162,6 +162,60 @@ class MpvPlayer(
         }
     }
 
+    /**
+     * Applies the profile subtitle style (plan §4 live editor). With
+     * [SubtitleStyle.preserveEmbeddedStyles] the libass authoring wins and
+     * only timing/delay apply; otherwise mpv's style properties override.
+     */
+    fun applySubtitleStyle(style: com.lamphaus.core.model.SubtitleStyle) {
+        val overrideEmbedded = !style.preserveEmbeddedStyles
+        MpvLibrary.setPropertyString(handle, "sub-ass-override", if (overrideEmbedded) "yes" else "no")
+        if (!overrideEmbedded) return
+        fun color(argb: Long, opacity: Float): String {
+            val alpha = ((argb ushr 24) * opacity).toInt().coerceIn(0, 255)
+            return "#%02X%06X".format(alpha, argb and 0xFFFFFF)
+        }
+        MpvLibrary.setPropertyString(
+            handle,
+            "sub-font-size",
+            (com.lamphaus.core.model.SubtitleStylePolicy.clampSizePercent(style.sizePercent) * 0.55).toString(),
+        )
+        MpvLibrary.setPropertyString(
+            handle,
+            "sub-pos",
+            (com.lamphaus.core.model.SubtitleStylePolicy.clampPositionFraction(style.verticalPositionFraction) * 100)
+                .toInt().toString(),
+        )
+        MpvLibrary.setPropertyString(handle, "sub-bold", if (style.bold) "yes" else "no")
+        MpvLibrary.setPropertyString(
+            handle,
+            "sub-color",
+            color(style.textColor, com.lamphaus.core.model.SubtitleStylePolicy.clampOpacity(style.textOpacity)),
+        )
+        val hasBackground = com.lamphaus.core.model.SubtitleStylePolicy.clampOpacity(style.backgroundOpacity) > 0f
+        MpvLibrary.setPropertyString(handle, "sub-border-style", if (hasBackground) "4" else "1")
+        MpvLibrary.setPropertyString(
+            handle,
+            "sub-back-color",
+            color(
+                style.backgroundColor,
+                com.lamphaus.core.model.SubtitleStylePolicy.clampOpacity(style.backgroundOpacity),
+            ),
+        )
+        MpvLibrary.setPropertyString(handle, "sub-outline-width", "%.1f".format(style.outlineWidthDp))
+        MpvLibrary.setPropertyString(
+            handle,
+            "sub-shadow",
+            when (style.edgeStyle) {
+                com.lamphaus.core.model.SubtitleEdgeStyle.NONE -> "0"
+                com.lamphaus.core.model.SubtitleEdgeStyle.DROP_SHADOW -> "1"
+                com.lamphaus.core.model.SubtitleEdgeStyle.RAISED -> "2"
+                com.lamphaus.core.model.SubtitleEdgeStyle.DEPRESSED -> "3"
+                com.lamphaus.core.model.SubtitleEdgeStyle.OUTLINE -> "0"
+            },
+        )
+    }
+
     /** Applies the audio output decision (plan §2): bitstream vs decode path. */
     fun applyAudioOutput(decision: AudioOutputDecision) {
         when (decision) {
