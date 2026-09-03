@@ -1,5 +1,6 @@
 package com.lamphaus.core.player
 
+import androidx.media3.common.PlaybackException
 import com.lamphaus.core.model.PlaybackEngineKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,5 +62,39 @@ class PlaybackEnginePolicyTest {
     fun `fallback reasons exist only for handoff failures`() {
         assertEquals("format unsupported by Media3", PlaybackEnginePolicy.fallbackReason(EngineFailureKind.UNSUPPORTED_FORMAT))
         assertNull(PlaybackEnginePolicy.fallbackReason(EngineFailureKind.NETWORK))
+    }
+}
+
+class EngineHandoffMappingTest {
+    @Test
+    fun `decoder failures map to fallback-capable kinds`() {
+        assertEquals(
+            EngineFailureKind.DECODER_INIT_FAILED,
+            EngineHandoff.failureKindFrom(PlaybackException.ERROR_CODE_DECODER_INIT_FAILED),
+        )
+        assertEquals(
+            EngineFailureKind.DECODER_FAILED,
+            EngineHandoff.failureKindFrom(PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED),
+        )
+        assertEquals(
+            EngineFailureKind.UNSUPPORTED_FORMAT,
+            EngineHandoff.failureKindFrom(PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED),
+        )
+    }
+
+    @Test
+    fun `io and auth failures never become engine problems`() {
+        assertEquals(
+            EngineFailureKind.NETWORK,
+            EngineHandoff.failureKindFrom(PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED),
+        )
+        assertEquals(
+            EngineFailureKind.AUTHORIZATION,
+            EngineHandoff.failureKindFrom(PlaybackException.ERROR_CODE_AUTHENTICATION_EXPIRED),
+        )
+        assertEquals(
+            EngineFailureKind.NETWORK,
+            EngineHandoff.failureKindFrom(PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS),
+        )
     }
 }

@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.lamphaus.core.model.PlaybackSessionState
 
 class LamphausPlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
@@ -23,6 +24,10 @@ class LamphausPlaybackService : MediaSessionService() {
         mediaSession = MediaSession.Builder(this, player)
             .apply { sessionActivity?.let(::setSessionActivity) }
             .build()
+        PlaybackEngineFallback.install(mediaSession!!) { state ->
+            // Diagnostics record only the engine switch, never the source (SHR-PROD-06).
+            android.util.Log.i("LamphausPlayback", "engine fallback: ${state.fallbackReason}")
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

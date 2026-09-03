@@ -20,6 +20,23 @@ android {
         lintConfig = file("lint.xml")
     }
 
+    // The MPV engine glue is dlopen-based: it builds and links with no
+    // libmpv dependency. libmpv.so ships per-ABI from the pinned build
+    // (scripts/build-mpv-libs.sh) into src/main/jniLibs/<abi>/.
+    defaultConfig {
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=none"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }
 
 kotlin {

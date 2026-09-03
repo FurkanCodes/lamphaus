@@ -1,0 +1,38 @@
+{
+  "buildFiles": [
+    "/Users/furkan/lamphaus/core/player/src/main/cpp/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/Users/furkan/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/Users/furkan/lamphaus/core/player/.cxx/Debug/603d6623/x86",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/Users/furkan/Library/Android/sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/Users/furkan/lamphaus/core/player/.cxx/Debug/603d6623/x86",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "lamphaus_mpv::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "x86",
+      "artifactName": "lamphaus_mpv",
+      "output": "/Users/furkan/lamphaus/core/player/build/intermediates/cxx/Debug/603d6623/obj/x86/liblamphaus_mpv.so",
+      "runtimeFiles": []
+    }
+  },
+  "toolchains": {
+    "toolchain": {
+      "cCompilerExecutable": "/Users/furkan/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang.lld",
+      "cppCompilerExecutable": "/Users/furkan/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++.lld"
+    }
+  },
+  "cFileExtensions": [
+    "c"
+  ],
+  "cppFileExtensions": []
+}

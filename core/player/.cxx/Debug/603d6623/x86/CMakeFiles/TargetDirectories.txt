@@ -1,0 +1,3 @@
+/Users/furkan/lamphaus/core/player/.cxx/Debug/603d6623/x86/CMakeFiles/lamphaus_mpv.dir
+/Users/furkan/lamphaus/core/player/.cxx/Debug/603d6623/x86/CMakeFiles/edit_cache.dir
+/Users/furkan/lamphaus/core/player/.cxx/Debug/603d6623/x86/CMakeFiles/rebuild_cache.dir

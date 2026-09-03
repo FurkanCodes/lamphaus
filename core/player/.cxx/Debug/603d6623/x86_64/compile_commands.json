@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/Users/furkan/lamphaus/core/player/.cxx/Debug/603d6623/x86_64",
+  "command": "/Users/furkan/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=x86_64-none-linux-android26 --sysroot=/Users/furkan/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dlamphaus_mpv_EXPORTS -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -fno-limit-debug-info  -fPIC -o CMakeFiles/lamphaus_mpv.dir/mpv_jni.c.o -c /Users/furkan/lamphaus/core/player/src/main/cpp/mpv_jni.c",
+  "file": "/Users/furkan/lamphaus/core/player/src/main/cpp/mpv_jni.c"
+}
+]
