@@ -13,6 +13,10 @@ import com.lamphaus.core.data.cloud.SupabaseAccountGateway
 import com.lamphaus.core.data.cloud.SupabasePairingGateway
 import com.lamphaus.core.data.cloud.SupabaseCloudSyncGateway
 import com.lamphaus.core.data.cloud.SupabaseSessionRecovery
+import com.lamphaus.core.data.cloud.SupabaseIntegrationsGateway
+import com.lamphaus.core.data.cloud.IntegrationsGateway
+import com.lamphaus.core.data.cloud.LocalIntegrationsGateway
+import com.lamphaus.core.data.cloud.SupabaseDetailEnrichmentRemoteDataSource
 import com.lamphaus.core.data.cloud.LocalCloudSyncGateway
 import com.lamphaus.core.data.cloud.CloudSyncGateway
 import com.lamphaus.core.data.cloud.PairingGateway
@@ -27,6 +31,8 @@ import com.lamphaus.core.data.preferences.UserPreferences
 import com.lamphaus.core.data.playback.IntroDbSkipRepository
 import com.lamphaus.core.data.repository.LibraryRepository
 import com.lamphaus.core.data.repository.RoomLibraryRepository
+import com.lamphaus.core.data.repository.DefaultDetailEnrichmentRepository
+import com.lamphaus.core.data.repository.DetailEnrichmentRepository
 import com.lamphaus.core.data.security.AndroidKeystoreStringCipher
 import com.lamphaus.core.provider.HttpProviderClient
 import com.lamphaus.core.data.security.LocalArtworkKeyStore
@@ -36,6 +42,7 @@ import com.lamphaus.core.provider.ProviderUrlPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.serialization.json.Json
 
 class AppContainer(context: Context) {
     private val database = Room.databaseBuilder(
@@ -43,11 +50,7 @@ class AppContainer(context: Context) {
         LamphausDatabase::class.java,
         "lamphaus.db",
     )
-        .addMigrations(
-            LamphausDatabase.MIGRATION_1_2,
-            LamphausDatabase.MIGRATION_2_3,
-            LamphausDatabase.MIGRATION_3_4,
-        )
+        .addMigrations(*LamphausDatabase.ALL_MIGRATIONS)
         .fallbackToDestructiveMigrationOnDowngrade()
         .build()
 
@@ -134,6 +137,29 @@ class AppContainer(context: Context) {
     )
     val cloudSyncGateway: CloudSyncGateway = artworkStorageModeGateway
 
+    /**
+     * Shared JSON instance for enrichment payloads: lenient so provider-shaped
+     * variation in edge responses never breaks decoding.
+     */
+    private val enrichmentJson: Json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    /**
+     * Provider-neutral detail enrichment (TMDB + MDBList), cached in Room.
+     * Null when this build has no cloud configured — the UI then simply never
+     * shows enrichment sections instead of surfacing a permanent error.
+     */
+    val detailEnrichmentRepository: DetailEnrichmentRepository? = supabase?.let { client ->
+        DefaultDetailEnrichmentRepository(
+            dao = database.dao(),
+            remote = SupabaseDetailEnrichmentRemoteDataSource(client, enrichmentJson),
+            json = enrichmentJson,
+        )
+    }
+    val integrationsGateway: IntegrationsGateway = if (supabase != null) {
+        SupabaseIntegrationsGateway(supabase, checkNotNull(sessionRecovery))
+    } else {
+        LocalIntegrationsGateway()
+    }
     fun openDevelopmentSession() {
         check(BuildConfig.DEBUG) { "Development sessions are disabled in this build." }
         localAccount.openDevelopmentSession()

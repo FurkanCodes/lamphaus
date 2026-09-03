@@ -340,6 +340,7 @@ class HttpProviderClient(
             ?.toIntOrNull()
             ?: int("year")
         val appExtras = obj("app_extras")
+        val rating = ratingWithSource()
         return MediaPreview(
             id = itemId,
             type = rawType.toMediaType(),
@@ -353,7 +354,8 @@ class HttpProviderClient(
             genres = stringsOrSingle("genres").ifEmpty { stringsOrSingle("genre") },
             contentRating = firstString("contentRating", "content_rating", "certification")
                 ?: appExtras?.firstString("certification"),
-            rating = ratingValue(),
+            rating = rating?.first,
+            ratingSource = rating?.second,
             providerIds = setOf(providerId),
             posterShape = string("posterShape") ?: catalogPosterShape,
         )
@@ -513,18 +515,23 @@ class HttpProviderClient(
         ?.toMap()
         .orEmpty()
     private fun String.canonicalExtraName(): String = trim().lowercase()
-    private fun JsonObject.ratingValue(): Double? {
-        val value = double("imdbRating")
+    /**
+     * Rating with its provenance. "imdb" only when an IMDb-named field
+     * supplied the value; a generic `rating`/`ratings.value` stays "provider"
+     * so the UI can never label it IMDb (SHR-PROD-05).
+     */
+    private fun JsonObject.ratingWithSource(): Pair<Double, String>? {
+        val imdb = double("imdbRating")
             ?: double("imdb_rating")
-            ?: double("rating")
-            ?: obj("ratings")?.let { ratings ->
-                ratings.double("imdb")
-                    ?: ratings.double("imdbRating")
-                    ?: ratings.double("rating")
-                    ?: ratings.double("value")
-            }
-        return value?.takeIf { it.isFinite() && it in 0.0..10.0 }
+            ?: obj("ratings")?.let { ratings -> ratings.double("imdb") ?: ratings.double("imdbRating") }
+        imdb?.takeIf { it.isValidRating() }?.let { return it to RATING_SOURCE_IMDB }
+        val provider = double("rating")
+            ?: obj("ratings")?.let { ratings -> ratings.double("rating") ?: ratings.double("value") }
+        provider?.takeIf { it.isValidRating() }?.let { return it to RATING_SOURCE_PROVIDER }
+        return null
     }
+
+    private fun Double.isValidRating(): Boolean = isFinite() && this in 0.0..10.0
     private fun JsonObject.streamFiles(key: String): List<StreamFile> = array(key).orEmpty().mapNotNull { item ->
         when (item) {
             is JsonPrimitive -> item.contentOrNull?.trim()?.takeIf(String::isNotBlank)?.let(::StreamFile)
@@ -560,6 +567,9 @@ class HttpProviderClient(
     }
 }
 
+
+internal const val RATING_SOURCE_IMDB = "imdb"
+internal const val RATING_SOURCE_PROVIDER = "provider"
 private class ProviderHttpException(val code: Int) : IOException()
 
 @OptIn(InternalCoroutinesApi::class)

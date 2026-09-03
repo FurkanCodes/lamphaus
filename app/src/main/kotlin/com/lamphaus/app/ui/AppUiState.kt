@@ -23,6 +23,8 @@ import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.CatalogQuery
+import com.lamphaus.core.model.DetailEnrichment
+import com.lamphaus.core.model.IntegrationStatus
 
 data class ArtworkEditorState(
     val media: MediaPreview,
@@ -213,6 +215,15 @@ data class AppUiState(
     val refreshing: Boolean = false,
     val searching: Boolean = false,
     val message: String? = null,
+    /** Provider-neutral enrichment for the open detail; independent of base metadata (SHR-ARC-05). */
+    val detailEnrichment: DetailEnrichment? = null,
+    val detailEnrichmentLoading: Boolean = false,
+    /** Refresh failed with a retryable error; render a local retry in the affected section. */
+    val detailEnrichmentFailed: Boolean = false,
+    val integrations: List<IntegrationStatus> = emptyList(),
+    val integrationsLoading: Boolean = false,
+    /** Integration list could not be loaded (not "no integrations configured"). */
+    val integrationsFailed: Boolean = false,
 ) {
     val activeProfile: Profile? get() = profiles.firstOrNull { it.id == activeProfileId }
     val allMedia: List<MediaPreview>

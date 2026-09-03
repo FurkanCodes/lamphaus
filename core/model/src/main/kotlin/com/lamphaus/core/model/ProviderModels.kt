@@ -90,6 +90,12 @@ data class MediaPreview(
     val genres: List<String> = emptyList(),
     val contentRating: String? = null,
     val rating: Double? = null,
+    /**
+     * Which field supplied [rating]: "imdb" when the addon exposed an IMDb
+     * score, "provider" for a generic provider rating, null when unknown.
+     * A generic rating must never be labeled IMDb (SHR-PROD-05).
+     */
+    val ratingSource: String? = null,
     val providerIds: Set<String> = emptySet(),
     val posterShape: String? = null,
 ) {

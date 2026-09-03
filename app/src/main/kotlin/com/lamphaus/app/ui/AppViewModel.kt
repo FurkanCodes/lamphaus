@@ -13,6 +13,8 @@ import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
 import com.lamphaus.core.data.cloud.CloudNotConfiguredException
 import com.lamphaus.core.data.cloud.ArtworkKeysNotConfiguredException
+import com.lamphaus.core.data.cloud.IntegrationInvalidCredentialException
+import com.lamphaus.core.model.IntegrationStatus
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.SpoilerProtectionSettings
@@ -38,6 +40,7 @@ import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.nextEpisodeAfter
+import com.lamphaus.core.model.enrichmentMediaKey
 import com.lamphaus.core.model.playbackQueueFrom
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.PairingSession
@@ -70,6 +73,7 @@ import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -132,6 +136,7 @@ class AppViewModel(
     private var browseJob: Job? = null
     private val pageJobs = mutableMapOf<String, Job>()
     private var detailJob: Job? = null
+    private var enrichmentJob: Job? = null
     private var sourceJob: Job? = null
     init {
         viewModelScope.launch {
@@ -610,6 +615,16 @@ class AppViewModel(
         }
     }
 
+    /** Discover loads the addon-declared category options on first entry. */
+    fun prepareDiscover() {
+        ensureBrowseTargets()
+    }
+
+    /** Back from category results: drop the genre filter without reloading. */
+    fun clearBrowseGenre() {
+        mutableState.update { it.copy(browse = it.browse.copy(selectedGenre = null)) }
+    }
+
     private fun selectBrowseTarget(target: CatalogBrowseTarget, genre: String?) {
         browseJob?.cancel()
         browseJob = viewModelScope.launch {
@@ -928,6 +943,9 @@ class AppViewModel(
         detailJob?.cancel()
         detailJob = viewModelScope.launch {
             mutableState.update { it.copy(selectedDetail = MediaDetail(media), refreshing = true) }
+            // Enrichment streams in independently of base metadata: sections
+            // appear when ready without displacing the hero (TV-CNT-02).
+            startDetailEnrichment(media)
             if (media.id.startsWith("fixture:")) {
                 mutableState.update {
                     it.copy(
@@ -973,6 +991,68 @@ class AppViewModel(
             }
         }
     }
+
+    /**
+     * Cache-first enrichment flow (SHR-ARC-06/13): Room content renders
+     * immediately, the TTL-gated refresh lands behind it, and a retryable
+     * failure surfaces only inside the affected sections (SHR-PROD-04).
+     * Cloud-less builds stay silent — enrichment is additive, never required.
+     */
+    private fun startDetailEnrichment(media: MediaPreview, force: Boolean = false) {
+        val repository = container.detailEnrichmentRepository
+        if (repository == null || media.id.startsWith("fixture:")) return
+        val mediaKey = media.enrichmentMediaKey()
+        val activeKey = media.stableKey
+        fun isCurrent(state: AppUiState) = state.selectedDetail?.preview?.stableKey == activeKey
+        enrichmentJob?.cancel()
+        enrichmentJob = viewModelScope.launch {
+            mutableState.update {
+                if (isCurrent(it)) {
+                    it.copy(detailEnrichmentLoading = true, detailEnrichmentFailed = false)
+                } else {
+                    it
+                }
+            }
+            // Cache-first: the observe collector renders Room content as soon
+            // as it exists, while the TTL-gated refresh lands behind it. The
+            // collector keeps running until the next detail opens or the
+            // screen closes, so the refresh's upsert re-emits the fresh row.
+            val observe = launch {
+                repository.observe(mediaKey).collect { cached ->
+                    mutableState.update { current ->
+                        if (isCurrent(current)) current.copy(detailEnrichment = cached) else current
+                    }
+                }
+            }
+            val refresh = launch {
+                val result = repository.refresh(media, force = force)
+                mutableState.update { current ->
+                    if (!isCurrent(current)) return@update current
+                    result.fold(
+                        onSuccess = { current.copy(detailEnrichmentLoading = false, detailEnrichmentFailed = false) },
+                        onFailure = { error ->
+                            when (error) {
+                                // No cloud in this build: enrichment simply stays absent.
+                                is CloudNotConfiguredException ->
+                                    current.copy(detailEnrichmentLoading = false)
+                                else ->
+                                    current.copy(detailEnrichmentLoading = false, detailEnrichmentFailed = true)
+                            }
+                        },
+                    )
+                }
+            }
+            refresh.join()
+            observe.join()
+        }
+    }
+
+    /** Force-reloads enrichment for the open detail after a failed attempt. */
+    fun retryDetailEnrichment() {
+        val media = state.value.selectedDetail?.preview ?: return
+        startDetailEnrichment(media, force = true)
+    }
+
     fun refreshArtworkKeyStatus() = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         refreshArtworkKeyStatus(userId)
@@ -1039,6 +1119,86 @@ class AppViewModel(
                 showMessage("$displayName artwork key removed.")
             }
             .onFailure { showMessage("Could not remove the $displayName artwork key. Try again.") }
+    }
+
+    // ── Integrations (Settings) ──────────────────────────────────────────
+    // Credentials travel to the encrypted server-side store and are never
+    // returned; the client only ever sees connection state (SHR-PROD-06).
+
+    fun refreshIntegrations() = viewModelScope.launch {
+        mutableState.update { it.copy(integrationsLoading = true) }
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId
+        if (userId == null) {
+            mutableState.update { it.copy(integrations = emptyList(), integrationsLoading = false) }
+            return@launch
+        }
+        container.integrationsGateway.statuses(userId)
+            .onSuccess { statuses ->
+                mutableState.update {
+                    it.copy(integrations = statuses, integrationsLoading = false, integrationsFailed = false)
+                }
+            }
+            .onFailure { error ->
+                mutableState.update {
+                    it.copy(
+                        integrationsLoading = false,
+                        integrationsFailed = error !is CloudNotConfiguredException,
+                    )
+                }
+            }
+    }
+
+    fun saveIntegrationCredential(integration: String, credential: String) = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId
+        if (userId == null) {
+            showMessage("Sign in to connect integrations.")
+            return@launch
+        }
+        if (credential.isBlank()) {
+            showMessage("Paste an API key first.")
+            return@launch
+        }
+        container.integrationsGateway.saveCredential(userId, integration, credential.trim())
+            .onSuccess {
+                showMessage("Integration connected.")
+                refreshIntegrations()
+            }
+            .onFailure { error ->
+                showMessage(
+                    when (error) {
+                        is IntegrationInvalidCredentialException ->
+                            "The key was rejected by the provider. Check it and try again."
+                        is CloudNotConfiguredException ->
+                            "Cloud services aren't configured for this build."
+                        else -> "Could not save the key. Try again."
+                    },
+                )
+            }
+    }
+
+    fun setIntegrationSources(integration: String, sources: List<String>) = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        container.integrationsGateway.setEnabledSources(userId, integration, sources)
+            .onSuccess { refreshIntegrations() }
+            .onFailure { error ->
+                if (error !is CloudNotConfiguredException) {
+                    showMessage("Could not update the rating sources. Try again.")
+                }
+            }
+    }
+
+    fun removeIntegration(integration: String) = viewModelScope.launch {
+        val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
+        container.integrationsGateway.removeCredential(userId, integration)
+            .onSuccess {
+                showMessage("Integration removed.")
+                refreshIntegrations()
+            }
+            .onFailure { error ->
+                if (error !is CloudNotConfiguredException) {
+                    showMessage("Could not remove the integration. Try again.")
+                }
+            }
     }
 
     fun openArtworkProviderKeyPage(providerId: ArtworkProviderId) {
@@ -1203,7 +1363,16 @@ class AppViewModel(
 
     fun clearDetail() {
         detailJob?.cancel()
-        mutableState.update { it.copy(selectedDetail = null, refreshing = false) }
+        enrichmentJob?.cancel()
+        mutableState.update {
+            it.copy(
+                selectedDetail = null,
+                refreshing = false,
+                detailEnrichment = null,
+                detailEnrichmentLoading = false,
+                detailEnrichmentFailed = false,
+            )
+        }
     }
 
     /** Loads every compatible stream provider. This intentionally does not select or launch a source. */
@@ -2331,6 +2500,7 @@ internal fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
     genres = (genres + other.genres).distinct(),
     contentRating = contentRating ?: other.contentRating,
     rating = rating ?: other.rating,
+    ratingSource = ratingSource ?: other.ratingSource,
     providerIds = providerIds + other.providerIds,
     posterShape = posterShape ?: other.posterShape,
 )

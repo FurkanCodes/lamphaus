@@ -3,13 +3,13 @@ package com.lamphaus.core.data.local
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.OnConflictStrategy
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface LamphausDao {
+interface LamphausDao : DetailEnrichmentDao {
     @Query("SELECT * FROM profiles ORDER BY kind, name")
     fun observeProfiles(): Flow<List<ProfileEntity>>
 

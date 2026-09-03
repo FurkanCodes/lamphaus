@@ -205,4 +205,46 @@
     <string name="profile">Profile</string>
     <string name="resume">Resume</string>
     <string name="resume_episode_format">Resume %1$s</string>
+
+    <!-- Detail enrichment (TV-CNT-01 section order; SHR-PROD-07 localized copy) -->
+    <string name="ratings_title">Ratings</string>
+    <string name="similar_title">More like this</string>
+    <string name="facts_title">Details</string>
+    <string name="facts_status">Status</string>
+    <string name="facts_language">Original language</string>
+    <string name="facts_budget">Budget</string>
+    <string name="facts_revenue">Revenue</string>
+    <string name="rating_source_description">%1$s rating: %2$s out of 10</string>
+    <string name="rating_votes_count">%1$s votes</string>
+    <string name="rating_attribution">Rating provided by %1$s</string>
+    <string name="rating_last_updated">Updated %1$s</string>
+    <string name="detail_enrichment_failed">Ratings and credits could not be loaded.</string>
+
+    <!-- Discover categories (addon-declared genre options) -->
+    <string name="all_categories">All</string>
+
+    <!-- Settings → Integrations -->
+    <string name="integrations">Integrations</string>
+    <string name="integrations_description">Connect rating services to enrich detail pages. Credentials are stored server-side and never shown again.</string>
+    <string name="integrations_sign_in_required">Sign in to connect integrations.</string>
+    <string name="integrations_load_failed">Integrations could not be loaded. Try again.</string>
+    <string name="integration_status_checking">Checking connection…</string>
+    <string name="integration_connected">Connected</string>
+    <string name="integration_not_connected">Not connected</string>
+    <string name="integration_key_rejected">The saved key was rejected. Replace it below.</string>
+    <string name="integration_api_key">API key</string>
+    <string name="integration_api_key_placeholder">Paste your API key</string>
+    <string name="integration_rating_sources">Enabled rating sources</string>
+    <string name="close">Close</string>
+    <string name="integration_connect">Connect</string>
+    <string name="integration_replace_key">Replace key</string>
+    <string name="integration_remove">Remove integration</string>
+    <string name="integration_source_toggle_description">Show this source on detail pages</string>
+    <string name="source_imdb">IMDb</string>
+    <string name="source_tmdb">TMDB</string>
+    <string name="source_trakt">Trakt</string>
+    <string name="source_rt_critics">Rotten Tomatoes critics</string>
+    <string name="source_rt_audience">Rotten Tomatoes audience</string>
+    <string name="source_letterboxd">Letterboxd</string>
+    <string name="source_metacritic">Metacritic</string>
 </resources>

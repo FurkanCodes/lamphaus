@@ -76,3 +76,15 @@ data class CloudSyncKeyEntity(
     val collection: String,
     val itemKey: String,
 )
+
+/**
+ * Provider-neutral detail enrichment (TMDB credits/facts, MDBList ratings),
+ * cached as serialized [com.lamphaus.core.model.DetailEnrichment] keyed by
+ * the canonical media key (SHR-ARC-13). Never synced to the cloud.
+ */
+@Entity(tableName = "detail_enrichment")
+data class DetailEnrichmentEntity(
+    @PrimaryKey val mediaKey: String,
+    val payloadJson: String,
+    val fetchedAtEpochMillis: Long,
+)

@@ -1,6 +1,7 @@
 package com.lamphaus.core.data.cloud
 
 import com.lamphaus.core.model.DeviceGrant
+import com.lamphaus.core.model.IntegrationStatus
 import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
@@ -44,6 +45,17 @@ class LocalPairingGateway : PairingGateway {
 }
 
 class CloudNotConfiguredException : IllegalStateException("Cloud services are not configured for this build.")
+
+class LocalIntegrationsGateway : IntegrationsGateway {
+    override suspend fun statuses(userId: String) =
+        Result.failure<List<IntegrationStatus>>(CloudNotConfiguredException())
+    override suspend fun saveCredential(userId: String, integration: String, credential: String) =
+        Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun setEnabledSources(userId: String, integration: String, sources: List<String>) =
+        Result.failure<Unit>(CloudNotConfiguredException())
+    override suspend fun removeCredential(userId: String, integration: String) =
+        Result.failure<Unit>(CloudNotConfiguredException())
+}
 
 class ArtworkKeysNotConfiguredException :
     IllegalStateException("Artwork keys are not configured.")

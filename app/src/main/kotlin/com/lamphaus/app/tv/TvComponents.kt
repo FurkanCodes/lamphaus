@@ -858,8 +858,24 @@ internal fun TvFocusableSurface(
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val reducedMotion = rememberReducedMotion()
+    val focusProgress by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(TvMotionTokens.focusDurationMillis),
+        label = "tv focusable surface",
+    )
     Box(
         modifier = modifier
+            .graphicsLayer {
+                val scale = 1f + ((TvMotionTokens.focusedArtworkScale - 1f) * focusProgress)
+                scaleX = scale
+                scaleY = scale
+                // TV-FOC-02: restrained 7dp/28% halo, driven by focusProgress.
+                shadowElevation = 7.dp.toPx() * focusProgress
+                shape = TvShapeTokens.button
+                ambientShadowColor = TvFocusTokens.halo
+                spotShadowColor = TvFocusTokens.halo
+            }
             .onFocusChanged { focused = it.isFocused }
             .background(
                 color = when {
@@ -870,8 +886,8 @@ internal fun TvFocusableSurface(
                 shape = TvShapeTokens.button,
             )
             .border(
-                width = if (focused) 1.dp else 0.dp,
-                color = if (focused) MaterialTheme.colorScheme.onBackground else Color.Transparent,
+                width = if (focused) TvFocusTokens.outlineWidth else 0.dp,
+                color = if (focused) TvFocusTokens.focusedCardOutline else Color.Transparent,
                 shape = TvShapeTokens.button,
             )
             .clip(TvShapeTokens.button)

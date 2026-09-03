@@ -35,9 +35,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 
@@ -47,6 +48,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +59,7 @@ import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Palette
@@ -133,8 +136,9 @@ import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.ArtworkEditorState
 import com.lamphaus.app.ui.AppUiState
-import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
+import com.lamphaus.app.ui.CatalogBrowseTarget
+import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CINEMETA_PROVIDER_ID
 import com.lamphaus.app.ui.ContentMenuAction
 import com.lamphaus.app.ui.ContentMenuOrigin
@@ -167,11 +171,13 @@ import com.lamphaus.core.model.ArtworkProviderResult
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.WatchProgress
+import com.lamphaus.core.model.DetailEnrichment
+import com.lamphaus.core.model.RatingSourceScore
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
-import com.lamphaus.core.model.WatchProgress
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collectLatest
@@ -716,13 +722,18 @@ private fun TvSignedIn(
         }
         TvDetailScreen(
             detail = state.selectedDetail,
+            enrichment = state.detailEnrichment,
+            enrichmentFailed = state.detailEnrichmentFailed,
             inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
             watchedEpisodeIds = watchedEpisodeIds,
             spoilerProtection = state.spoilerProtection,
             progress = state.progress,
             onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
+            onOpenMedia = openMedia,
+            onFocusedMedia = { lastFocusedMedia = it },
             onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
             onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
+            onRetryEnrichment = viewModel::retryDetailEnrichment,
         )
         return
     }
@@ -803,12 +814,17 @@ private fun TvSignedIn(
                     )
 
 
-                    TvDestination.DISCOVER -> TvMediaGrid(
-                        title = stringResource(R.string.discover),
-                        media = state.allMedia,
+                    TvDestination.DISCOVER -> TvDiscover(
+                        state = state,
+                        onPrepare = viewModel::prepareDiscover,
+                        onBrowseCatalog = viewModel::selectBrowseCatalog,
+                        onBrowseGenre = viewModel::selectBrowseGenre,
+                        onClearGenre = viewModel::clearBrowseGenre,
+                        onLoadMore = viewModel::loadMoreBrowse,
+                        onRetry = viewModel::retryBrowse,
                         onMedia = openMedia,
-                        initialFocusRequester = contentFocus.getValue(TvDestination.DISCOVER),
                         onFocused = { lastFocusedMedia = it },
+                        initialFocusRequester = contentFocus.getValue(TvDestination.DISCOVER),
                         restoreMediaKey = pendingMediaKey,
                         onFocusRestored = { pendingMediaKey = null },
                     )
@@ -1590,6 +1606,311 @@ private fun TvMediaGrid(
         }
     }
 }
+/**
+ * Discover (TV-NAV-01): addon-declared category overview in a four-column
+ * grid, then five-column poster results. Categories come from the selected
+ * addon catalog's declared genre options — never a hard-coded list.
+ */
+private val categoryGradientStarts = listOf(
+    Color(0xFF1E2023),
+    Color(0xFF232733),
+    Color(0xFF20272A),
+    Color(0xFF262331),
+    Color(0xFF1F262E),
+)
+private val categoryGradientEnds = listOf(
+    Color(0xFF354964),
+    Color(0xFF2F3B52),
+    Color(0xFF31424D),
+    Color(0xFF3A3450),
+    Color(0xFF2E3A4A),
+)
+
+/** Deterministic muted instrument-blue gradient per category id (SHR-PROD-03). */
+private fun categoryGradient(id: String): Brush {
+    val seed = id.fold(0) { acc, char -> acc * 31 + char.code }
+    val index = Math.floorMod(seed, categoryGradientStarts.size)
+    return Brush.linearGradient(listOf(categoryGradientStarts[index], categoryGradientEnds[index]))
+}
+
+@Composable
+private fun TvDiscover(
+    state: AppUiState,
+    onPrepare: () -> Unit,
+    onBrowseCatalog: (String) -> Unit,
+    onBrowseGenre: (String?) -> Unit,
+    onClearGenre: () -> Unit,
+    onLoadMore: () -> Unit,
+    onRetry: () -> Unit,
+    onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
+    initialFocusRequester: FocusRequester,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
+    LaunchedEffect(Unit) { onPrepare() }
+    val browse = state.browse
+    val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
+    val activeGenre = browse.selectedGenre
+    var showResults by rememberSaveable { mutableStateOf(false) }
+    // Back reverses the latest layer: results → overview → destination (TV-NAV-02).
+    BackHandler(enabled = showResults) {
+        showResults = false
+        if (activeGenre != null) onClearGenre()
+    }
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            text = stringResource(R.string.discover),
+            modifier = Modifier
+                .padding(
+                    start = TvLayoutTokens.screenHorizontalPadding,
+                    end = TvLayoutTokens.screenHorizontalPadding,
+                    bottom = 16.dp,
+                )
+                .semantics { heading() },
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        if (browse.targets.isEmpty()) {
+            Column(
+                modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TvEmptyMark()
+                Text(
+                    stringResource(R.string.install_first_addon),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            return@Column
+        }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(start = TvLayoutTokens.screenHorizontalPadding),
+        ) {
+            items(browse.targets, key = CatalogBrowseTarget::id) { target ->
+                TvFilterChip(
+                    label = target.catalog.name,
+                    selected = browse.selectedCatalogId == target.id,
+                    onClick = { onBrowseCatalog(target.id) },
+                )
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        if (showResults) {
+            TvCategoryResults(
+                genreLabel = activeGenre ?: stringResource(R.string.all_categories),
+                result = browse.result,
+                loading = browse.loading,
+                onMedia = onMedia,
+                onFocused = onFocused,
+                initialFocusRequester = initialFocusRequester,
+                restoreMediaKey = restoreMediaKey,
+                onFocusRestored = onFocusRestored,
+                onLoadMore = onLoadMore,
+                onRetry = onRetry,
+            )
+        } else {
+            val genres = selectedTarget?.genres.orEmpty()
+            if (genres.isEmpty()) {
+                Column(
+                    modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TvEmptyMark()
+                    Text(
+                        stringResource(R.string.nothing_here),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(
+                        start = TvLayoutTokens.screenHorizontalPadding,
+                        end = TvLayoutTokens.screenHorizontalPadding,
+                        bottom = TvLayoutTokens.bottomListPadding,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    item(key = "all") {
+                        TvCategoryTile(
+                            label = stringResource(R.string.all_categories),
+                            gradient = categoryGradient("all"),
+                            onClick = {
+                                onBrowseGenre(null)
+                                showResults = true
+                            },
+                            modifier = Modifier.focusRequester(initialFocusRequester),
+                        )
+                    }
+                    items(genres, key = { it }) { genre ->
+                        TvCategoryTile(
+                            label = genre,
+                            gradient = categoryGradient(genre),
+                            onClick = {
+                                onBrowseGenre(genre)
+                                showResults = true
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvCategoryTile(
+    label: String,
+    gradient: Brush,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TvFocusableSurface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(196f / 110f),
+        containerColor = Color.Transparent,
+        focusedContainerColor = Color.Transparent,
+    ) { _ ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(TvShapeTokens.card)
+                .background(gradient)
+                .padding(20.dp),
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Five-column poster grid; the header keeps a stable height while results refresh (TV-CNT-02). */
+@Composable
+private fun TvCategoryResults(
+    genreLabel: String,
+    result: CatalogSection?,
+    loading: Boolean,
+    onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
+    initialFocusRequester: FocusRequester,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+    onLoadMore: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            text = genreLabel,
+            modifier = Modifier
+                .padding(
+                    start = TvLayoutTokens.screenHorizontalPadding,
+                    end = TvLayoutTokens.screenHorizontalPadding,
+                    bottom = 16.dp,
+                )
+                .semantics { heading() },
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        when {
+            result?.errorMessage != null -> {
+                Text(
+                    text = result.errorMessage,
+                    modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TvAction(
+                    label = stringResource(R.string.retry),
+                    icon = Icons.Outlined.Refresh,
+                    onClick = onRetry,
+                )
+            }
+            result != null -> {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(5),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(
+                        start = TvLayoutTokens.screenHorizontalPadding,
+                        end = TvLayoutTokens.screenHorizontalPadding,
+                        bottom = TvLayoutTokens.bottomListPadding,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(40.dp),
+                ) {
+                    itemsIndexed(result.items, key = { _, item -> item.stableKey }) { index, item ->
+                        TvMediaCard(
+                            media = item,
+                            onClick = { onMedia(item) },
+                            onFocused = { onFocused(item) },
+                            showLabel = true,
+                            revealLabelOnFocus = true,
+                            showRating = true,
+                            modifier = (if (index == 0) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                                .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
+                        )
+                    }
+                    if (result.loadMoreError != null || result.hasMore) {
+                        item("catalog-action") {
+                            TvAction(
+                                label = stringResource(
+                                    if (result.loadMoreError != null) R.string.retry else R.string.load_more,
+                                ),
+                                icon = Icons.Outlined.Refresh,
+                                onClick = if (result.loadMoreError != null) onRetry else onLoadMore,
+                            )
+                        }
+                    }
+                }
+            }
+            loading -> TvCategoryResultsSkeleton(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+/** Preserves the final grid geometry while the first category page loads. */
+@Composable
+private fun TvCategoryResultsSkeleton(modifier: Modifier = Modifier) {
+    val pulse by rememberInfiniteTransition(label = "category results loading").animateFloat(
+        initialValue = 0.58f,
+        targetValue = 0.98f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "category results pulse",
+    )
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(5),
+        modifier = modifier,
+        contentPadding = PaddingValues(
+            start = TvLayoutTokens.screenHorizontalPadding,
+            end = TvLayoutTokens.screenHorizontalPadding,
+            bottom = TvLayoutTokens.bottomListPadding,
+        ),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(40.dp),
+    ) {
+        items(10, key = { "category-skeleton-$it" }) {
+            Box(
+                modifier = Modifier
+                    .size(width = TvLayoutTokens.posterWidth, height = TvLayoutTokens.posterHeight)
+                    .clip(TvShapeTokens.card)
+                    .background(Color.White.copy(alpha = 0.04f + 0.05f * pulse)),
+            )
+        }
+    }
+}
 
 @Composable
 private fun TvSearch(
@@ -2030,13 +2351,18 @@ private fun TvSourceMediaSummary(
 @Composable
 private fun TvDetailScreen(
     detail: MediaDetail?,
+    enrichment: DetailEnrichment?,
+    enrichmentFailed: Boolean,
     inLibrary: Boolean,
     watchedEpisodeIds: Set<String>,
     spoilerProtection: SpoilerProtectionSettings,
     progress: List<WatchProgress>,
     onPlay: (Episode?) -> Unit,
+    onOpenMedia: (MediaPreview) -> Unit,
+    onFocusedMedia: (MediaPreview) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
+    onRetryEnrichment: () -> Unit,
 ) {
     if (detail == null) return
     val artworkResolver = LocalArtworkResolver.current
@@ -2046,9 +2372,10 @@ private fun TvDetailScreen(
     val playFocus = remember(detail.preview.stableKey) { FocusRequester() }
     val libraryFocus = remember(detail.preview.stableKey) { FocusRequester() }
     var lastActionFocus by remember(detail.preview.stableKey) { mutableStateOf<FocusRequester?>(null) }
-    val reducedMotion = rememberReducedMotion()
+    var selectedRating by remember(detail.preview.stableKey) { mutableStateOf<RatingSourceScore?>(null) }
     val libraryPulse = remember(detail.preview.stableKey) { Animatable(1f) }
     var previousLibraryState by remember(detail.preview.stableKey) { mutableStateOf(inLibrary) }
+    val reducedMotion = rememberReducedMotion()
     LaunchedEffect(detail.preview.stableKey) { playFocus.requestFocus() }
     LaunchedEffect(inLibrary) {
         if (inLibrary && !previousLibraryState && !reducedMotion) {
@@ -2235,7 +2562,43 @@ private fun TvDetailScreen(
                     }
                 }
             }
+            if (enrichment?.cast.isNullOrEmpty() == false) {
+                item("cast") { TvPeopleRail(enrichment!!.cast) }
+            }
+            if (enrichment?.similar.isNullOrEmpty() == false) {
+                item("similar") {
+                    TvSimilarRail(
+                        similar = enrichment!!.similar,
+                        onOpenMedia = onOpenMedia,
+                        onFocused = onFocusedMedia,
+                    )
+                }
+            }
+            if (enrichment?.ratings.isNullOrEmpty() == false) {
+                item("ratings") {
+                    TvRatingsSection(
+                        ratings = enrichment!!.ratings,
+                        onSelect = { selectedRating = it },
+                    )
+                }
+            }
+            enrichment?.facts?.takeIf { facts ->
+                facts.status != null || facts.originalLanguage != null ||
+                    (facts.budgetUsd ?: 0) > 0 || (facts.revenueUsd ?: 0) > 0
+            }?.let { facts ->
+                item("facts") { TvFactsSection(facts) }
+            }
+            if (enrichmentFailed) {
+                item("enrichment-error") { TvInlineError(onRetry = onRetryEnrichment) }
+            }
         }
+    }
+    selectedRating?.let { rating ->
+        TvRatingDetailsDialog(
+            rating = rating,
+            fetchedAtEpochMillis = enrichment?.fetchedAtEpochMillis ?: 0L,
+            onDismiss = { selectedRating = null },
+        )
     }
 }
 @Composable
@@ -2729,6 +3092,7 @@ private enum class TvSettingsSection(
 ) {
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     SOURCES(R.string.addons, Icons.Outlined.Add),
+    INTEGRATIONS(R.string.integrations, Icons.Outlined.Extension),
     APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
     SPOILERS(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ARTWORK(R.string.artwork, Icons.Outlined.Palette),
@@ -2781,6 +3145,7 @@ private fun TvSettings(
             when (section) {
                 TvSettingsSection.PROFILES -> TvProfilesSettings(state, viewModel)
                 TvSettingsSection.SOURCES -> TvSourcesSettings(state, viewModel)
+                TvSettingsSection.INTEGRATIONS -> TvIntegrationsSettings(state, viewModel)
                 TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
                 TvSettingsSection.SPOILERS -> TvSpoilerSettings(state, viewModel)
                 TvSettingsSection.ARTWORK -> TvArtworkSettings(state, viewModel)
@@ -2942,6 +3307,151 @@ private fun TvSpoilerSettings(state: AppUiState, viewModel: AppViewModel) {
         }
     }
 }
+/** Aggregated rating sources offered by the MDBList integration (spec: recommended set). */
+private val ratingSourceOptions = listOf(
+    R.string.source_imdb,
+    R.string.source_tmdb,
+    R.string.source_trakt,
+    R.string.source_rt_critics,
+    R.string.source_rt_audience,
+    R.string.source_metacritic,
+    R.string.source_letterboxd,
+)
+private val ratingSourceIds = listOf("imdb", "tmdb", "trakt", "tomatoes", "popcorn", "metacritic", "letterboxd")
+
+@Composable
+private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
+    var apiKey by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(Unit) { viewModel.refreshIntegrations() }
+    val mdblist = state.integrations.firstOrNull { it.integration == "mdblist" }
+    val connected = mdblist?.connected == true
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
+    ) {
+        item {
+            Text(stringResource(R.string.integrations), style = MaterialTheme.typography.headlineSmall)
+        }
+        item {
+            Text(
+                stringResource(R.string.integrations_description),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        if (state.account !is AccountState.SignedIn) {
+            item {
+                Text(
+                    stringResource(R.string.integrations_sign_in_required),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            return@LazyColumn
+        }
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TvSurfaceTokens.elevated, TvShapeTokens.card)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("MDBList", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = when {
+                        state.integrationsLoading -> stringResource(R.string.integration_status_checking)
+                        mdblist == null -> stringResource(R.string.integration_not_connected)
+                        mdblist.valid == false -> stringResource(R.string.integration_key_rejected)
+                        connected -> stringResource(R.string.integration_connected)
+                        else -> stringResource(R.string.integration_not_connected)
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TvEditableTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = stringResource(R.string.integration_api_key),
+                    placeholder = stringResource(R.string.integration_api_key_placeholder),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    onImeAction = {
+                        viewModel.saveIntegrationCredential("mdblist", apiKey)
+                        apiKey = ""
+                    },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvAction(
+                        label = stringResource(
+                            if (connected) R.string.integration_replace_key else R.string.integration_connect,
+                        ),
+                        icon = Icons.Outlined.Check,
+                        enabled = apiKey.isNotBlank(),
+                        onClick = {
+                            viewModel.saveIntegrationCredential("mdblist", apiKey)
+                            apiKey = ""
+                        },
+                    )
+                    if (connected) {
+                        TvAction(
+                            label = stringResource(R.string.integration_remove),
+                            icon = Icons.Outlined.Delete,
+                            onClick = { viewModel.removeIntegration("mdblist") },
+                        )
+                    }
+                }
+                if (connected) {
+                    Text(
+                        stringResource(R.string.integration_rating_sources),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    // Only the sources the server actually returns stay enabled-checkable;
+                    // unknown ids are ignored server-side when filtering ratings.
+                    ratingSourceOptions.forEachIndexed { index, labelRes ->
+                        val sourceId = ratingSourceIds[index]
+                        val enabled = mdblist.enabledSources.contains(sourceId)
+                        TvSettingsToggleRow(
+                            title = stringResource(labelRes),
+                            description = stringResource(R.string.integration_source_toggle_description),
+                            checked = enabled,
+                            onCheckedChange = { checked ->
+                                val next = if (checked) {
+                                    (mdblist.enabledSources + sourceId).distinct()
+                                } else {
+                                    mdblist.enabledSources - sourceId
+                                }
+                                viewModel.setIntegrationSources("mdblist", next)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        if (state.integrationsFailed) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.integrations_load_failed),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TvAction(
+                        label = stringResource(R.string.retry),
+                        icon = Icons.Outlined.Refresh,
+                        onClick = { viewModel.refreshIntegrations() },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
     var artworkKeys by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }

@@ -10,8 +10,9 @@ import androidx.room.RoomDatabase
         LibraryEntity::class,
         WatchProgressEntity::class,
         CloudSyncKeyEntity::class,
+        DetailEnrichmentEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class LamphausDatabase : RoomDatabase() {
@@ -51,5 +52,32 @@ abstract class LamphausDatabase : RoomDatabase() {
                 )
             }
         }
+
+        /** v5: detail_enrichment caches provider-neutral detail enrichment locally. */
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS detail_enrichment (
+                        mediaKey TEXT NOT NULL PRIMARY KEY,
+                        payloadJson TEXT NOT NULL,
+                        fetchedAtEpochMillis INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        /**
+         * Complete non-destructive migration graph for production database builders and tests.
+         * Keeping the registry beside the migrations prevents a schema version bump from being
+         * implemented but omitted at the application wiring boundary.
+         */
+        val ALL_MIGRATIONS = arrayOf(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+        )
     }
 }
