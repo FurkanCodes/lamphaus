@@ -89,6 +89,8 @@ class PlayerActivity : ComponentActivity() {
     private val sidecarLoader = com.lamphaus.core.player.SidecarSubtitleLoader()
     private var subtitleCues: List<com.lamphaus.core.model.SubtitleCue> = emptyList()
     private var uiPlayer: Player? = null
+    private val subtitleStyleState = mutableStateOf(com.lamphaus.core.model.SubtitleStyle())
+    private val streamInfoState = mutableStateOf<String?>(null)
     private var displayTickJob: Job? = null
     private var audioRouteFingerprint: String? = null
 
@@ -123,7 +125,20 @@ class PlayerActivity : ComponentActivity() {
             displayModeController = PlaybackDisplayModeController(
                 activity = this@PlayerActivity,
                 configProvider = { Media3EngineFactory.deviceConfig },
+                onModeDecision = { decision ->
+                    streamInfoState.value = buildString {
+                        append(decision.appliedMode?.let { "${it.width}x${it.height} @ ${it.refreshRateHz} Hz" } ?: "current display mode")
+                        if (decision.reason.isNotEmpty()) append(" \u00b7 ").append(decision.reason)
+                    }
+                },
             )
+        }
+        lifecycleScope.launch {
+            val signedIn = container.accountGateway.state.value as? AccountState.SignedIn
+            val profileId = signedIn?.userId
+                ?: container.preferences.settings.first().activeProfileId
+                ?: return@launch
+            subtitleStyleState.value = container.playbackPreferencesRepository.profilePreferences(profileId).subtitleStyle
         }
         registerAudioRouteListener()
         connect(playback)
@@ -153,6 +168,13 @@ class PlayerActivity : ComponentActivity() {
                     onDismissNextEpisodeMessage = { nextEpisodeMessageState.value = null },
                     onDismissNextEpisodeCard = ::dismissNextEpisodeCard,
                     onPlayerViewLayout = ::updatePipSourceRect,
+                    subtitleStyle = subtitleStyleState.value,
+                    streamInfo = streamInfoState.value,
+                    onSubtitleDelay = ::applySubtitleDelay,
+                    onAudioDelay = ::updateAudioRouteDelay,
+                    onSubtitleStyle = ::applySubtitleStyle,
+                    onLoadSidecarCues = ::loadSidecarCues,
+                    onApplySyncByLine = ::applySyncByLine,
                 )
             }
         }
@@ -546,6 +568,38 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Persists the subtitle style to the profile and re-applies it live: the
+     * PlayerView via recomposition, the MPV engine via a session command.
+     */
+    private fun applySubtitleStyle(style: com.lamphaus.core.model.SubtitleStyle) {
+        subtitleStyleState.value = style
+        controller?.sendCustomCommand(
+            androidx.media3.session.SessionCommand(
+                ACTION_APPLY_SUBTITLE_STYLE,
+                android.os.Bundle().apply {
+                    putString(
+                        EXTRA_STYLE_JSON,
+                        Json { ignoreUnknownKeys = true }.encodeToString(
+                            com.lamphaus.core.model.SubtitleStyle.serializer(),
+                            style,
+                        ),
+                    )
+                },
+            ),
+            android.os.Bundle.EMPTY,
+        )
+        container.applicationScope.launch {
+            val userId = (container.accountGateway.state.value as? AccountState.SignedIn)?.userId
+                ?: container.preferences.settings.first().activeProfileId ?: return@launch
+            val current = container.playbackPreferencesRepository.profilePreferences(userId)
+            container.playbackPreferencesRepository.saveProfilePreferences(
+                userId,
+                current.copy(subtitleStyle = style, updatedAtEpochMillis = System.currentTimeMillis()),
+            )
+        }
+    }
+
     /** Applies and remembers the delay for the current route (audio panel entry point). */
     fun updateAudioRouteDelay(millis: Long) {
         Media3EngineFactory.audioDelayProcessor.delayMillis = millis
@@ -637,6 +691,8 @@ class PlayerActivity : ComponentActivity() {
         private const val DISPLAY_TICK_INTERVAL_MILLIS = 500L
         private const val ACTION_SET_SUBTITLE_DELAY = "lamphaus.playback.SET_SUBTITLE_DELAY"
         private const val EXTRA_DELAY_MILLIS = "delay_millis"
+        private const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"
+        private const val EXTRA_STYLE_JSON = "style_json"
         private val JSON = Json { ignoreUnknownKeys = true }
 
         fun intent(context: Context, request: PlaybackRequest): Intent =
