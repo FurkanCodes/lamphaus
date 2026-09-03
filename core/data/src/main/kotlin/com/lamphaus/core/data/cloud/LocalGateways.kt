@@ -57,6 +57,10 @@ class LocalIntegrationsGateway : IntegrationsGateway {
         Result.failure<Unit>(CloudNotConfiguredException())
 }
 
+/** The server validated the artwork credential before storing it and rejected it. */
+class ArtworkKeyInvalidException :
+    IllegalStateException("The artwork credential was rejected by the provider.")
+
 class ArtworkKeysNotConfiguredException :
     IllegalStateException("Artwork keys are not configured.")
 

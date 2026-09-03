@@ -48,6 +48,7 @@ async function catalogProvider(provider: string): Promise<boolean> {
     (row as Record<string, unknown>).id === provider && (row as Record<string, unknown>).enabled === true;
 }
 
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -66,6 +67,18 @@ Deno.serve(async (req) => {
   if (!supported) return json({ error: "unsupported_provider" }, 400);
   const apiKey = typeof body.api_key === "string" ? body.api_key.trim() : "";
   if (!apiKey || apiKey.length > 512) return json({ error: "invalid_api_key" }, 400);
+  if (provider === "tmdb") {
+    // Storage-gate for the TMDB credential: an invalid key must never land in
+    // provider_configs, or artwork and detail enrichment silently degrade to
+    // empty responses for the whole TTL. Mirrors the MDBList save contract —
+    // validation runs before storage and answers 400 invalid_credential.
+    // The key is never logged and never echoed back (SHR-PROD-06).
+    const probe = await fetch(
+      `https://api.themoviedb.org/3/configuration?api_key=${encodeURIComponent(apiKey)}`,
+      { headers: { accept: "application/json" } },
+    ).catch(() => null);
+    if (probe === null || !probe.ok) return json({ error: "invalid_credential" }, 400);
+  }
 
   let encryptedConfig: string;
   try {

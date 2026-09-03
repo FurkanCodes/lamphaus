@@ -243,11 +243,24 @@ class SupabaseCloudSyncGateway(
         apiKey: String,
     ): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
-            supabase.functions.buildEdgeFunction(FUNCTION_SAVE_ARTWORK_CONFIG)
+            val response = supabase.functions.buildEdgeFunction(FUNCTION_SAVE_ARTWORK_CONFIG)
                 .invoke(json.encodeToString(ArtworkKeyUpsert(provider = provider.value, apiKey = apiKey))) {
                     contentType(ContentType.Application.Json)
                 }
-                .bodyOrThrow()
+            if (!response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                val code = extractFunctionErrorCode(json, body)
+                // The function validates TMDB credentials before storage.
+                if (response.status.value == 400 && code == CODE_INVALID_CREDENTIAL) {
+                    throw ArtworkKeyInvalidException()
+                }
+                throw SupabaseFunctionException(
+                    statusCode = response.status.value,
+                    responseCode = code,
+                    message = "save artwork key returned ${response.status.value}: " +
+                        CloudLog.clamp(CloudLog.sanitize(body)),
+                )
+            }
             Unit
         }
     }
@@ -543,6 +556,7 @@ private const val KEY_MANIFEST_URL = "manifest_url"
 /** Reserved provider_configs rows holding encrypted artwork BYOK keys. */
 private const val ARTWORK_PROVIDER_PREFIX = "artwork."
 private const val ARTWORK_KEYS_NOT_CONFIGURED = "artwork_key_not_configured"
+private const val CODE_INVALID_CREDENTIAL = "invalid_credential"
 
 @Serializable
 internal data class ArtworkContractRequest(
