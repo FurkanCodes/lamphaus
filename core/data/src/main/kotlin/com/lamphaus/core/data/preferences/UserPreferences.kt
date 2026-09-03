@@ -10,6 +10,14 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.NextEpisodePolicy
 import com.lamphaus.core.model.NextEpisodeThresholdMode
+import com.lamphaus.core.model.AudioOutputMode
+import com.lamphaus.core.model.DecoderPriority
+import com.lamphaus.core.model.DevicePlaybackConfig
+import com.lamphaus.core.model.DolbyVisionHandling
+import com.lamphaus.core.model.DownmixMode
+import com.lamphaus.core.model.FrameRateMatching
+import com.lamphaus.core.model.PlaybackEngineKind
+import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +38,8 @@ data class UserSettings(
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playback: PlaybackSettings = PlaybackSettings(),
+    /** Device-local player V2 knobs (engine, HDR, frame-rate, audio policy). */
+    val devicePlayback: DevicePlaybackConfig = DevicePlaybackConfig(),
     val updatedAtEpochMillis: Long = 0,
 )
 
@@ -74,6 +84,15 @@ class UserPreferences(private val context: Context) {
                 thresholdMode = values[PLAYBACK_NEXT_EPISODE_MODE],
                 thresholdPercent = values[PLAYBACK_NEXT_EPISODE_PERCENT],
                 thresholdMinutes = values[PLAYBACK_NEXT_EPISODE_MINUTES],
+            ),
+            devicePlayback = devicePlaybackConfigFromKeys(
+                engine = values[PLAYBACK_ENGINE],
+                dolbyVision = values[PLAYBACK_DOLBY_VISION],
+                frameRateMatching = values[PLAYBACK_FRAME_RATE_MATCHING],
+                resolutionMatching = values[PLAYBACK_RESOLUTION_MATCHING],
+                audioOutputMode = values[PLAYBACK_AUDIO_OUTPUT],
+                decoderPriority = values[PLAYBACK_DECODER_PRIORITY],
+                downmixMode = values[PLAYBACK_DOWNMIX],
             ),
             updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
@@ -153,6 +172,19 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /** Player V2 device-local knobs: engine, HDR/DV, frame-rate, audio policy. */
+    suspend fun setDevicePlayback(config: DevicePlaybackConfig) {
+        context.dataStore.edit {
+            it[PLAYBACK_ENGINE] = config.engineKind.name
+            it[PLAYBACK_DOLBY_VISION] = config.dolbyVisionHandling.name
+            it[PLAYBACK_FRAME_RATE_MATCHING] = config.frameRateMatching.name
+            it[PLAYBACK_RESOLUTION_MATCHING] = config.resolutionMatching.name
+            it[PLAYBACK_AUDIO_OUTPUT] = config.audioOutputMode.name
+            it[PLAYBACK_DECODER_PRIORITY] = config.decoderPriority.name
+            it[PLAYBACK_DOWNMIX] = config.downmixMode.name
+        }
+    }
+
     /**
      * Adopts an inbound cloud row that won last-writer-wins locally. The row's
      * timestamp becomes the local one so older echoes keep losing.
@@ -208,6 +240,13 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_NEXT_EPISODE_MODE = stringPreferencesKey("playback_next_episode_mode")
         val PLAYBACK_NEXT_EPISODE_PERCENT = floatPreferencesKey("playback_next_episode_percent")
         val PLAYBACK_NEXT_EPISODE_MINUTES = floatPreferencesKey("playback_next_episode_minutes")
+        val PLAYBACK_ENGINE = stringPreferencesKey("playback_engine")
+        val PLAYBACK_DOLBY_VISION = stringPreferencesKey("playback_dolby_vision")
+        val PLAYBACK_FRAME_RATE_MATCHING = stringPreferencesKey("playback_frame_rate_matching")
+        val PLAYBACK_RESOLUTION_MATCHING = stringPreferencesKey("playback_resolution_matching")
+        val PLAYBACK_AUDIO_OUTPUT = stringPreferencesKey("playback_audio_output")
+        val PLAYBACK_DECODER_PRIORITY = stringPreferencesKey("playback_decoder_priority")
+        val PLAYBACK_DOWNMIX = stringPreferencesKey("playback_downmix")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }
@@ -236,3 +275,32 @@ internal fun playbackSettingsFromKeys(
     nextEpisodeThresholdMinutesBeforeEnd =
         NextEpisodePolicy.clampedMinutesBeforeEnd(thresholdMinutes ?: 2f),
 )
+
+/**
+ * Maps raw DataStore values into [DevicePlaybackConfig]. Missing keys (older
+ * payloads) fall back to the shipped defaults, and unknown names (payloads
+ * written by newer builds) fall back too instead of crashing the read.
+ */
+private inline fun <reified T : Enum<T>> parseEnum(raw: String?, fallback: T): T =
+    raw?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: fallback
+
+internal fun devicePlaybackConfigFromKeys(
+    engine: String?,
+    dolbyVision: String?,
+    frameRateMatching: String?,
+    resolutionMatching: String?,
+    audioOutputMode: String?,
+    decoderPriority: String?,
+    downmixMode: String?,
+): DevicePlaybackConfig {
+
+    return DevicePlaybackConfig(
+        engineKind = parseEnum(engine, PlaybackEngineKind.AUTO),
+        dolbyVisionHandling = parseEnum(dolbyVision, DolbyVisionHandling.AUTO),
+        frameRateMatching = parseEnum(frameRateMatching, FrameRateMatching.SEAMLESS_ONLY),
+        resolutionMatching = parseEnum(resolutionMatching, ResolutionMatching.OFF),
+        audioOutputMode = parseEnum(audioOutputMode, AudioOutputMode.AUTO),
+        decoderPriority = parseEnum(decoderPriority, DecoderPriority.AUTO),
+        downmixMode = parseEnum(downmixMode, DownmixMode.AUTO),
+    )
+}

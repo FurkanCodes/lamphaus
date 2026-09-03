@@ -9,7 +9,7 @@ import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface LamphausDao : DetailEnrichmentDao {
+interface LamphausDao : DetailEnrichmentDao, PlaybackPrefsDao {
     @Query("SELECT * FROM profiles ORDER BY kind, name")
     fun observeProfiles(): Flow<List<ProfileEntity>>
 

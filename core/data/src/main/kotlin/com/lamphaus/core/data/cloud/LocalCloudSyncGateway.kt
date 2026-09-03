@@ -6,6 +6,8 @@ import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.LibraryEntry
+import com.lamphaus.core.model.MediaPlaybackSelection
+import com.lamphaus.core.model.ProfilePlaybackPreferences
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.Profile
@@ -46,4 +48,18 @@ class LocalCloudSyncGateway : CloudSyncGateway {
         releaseYear: Int?,
         mediaType: MediaType,
     ) = Result.failure<ArtworkCandidates>(CloudNotConfiguredException())
+    override suspend fun saveProfilePlaybackPrefs(userId: String, profileId: String, prefs: ProfilePlaybackPreferences) =
+        Result.success(Unit)
+    override suspend fun profilePlaybackPrefs(userId: String, profileId: String) =
+        Result.success<ProfilePlaybackPreferences?>(null)
+    override suspend fun saveMediaPlaybackSelection(
+        userId: String,
+        profileId: String,
+        mediaKey: String,
+        selection: MediaPlaybackSelection,
+    ) = Result.success(Unit)
+    override suspend fun deleteMediaPlaybackSelection(userId: String, profileId: String, mediaKey: String) =
+        Result.success(Unit)
+    override suspend fun mediaPlaybackSelections(userId: String, profileId: String) =
+        Result.success(emptyMap<String, MediaPlaybackSelection>())
 }

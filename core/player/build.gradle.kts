@@ -30,6 +30,7 @@ kotlin {
 
 dependencies {
     api(project(":core:model"))
+    testImplementation(libs.junit)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.hls)

@@ -10,6 +10,8 @@ import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderResult
 import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.LibraryEntry
+import com.lamphaus.core.model.MediaPlaybackSelection
+import com.lamphaus.core.model.ProfilePlaybackPreferences
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.Profile
@@ -157,6 +159,69 @@ class SupabaseCloudSyncGateway(
                 .upsert(listOf(UserSettingsRow.of(userId, settings, json))) { onConflict = "user_id" }
         }
     }
+
+    // ── Player V2 playback preferences (plan §5) ─────────────────────────
+    override suspend fun saveProfilePlaybackPrefs(
+        userId: String,
+        profileId: String,
+        prefs: ProfilePlaybackPreferences,
+    ): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.from(TABLE_PROFILE_PLAYBACK_PREFS)
+                .upsert(listOf(PlaybackPrefsRow.of(profileId, userId, prefs, json))) {
+                    onConflict = "profile_id"
+                }
+        }
+    }
+
+    override suspend fun profilePlaybackPrefs(userId: String, profileId: String): Result<ProfilePlaybackPreferences?> =
+        runCatching {
+            sessionRecovery.withAuthRetry {
+                supabase.from(TABLE_PROFILE_PLAYBACK_PREFS)
+                    .select()
+                    .decodeList<PlaybackPrefsRow>()
+                    .firstOrNull { it.profileId == profileId }
+                    ?.toModel(json)
+            }
+        }
+
+    override suspend fun saveMediaPlaybackSelection(
+        userId: String,
+        profileId: String,
+        mediaKey: String,
+        selection: MediaPlaybackSelection,
+    ): Result<Unit> = runCatching {
+        sessionRecovery.withAuthRetry {
+            supabase.from(TABLE_MEDIA_PLAYBACK_PREFS)
+                .upsert(listOf(MediaPlaybackPrefsRow.of(profileId, userId, mediaKey, selection, json))) {
+                    onConflict = "profile_id,media_key"
+                }
+        }
+    }
+
+    override suspend fun deleteMediaPlaybackSelection(userId: String, profileId: String, mediaKey: String): Result<Unit> =
+        runCatching {
+            sessionRecovery.withAuthRetry {
+                supabase.from(TABLE_MEDIA_PLAYBACK_PREFS)
+                    .delete {
+                        filter {
+                            eq("profile_id", profileId)
+                            eq("media_key", mediaKey)
+                        }
+                    }
+            }
+        }
+
+    override suspend fun mediaPlaybackSelections(userId: String, profileId: String): Result<Map<String, MediaPlaybackSelection>> =
+        runCatching {
+            sessionRecovery.withAuthRetry {
+                supabase.from(TABLE_MEDIA_PLAYBACK_PREFS)
+                    .select()
+                    .decodeList<MediaPlaybackPrefsRow>()
+                    .filter { it.profileId == profileId }
+                    .associate { it.mediaKey to it.toModel(json) }
+            }
+        }
 
 
     // ── Provider configs travel through Edge Functions (plan D4/F5): the
@@ -465,12 +530,63 @@ class SupabaseCloudSyncGateway(
         }
     }
 
+    private data class PlaybackPrefsRow(
+        @SerialName("profile_id") val profileId: String,
+        @SerialName("user_id") val userId: String,
+        @SerialName("payload") val payload: JsonElement,
+        @SerialName("updated_at_epoch_millis") val updatedAtEpochMillis: Long,
+    ) {
+        fun toModel(json: Json) =
+            json.decodeFromJsonElement<ProfilePlaybackPreferences>(payload)
+                .copy(updatedAtEpochMillis = updatedAtEpochMillis)
+
+        companion object {
+            fun of(profileId: String, userId: String, prefs: ProfilePlaybackPreferences, json: Json) =
+                PlaybackPrefsRow(
+                    profileId = profileId,
+                    userId = userId,
+                    payload = json.encodeToJsonElement(prefs.copy(updatedAtEpochMillis = 0)),
+                    updatedAtEpochMillis = prefs.updatedAtEpochMillis,
+                )
+        }
+    }
+
+    private data class MediaPlaybackPrefsRow(
+        @SerialName("profile_id") val profileId: String,
+        @SerialName("user_id") val userId: String,
+        @SerialName("media_key") val mediaKey: String,
+        @SerialName("payload") val payload: JsonElement,
+        @SerialName("updated_at_epoch_millis") val updatedAtEpochMillis: Long,
+    ) {
+        fun toModel(json: Json) =
+            json.decodeFromJsonElement<MediaPlaybackSelection>(payload)
+                .copy(updatedAtEpochMillis = updatedAtEpochMillis)
+
+        companion object {
+            fun of(
+                profileId: String,
+                userId: String,
+                mediaKey: String,
+                selection: MediaPlaybackSelection,
+                json: Json,
+            ) = MediaPlaybackPrefsRow(
+                profileId = profileId,
+                userId = userId,
+                mediaKey = mediaKey,
+                payload = json.encodeToJsonElement(selection.copy(updatedAtEpochMillis = 0)),
+                updatedAtEpochMillis = selection.updatedAtEpochMillis,
+            )
+        }
+    }
+
     companion object {
         private const val TAG = "SupabaseSync"
         private const val TABLE_PROFILES = "profiles"
         private const val TABLE_LIBRARY = "library_entries"
         private const val TABLE_PROGRESS = "watch_progress"
         private const val TABLE_USER_SETTINGS = "user_settings"
+        private const val TABLE_PROFILE_PLAYBACK_PREFS = "profile_playback_preferences"
+        private const val TABLE_MEDIA_PLAYBACK_PREFS = "media_playback_preferences"
         private const val TABLE_ARTWORK_OVERRIDES = "media_artwork_overrides"
         private const val FUNCTION_SAVE_PROVIDER_CONFIG = "save-provider-config"
         private const val FUNCTION_DELETE_PROVIDER_CONFIG = "delete-provider-config"

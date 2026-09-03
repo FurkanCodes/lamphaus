@@ -2,6 +2,8 @@ package com.lamphaus.core.data.cloud
 
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.model.ArtworkCandidates
+import com.lamphaus.core.model.MediaPlaybackSelection
+import com.lamphaus.core.model.ProfilePlaybackPreferences
 import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderStatus
@@ -49,4 +51,28 @@ interface CloudSyncGateway {
         releaseYear: Int?,
         mediaType: com.lamphaus.core.model.MediaType,
     ): Result<ArtworkCandidates>
+
+    // ── Player V2 playback preferences (plan §5) ─────────────────────────
+    // Profile defaults and semantic per-title choices sync; exact track ids,
+    // URLs, timings, engine/frame-rate/resolution overrides stay device-local
+    // and never reach this interface (SHR-PROD-06).
+
+    suspend fun saveProfilePlaybackPrefs(
+        userId: String,
+        profileId: String,
+        prefs: ProfilePlaybackPreferences,
+    ): Result<Unit>
+
+    suspend fun profilePlaybackPrefs(userId: String, profileId: String): Result<ProfilePlaybackPreferences?>
+
+    suspend fun saveMediaPlaybackSelection(
+        userId: String,
+        profileId: String,
+        mediaKey: String,
+        selection: MediaPlaybackSelection,
+    ): Result<Unit>
+
+    suspend fun deleteMediaPlaybackSelection(userId: String, profileId: String, mediaKey: String): Result<Unit>
+
+    suspend fun mediaPlaybackSelections(userId: String, profileId: String): Result<Map<String, MediaPlaybackSelection>>
 }

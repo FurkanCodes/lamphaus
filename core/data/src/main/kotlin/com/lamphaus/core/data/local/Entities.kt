@@ -88,3 +88,59 @@ data class DetailEnrichmentEntity(
     val payloadJson: String,
     val fetchedAtEpochMillis: Long,
 )
+
+/**
+ * Profile-owned playback defaults (languages, subtitle mode/style, original
+ * colors), stored as the serialized [com.lamphaus.core.model.ProfilePlaybackPreferences]
+ * payload so the shape evolves without migrations. Mirrored to the cloud
+ * `profile_playback_preferences` row for the signed-in profile.
+ */
+@Entity(tableName = "profile_playback_prefs")
+data class ProfilePlaybackPrefsEntity(
+    @PrimaryKey val profileId: String,
+    val payloadJson: String,
+    val updatedAtEpochMillis: Long,
+)
+
+/**
+ * Semantic per-title choice ("this series plays with Japanese audio and
+ * English subtitles") synced per profile; never carries exact track ids.
+ */
+@Entity(
+    tableName = "media_playback_selections",
+    primaryKeys = ["profileId", "mediaKey"],
+    indices = [Index(value = ["profileId", "updatedAtEpochMillis"])],
+)
+data class MediaPlaybackSelectionEntity(
+    val profileId: String,
+    val mediaKey: String,
+    val payloadJson: String,
+    val updatedAtEpochMillis: Long,
+)
+
+/**
+ * Exact track selection and timing remembered for one source fingerprint.
+ * Provider-shaped and device-local: never synced (plan §5, SHR-PROD-06).
+ */
+@Entity(
+    tableName = "source_playback_selections",
+    primaryKeys = ["profileId", "mediaKey", "sourceFingerprint"],
+)
+data class SourcePlaybackSelectionEntity(
+    val profileId: String,
+    val mediaKey: String,
+    val sourceFingerprint: String,
+    val audioTrackId: String?,
+    val subtitleTrackId: String?,
+    val subtitleDelayMillis: Long,
+    val audioDelayMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
+/** Per-output-route audio timing, remembered locally (plan §2). */
+@Entity(tableName = "audio_route_settings")
+data class AudioRouteSettingsEntity(
+    @PrimaryKey val routeFingerprint: String,
+    val audioDelayMillis: Long,
+    val updatedAtEpochMillis: Long,
+)

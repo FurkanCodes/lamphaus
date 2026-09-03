@@ -32,6 +32,9 @@ import com.lamphaus.core.data.playback.IntroDbSkipRepository
 import com.lamphaus.core.data.repository.LibraryRepository
 import com.lamphaus.core.data.repository.RoomLibraryRepository
 import com.lamphaus.core.data.repository.DefaultDetailEnrichmentRepository
+import com.lamphaus.core.data.repository.DefaultPlaybackPreferencesRepository
+import com.lamphaus.core.data.repository.PlaybackPreferencesRepository
+import com.lamphaus.core.player.Media3EngineFactory
 import com.lamphaus.core.data.repository.DetailEnrichmentRepository
 import com.lamphaus.core.data.security.AndroidKeystoreStringCipher
 import com.lamphaus.core.provider.HttpProviderClient
@@ -42,6 +45,8 @@ import com.lamphaus.core.provider.ProviderUrlPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 class AppContainer(context: Context) {
@@ -82,6 +87,15 @@ class AppContainer(context: Context) {
      * singleton persistence scope).
      */
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Publishes device-local player knobs to the playback service (plan §1). */
+    init {
+        applicationScope.launch {
+            preferences.settings.map { it.devicePlayback }.collect { config ->
+                Media3EngineFactory.deviceConfig = config
+            }
+        }
+    }
 
     val libraryRepository: LibraryRepository = RoomLibraryRepository(
         database.dao(),
@@ -155,6 +169,8 @@ class AppContainer(context: Context) {
             json = enrichmentJson,
         )
     }
+    val playbackPreferencesRepository: PlaybackPreferencesRepository =
+        DefaultPlaybackPreferencesRepository(database.dao())
     val integrationsGateway: IntegrationsGateway = if (supabase != null) {
         SupabaseIntegrationsGateway(supabase, checkNotNull(sessionRecovery))
     } else {
