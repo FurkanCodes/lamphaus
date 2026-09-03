@@ -136,8 +136,13 @@ async function tmdbJson<T>(
   }
 }
 
-function isTmdbType(type: string): type is "movie" | "tv" {
-  return type === "movie" || type === "tv";
+function isWireType(type: string): type is "movie" | "series" {
+  return type === "movie" || type === "series";
+}
+
+/** TMDB spells series "tv"; the client contract spells it "series". */
+function toTmdbType(type: "movie" | "series"): "movie" | "tv" {
+  return type === "series" ? "tv" : "movie";
 }
 
 type IdResolution = { tmdbId: number | null; transient: boolean };
@@ -235,8 +240,11 @@ function factsFrom(details: TmdbSummary): Record<string, unknown> {
 async function similarFrom(
   apiKey: string,
   details: TmdbSummary,
-  type: "movie" | "tv",
+  tmdbType: "movie" | "tv",
 ): Promise<Array<Record<string, unknown>>> {
+  // Similar previews travel to the client as MediaPreview, whose MediaType
+  // contract spells series "series" — never TMDB's "tv".
+  const wire = tmdbType === "tv" ? "series" : "movie";
   const candidates = (details.recommendations?.results ?? [])
     .filter((entry) => typeof entry.id === "number")
     .slice(0, SIMILAR_LIMIT);
@@ -244,7 +252,7 @@ async function similarFrom(
   const resolved = await Promise.all(
     candidates.map(async (entry): Promise<Record<string, unknown> | null> => {
       // Recommendations omit IMDb ids; resolve each through its details payload.
-      const detailed = await tmdbJson<TmdbSummary>(apiKey, `/${type}/${entry.id}`);
+      const detailed = await tmdbJson<TmdbSummary>(apiKey, `/${tmdbType}/${entry.id}`);
       if (!detailed.ok) return null;
       const summary = detailed.value;
       if (typeof summary.imdb_id !== "string" || !summary.imdb_id.startsWith("tt")) return null;
@@ -253,8 +261,8 @@ async function similarFrom(
       const year = Number.parseInt((summary.release_date ?? summary.first_air_date ?? "").slice(0, 4), 10);
       return {
         id: summary.imdb_id,
-        type,
-        rawType: type,
+        type: wire,
+        rawType: wire,
         name,
         posterUrl: profileUrl(summary.poster_path, "w342"),
         backgroundUrl: profileUrl(summary.backdrop_path, "w780"),
@@ -409,11 +417,12 @@ Deno.serve(async (req) => {
   const mediaKey = typeof body.mediaKey === "string" ? body.mediaKey : "";
   const type = typeof body.type === "string" ? body.type : "";
   const id = typeof body.id === "string" ? body.id : "";
-  if (mediaKey.length === 0 || !isTmdbType(type) || id.length === 0) {
+  if (mediaKey.length === 0 || !isWireType(type) || id.length === 0) {
     return json({ error: "invalid_request" }, 400);
   }
   const name = typeof body.name === "string" ? body.name : "";
   const releaseYear = typeof body.releaseYear === "number" ? Math.trunc(body.releaseYear) : null;
+  const tmdbType = toTmdbType(type);
 
   const tmdbKey = await loadTmdbKey(user.id);
 
@@ -423,24 +432,24 @@ Deno.serve(async (req) => {
   let resolution: IdResolution = { tmdbId: null, transient: false };
   if (id.startsWith("tt")) {
     imdbId = id;
-    if (tmdbKey !== "") resolution = await findTmdbId(tmdbKey, imdbId, type);
+    if (tmdbKey !== "") resolution = await findTmdbId(tmdbKey, imdbId, tmdbType);
   } else if (id.startsWith("tmdb:")) {
     const numeric = Number.parseInt(id.split(":").pop() ?? "", 10);
     if (Number.isFinite(numeric)) resolution = { tmdbId: numeric, transient: false };
   } else if (name.length > 0 && tmdbKey !== "") {
-    resolution = await searchTmdbId(tmdbKey, name, type, releaseYear);
+    resolution = await searchTmdbId(tmdbKey, name, tmdbType, releaseYear);
   }
 
   // Details and ratings resolve concurrently; either may come up empty.
   const detailsTask = resolution.tmdbId !== null
-    ? tmdbJson<TmdbSummary>(tmdbKey, `/${type}/${resolution.tmdbId}`, {
+    ? tmdbJson<TmdbSummary>(tmdbKey, `/${tmdbType}/${resolution.tmdbId}`, {
       append_to_response: "credits,recommendations",
     })
     : null;
 
   const credential = await loadMdbListCredential(user.id);
   const ratingsTask = credential !== null && imdbId !== null
-    ? fetchMdbListRatings(credential.apiKey, imdbId, type === "movie" ? "movie" : "show")
+    ? fetchMdbListRatings(credential.apiKey, imdbId, tmdbType === "movie" ? "movie" : "show")
     : Promise.resolve(null);
 
   const [details, ratings] = await Promise.all([detailsTask, ratingsTask]);
@@ -470,7 +479,7 @@ Deno.serve(async (req) => {
     enrichment.cast = credits.cast;
     enrichment.crew = credits.crew;
     enrichment.facts = factsFrom(details.value);
-    enrichment.similar = await similarFrom(tmdbKey, details.value, type);
+    enrichment.similar = await similarFrom(tmdbKey, details.value, tmdbType);
   }
 
   const hasContent = (enrichment.cast as unknown[]).length > 0 ||
