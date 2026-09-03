@@ -124,6 +124,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import androidx.core.text.HtmlCompat
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -166,6 +167,7 @@ import com.lamphaus.app.ui.menuActions
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
+import com.lamphaus.core.model.PersonCredit
 import com.lamphaus.core.model.ArtworkProviderId
 import com.lamphaus.core.model.ArtworkProviderResult
 import com.lamphaus.core.model.Episode
@@ -2507,11 +2509,6 @@ private fun TvDetailScreen(
                         )
                     }
                     TvExpandablePeopleSection(
-                        labelRes = R.string.cast,
-                        people = detail.cast,
-                        returnFocusProvider = { lastActionFocus },
-                    )
-                    TvExpandablePeopleSection(
                         labelRes = R.string.directors,
                         people = detail.directors,
                         returnFocusProvider = { lastActionFocus },
@@ -2562,8 +2559,12 @@ private fun TvDetailScreen(
                     }
                 }
             }
-            if (enrichment?.cast.isNullOrEmpty() == false) {
-                item("cast") { TvPeopleRail(enrichment!!.cast) }
+            // Enrichment upgrades the rail with portraits; the addon's own cast
+            // list keeps it useful without any integration configured.
+            val castCredits = enrichment?.cast?.takeIf(List<PersonCredit>::isNotEmpty)
+                ?: detail.cast.map { name -> PersonCredit(name = HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()) }
+            if (castCredits.isNotEmpty()) {
+                item("cast") { TvPeopleRail(castCredits) }
             }
             if (enrichment?.similar.isNullOrEmpty() == false) {
                 item("similar") {
@@ -3095,10 +3096,8 @@ private enum class TvSettingsSection(
     INTEGRATIONS(R.string.integrations, Icons.Outlined.Extension),
     APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
     SPOILERS(R.string.spoiler_protection, Icons.Outlined.Visibility),
-    ARTWORK(R.string.artwork, Icons.Outlined.Palette),
     ABOUT(R.string.about, Icons.Outlined.Info),
 }
-
 @Composable
 private fun TvSettings(
     state: AppUiState,
@@ -3148,7 +3147,6 @@ private fun TvSettings(
                 TvSettingsSection.INTEGRATIONS -> TvIntegrationsSettings(state, viewModel)
                 TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
                 TvSettingsSection.SPOILERS -> TvSpoilerSettings(state, viewModel)
-                TvSettingsSection.ARTWORK -> TvArtworkSettings(state, viewModel)
                 TvSettingsSection.ABOUT -> TvAboutSettings()
             }
         }
@@ -3321,8 +3319,13 @@ private val ratingSourceIds = listOf("imdb", "tmdb", "trakt", "tomatoes", "popco
 
 @Composable
 private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
-    var apiKey by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(Unit) { viewModel.refreshIntegrations() }
+    var mdblistKey by rememberSaveable { mutableStateOf("") }
+    var artworkKeys by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var pendingArtworkStorageMode by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        viewModel.refreshIntegrations()
+        viewModel.refreshArtworkKeyStatus()
+    }
     val mdblist = state.integrations.firstOrNull { it.integration == "mdblist" }
     val connected = mdblist?.connected == true
     LazyColumn(
@@ -3351,128 +3354,6 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
             return@LazyColumn
         }
         item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(TvSurfaceTokens.elevated, TvShapeTokens.card)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("MDBList", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    text = when {
-                        state.integrationsLoading -> stringResource(R.string.integration_status_checking)
-                        mdblist == null -> stringResource(R.string.integration_not_connected)
-                        mdblist.valid == false -> stringResource(R.string.integration_key_rejected)
-                        connected -> stringResource(R.string.integration_connected)
-                        else -> stringResource(R.string.integration_not_connected)
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                TvEditableTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = stringResource(R.string.integration_api_key),
-                    placeholder = stringResource(R.string.integration_api_key_placeholder),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done,
-                    ),
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth().height(60.dp),
-                    onImeAction = {
-                        viewModel.saveIntegrationCredential("mdblist", apiKey)
-                        apiKey = ""
-                    },
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TvAction(
-                        label = stringResource(
-                            if (connected) R.string.integration_replace_key else R.string.integration_connect,
-                        ),
-                        icon = Icons.Outlined.Check,
-                        enabled = apiKey.isNotBlank(),
-                        onClick = {
-                            viewModel.saveIntegrationCredential("mdblist", apiKey)
-                            apiKey = ""
-                        },
-                    )
-                    if (connected) {
-                        TvAction(
-                            label = stringResource(R.string.integration_remove),
-                            icon = Icons.Outlined.Delete,
-                            onClick = { viewModel.removeIntegration("mdblist") },
-                        )
-                    }
-                }
-                if (connected) {
-                    Text(
-                        stringResource(R.string.integration_rating_sources),
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    // Only the sources the server actually returns stay enabled-checkable;
-                    // unknown ids are ignored server-side when filtering ratings.
-                    ratingSourceOptions.forEachIndexed { index, labelRes ->
-                        val sourceId = ratingSourceIds[index]
-                        val enabled = mdblist.enabledSources.contains(sourceId)
-                        TvSettingsToggleRow(
-                            title = stringResource(labelRes),
-                            description = stringResource(R.string.integration_source_toggle_description),
-                            checked = enabled,
-                            onCheckedChange = { checked ->
-                                val next = if (checked) {
-                                    (mdblist.enabledSources + sourceId).distinct()
-                                } else {
-                                    mdblist.enabledSources - sourceId
-                                }
-                                viewModel.setIntegrationSources("mdblist", next)
-                            },
-                        )
-                    }
-                }
-            }
-        }
-        if (state.integrationsFailed) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        stringResource(R.string.integrations_load_failed),
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    TvAction(
-                        label = stringResource(R.string.retry),
-                        icon = Icons.Outlined.Refresh,
-                        onClick = { viewModel.refreshIntegrations() },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
-    var artworkKeys by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var pendingArtworkStorageMode by remember { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
-    ) {
-        item {
-            Text(stringResource(R.string.artwork), style = MaterialTheme.typography.headlineSmall)
-        }
-        item {
-            Text(
-                stringResource(R.string.artwork_settings_description),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        item {
             TvSettingsToggleRow(
                 title = stringResource(R.string.local_only_artwork_keys),
                 description = stringResource(R.string.local_only_artwork_keys_description),
@@ -3484,9 +3365,15 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
         if (state.artworkProviders.isEmpty() && state.artworkProviderCatalogError != null) {
             item {
                 Text(state.artworkProviderCatalogError, color = MaterialTheme.colorScheme.error)
-                TvAction(label = "Retry", icon = Icons.Outlined.Refresh, onClick = viewModel::refreshArtworkKeyStatus)
+                TvAction(
+                    label = stringResource(R.string.retry),
+                    icon = Icons.Outlined.Refresh,
+                    onClick = viewModel::refreshArtworkKeyStatus,
+                )
             }
         }
+        // Artwork providers double as enrichment sources: a TMDB key powers
+        // artwork, cast, and ratings; Fanart.tv covers artwork only.
         items(state.artworkProviders, key = { it.provider.value }) { provider ->
             val providerId = provider.provider
             val providerName = provider.displayName
@@ -3501,7 +3388,11 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(providerName, style = MaterialTheme.typography.titleMedium)
                 if (!provider.enabled) {
-                    Text("This provider is no longer available. You can remove its saved key.")
+                    Text(
+                        stringResource(R.string.integration_provider_retired),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                     TvAction(
                         label = stringResource(R.string.remove_artwork_key),
                         icon = Icons.Outlined.Delete,
@@ -3576,6 +3467,105 @@ private fun TvArtworkSettings(state: AppUiState, viewModel: AppViewModel) {
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
+                }
+            }
+        }
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TvSurfaceTokens.elevated, TvShapeTokens.card)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("MDBList", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = when {
+                        state.integrationsLoading -> stringResource(R.string.integration_status_checking)
+                        mdblist == null -> stringResource(R.string.integration_not_connected)
+                        mdblist.valid == false -> stringResource(R.string.integration_key_rejected)
+                        connected -> stringResource(R.string.integration_connected)
+                        else -> stringResource(R.string.integration_not_connected)
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TvEditableTextField(
+                    value = mdblistKey,
+                    onValueChange = { mdblistKey = it },
+                    label = stringResource(R.string.integration_api_key),
+                    placeholder = stringResource(R.string.integration_api_key_placeholder),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    onImeAction = {
+                        viewModel.saveIntegrationCredential("mdblist", mdblistKey)
+                        mdblistKey = ""
+                    },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvAction(
+                        label = stringResource(
+                            if (connected) R.string.integration_replace_key else R.string.integration_connect,
+                        ),
+                        icon = Icons.Outlined.Check,
+                        enabled = mdblistKey.isNotBlank(),
+                        onClick = {
+                            viewModel.saveIntegrationCredential("mdblist", mdblistKey)
+                            mdblistKey = ""
+                        },
+                    )
+                    if (connected) {
+                        TvAction(
+                            label = stringResource(R.string.integration_remove),
+                            icon = Icons.Outlined.Delete,
+                            onClick = { viewModel.removeIntegration("mdblist") },
+                        )
+                    }
+                }
+                if (connected) {
+                    Text(
+                        stringResource(R.string.integration_rating_sources),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    // Only the sources the server actually returns stay enabled-checkable;
+                    // unknown ids are ignored server-side when filtering ratings.
+                    ratingSourceOptions.forEachIndexed { index, labelRes ->
+                        val sourceId = ratingSourceIds[index]
+                        val enabled = mdblist.enabledSources.contains(sourceId)
+                        TvSettingsToggleRow(
+                            title = stringResource(labelRes),
+                            description = stringResource(R.string.integration_source_toggle_description),
+                            checked = enabled,
+                            onCheckedChange = { checked ->
+                                val next = if (checked) {
+                                    (mdblist.enabledSources + sourceId).distinct()
+                                } else {
+                                    mdblist.enabledSources - sourceId
+                                }
+                                viewModel.setIntegrationSources("mdblist", next)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        if (state.integrationsFailed) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        stringResource(R.string.integrations_load_failed),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TvAction(
+                        label = stringResource(R.string.retry),
+                        icon = Icons.Outlined.Refresh,
+                        onClick = { viewModel.refreshIntegrations() },
+                    )
                 }
             }
         }

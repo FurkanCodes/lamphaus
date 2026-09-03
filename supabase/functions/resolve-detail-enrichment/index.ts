@@ -9,9 +9,16 @@ import {
 // resolve-detail-enrichment — aggregates provider-neutral detail enrichment.
 //
 // Authenticated (verify_jwt=true). Sources:
-//   • TMDB (server-side credential TMDB_API_KEY): credits, facts, similar
-//     titles, and IMDb-id resolution.
-//   • MDBList (caller's stored credential): aggregate rating sources.
+//   • TMDB: credits, facts, similar titles, IMDb-id resolution, and the TMDB
+//     rating. The credential is the caller's stored artwork.tmdb key
+//     (provider_configs) — the same key the artwork system uses — falling
+//     back to TMDB_API_KEY for deployments that ship a server-side key.
+//   • MDBList (caller's stored integration credential): aggregate rating
+//     sources.
+//
+// One integration therefore powers artwork, cast, and ratings together: any
+// stored key enables the whole enrichment, and a caller with no keys simply
+// gets an empty 200 — never an error (SHR-PROD-04).
 //
 // Sources degrade independently per the enrichment contract: one unavailable
 // source never fails the whole response. A 502 is returned only when nothing
@@ -22,7 +29,7 @@ const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_JWT") ??
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const TMDB_API_KEY = Deno.env.get("TMDB_API_KEY") ?? "";
+const TMDB_ENV_API_KEY = Deno.env.get("TMDB_API_KEY") ?? "";
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const TMDB_IMAGE = "https://image.tmdb.org/t/p";
 
@@ -92,6 +99,8 @@ type TmdbSummary = {
   original_language?: string | null;
   budget?: number | null;
   revenue?: number | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
   credits?: {
     cast?: TmdbPerson[] | null;
     crew?: TmdbPerson[] | null;
@@ -101,26 +110,23 @@ type TmdbSummary = {
   } | null;
 };
 
-function tmdbUrl(path: string, params: Record<string, string> = {}): string {
-  const url = new URL(`${TMDB_BASE}${path}`);
-  url.searchParams.set("api_key", TMDB_API_KEY);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-  return url.toString();
-}
-
 type TmdbResult<T> =
   | { ok: true; value: T }
   | { ok: false; transient: boolean };
 
 async function tmdbJson<T>(
+  apiKey: string,
   path: string,
   params: Record<string, string> = {},
 ): Promise<TmdbResult<T>> {
-  if (TMDB_API_KEY === "") return { ok: false, transient: false };
+  if (apiKey === "") return { ok: false, transient: false };
   try {
-    const response = await fetch(tmdbUrl(path, params), {
+    const url = new URL(`${TMDB_BASE}${path}`);
+    url.searchParams.set("api_key", apiKey);
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+    const response = await fetch(url.toString(), {
       headers: { accept: "application/json" },
     });
     if (!response.ok) return { ok: false, transient: response.status >= 500 };
@@ -136,8 +142,13 @@ function isTmdbType(type: string): type is "movie" | "tv" {
 
 type IdResolution = { tmdbId: number | null; transient: boolean };
 
-async function findTmdbId(imdbId: string, type: "movie" | "tv"): Promise<IdResolution> {
+async function findTmdbId(
+  apiKey: string,
+  imdbId: string,
+  type: "movie" | "tv",
+): Promise<IdResolution> {
   const found = await tmdbJson<{ movie_results?: TmdbSummary[]; tv_results?: TmdbSummary[] }>(
+    apiKey,
     `/find/${encodeURIComponent(imdbId)}`,
     { external_source: "imdb_id" },
   );
@@ -148,6 +159,7 @@ async function findTmdbId(imdbId: string, type: "movie" | "tv"): Promise<IdResol
 }
 
 async function searchTmdbId(
+  apiKey: string,
   name: string,
   type: "movie" | "tv",
   releaseYear: number | null,
@@ -156,7 +168,7 @@ async function searchTmdbId(
   if (releaseYear !== null) {
     params[type === "movie" ? "year" : "first_air_date_year"] = String(releaseYear);
   }
-  const searched = await tmdbJson<{ results?: TmdbSummary[] }>(`/search/${type}`, params);
+  const searched = await tmdbJson<{ results?: TmdbSummary[] }>(apiKey, `/search/${type}`, params);
   if (!searched.ok) return { tmdbId: null, transient: searched.transient };
   const match = (searched.value.results ?? []).find((entry) => typeof entry.id === "number");
   return { tmdbId: match?.id ?? null, transient: false };
@@ -221,6 +233,7 @@ function factsFrom(details: TmdbSummary): Record<string, unknown> {
 }
 
 async function similarFrom(
+  apiKey: string,
   details: TmdbSummary,
   type: "movie" | "tv",
 ): Promise<Array<Record<string, unknown>>> {
@@ -230,24 +243,24 @@ async function similarFrom(
 
   const resolved = await Promise.all(
     candidates.map(async (entry): Promise<Record<string, unknown> | null> => {
-    // Recommendations omit IMDb ids; resolve each through its details payload.
-    const detailed = await tmdbJson<TmdbSummary>(`/${type}/${entry.id}`);
-    if (!detailed.ok) return null;
-    const summary = detailed.value;
-    if (typeof summary.imdb_id !== "string" || !summary.imdb_id.startsWith("tt")) return null;
-    const name = summary.title ?? summary.name ?? "";
-    if (name.length === 0) return null;
-    const year = Number.parseInt((summary.release_date ?? summary.first_air_date ?? "").slice(0, 4), 10);
-    return {
-      id: summary.imdb_id,
-      type,
-      rawType: type,
-      name,
-      posterUrl: profileUrl(summary.poster_path, "w342"),
-      backgroundUrl: profileUrl(summary.backdrop_path, "w780"),
-      releaseYear: Number.isFinite(year) ? year : null,
-      providerIds: [],
-    };
+      // Recommendations omit IMDb ids; resolve each through its details payload.
+      const detailed = await tmdbJson<TmdbSummary>(apiKey, `/${type}/${entry.id}`);
+      if (!detailed.ok) return null;
+      const summary = detailed.value;
+      if (typeof summary.imdb_id !== "string" || !summary.imdb_id.startsWith("tt")) return null;
+      const name = summary.title ?? summary.name ?? "";
+      if (name.length === 0) return null;
+      const year = Number.parseInt((summary.release_date ?? summary.first_air_date ?? "").slice(0, 4), 10);
+      return {
+        id: summary.imdb_id,
+        type,
+        rawType: type,
+        name,
+        posterUrl: profileUrl(summary.poster_path, "w342"),
+        backgroundUrl: profileUrl(summary.backdrop_path, "w780"),
+        releaseYear: Number.isFinite(year) ? year : null,
+        providerIds: [],
+      };
     }),
   );
 
@@ -288,6 +301,33 @@ async function loadMdbListCredential(userId: string): Promise<Credential> {
   } catch {
     // Missing, undecryptable, or unreachable integration: ratings degrade to none.
     return null;
+  }
+}
+
+/**
+ * The caller's own artwork.tmdb key — the same credential the artwork system
+ * stores — so one TMDB key powers artwork, cast, facts, and ratings. Falls
+ * back to the deployment's env key when the caller has none stored.
+ */
+async function loadTmdbKey(userId: string): Promise<string> {
+  try {
+    const response = await fetch(
+      `${SB_URL}/rest/v1/provider_configs?user_id=eq.${userId}&provider_id=eq.artwork.tmdb`,
+      { headers: { apikey: SERVICE_ROLE, Authorization: `Bearer ${SERVICE_ROLE}` } },
+    );
+    if (!response.ok) return TMDB_ENV_API_KEY;
+    const rows = await response.json() as Array<{ encrypted_config?: unknown }>;
+    const blob = rows[0]?.encrypted_config;
+    if (typeof blob !== "string" || blob.length === 0) return TMDB_ENV_API_KEY;
+    const decrypted = await providerConfigCrypto.decrypt(userId, "artwork.tmdb", blob);
+    const config = decrypted.config;
+    if (config && typeof config === "object" && "api_key" in config) {
+      const apiKey = config.api_key;
+      if (typeof apiKey === "string" && apiKey.length > 0) return apiKey;
+    }
+    return TMDB_ENV_API_KEY;
+  } catch {
+    return TMDB_ENV_API_KEY;
   }
 }
 
@@ -332,6 +372,24 @@ function ratingsFrom(
   return result;
 }
 
+/** TMDB's own score fills the "tmdb" slot when MDBList did not supply one. */
+function tmdbRatingFrom(details: TmdbSummary): Record<string, unknown> | null {
+  const value = typeof details.vote_average === "number" && Number.isFinite(details.vote_average) &&
+      details.vote_average > 0
+    ? details.vote_average
+    : null;
+  if (value === null) return null;
+  return {
+    sourceId: "tmdb",
+    displayName: DISPLAY_NAME_BY_SOURCE["tmdb"] ?? "tmdb",
+    value,
+    scale: 10,
+    voteCount: typeof details.vote_count === "number" && Number.isFinite(details.vote_count)
+      ? Math.round(details.vote_count)
+      : null,
+  };
+}
+
 // ─────────────────────────────── handler ───────────────────────────────
 
 Deno.serve(async (req) => {
@@ -357,23 +415,25 @@ Deno.serve(async (req) => {
   const name = typeof body.name === "string" ? body.name : "";
   const releaseYear = typeof body.releaseYear === "number" ? Math.trunc(body.releaseYear) : null;
 
+  const tmdbKey = await loadTmdbKey(user.id);
+
   // Identifier resolution: tmdb: ids carry their own id; tt ids go through
   // /find; otherwise fall back to a name search.
   let imdbId: string | null = null;
   let resolution: IdResolution = { tmdbId: null, transient: false };
   if (id.startsWith("tt")) {
     imdbId = id;
-    if (TMDB_API_KEY !== "") resolution = await findTmdbId(imdbId, type);
+    if (tmdbKey !== "") resolution = await findTmdbId(tmdbKey, imdbId, type);
   } else if (id.startsWith("tmdb:")) {
     const numeric = Number.parseInt(id.split(":").pop() ?? "", 10);
     if (Number.isFinite(numeric)) resolution = { tmdbId: numeric, transient: false };
-  } else if (name.length > 0 && TMDB_API_KEY !== "") {
-    resolution = await searchTmdbId(name, type, releaseYear);
+  } else if (name.length > 0 && tmdbKey !== "") {
+    resolution = await searchTmdbId(tmdbKey, name, type, releaseYear);
   }
 
   // Details and ratings resolve concurrently; either may come up empty.
   const detailsTask = resolution.tmdbId !== null
-    ? tmdbJson<TmdbSummary>(`/${type}/${resolution.tmdbId}`, {
+    ? tmdbJson<TmdbSummary>(tmdbKey, `/${type}/${resolution.tmdbId}`, {
       append_to_response: "credits,recommendations",
     })
     : null;
@@ -385,12 +445,22 @@ Deno.serve(async (req) => {
 
   const [details, ratings] = await Promise.all([detailsTask, ratingsTask]);
 
+  const mdblistRatings = ratingsFrom(ratings, credential?.enabledSources ?? []);
+  // The source toggles under MDBList govern every rating slot, including the
+  // TMDB score resolved from the caller's own artwork.tmdb key.
+  const enabledSources = credential?.enabledSources ?? Object.keys(SCALE_BY_SOURCE);
+  const ratingsOut = mdblistRatings.some((rating) => rating.sourceId === "tmdb")
+    ? mdblistRatings
+    : details?.ok && enabledSources.includes("tmdb")
+    ? [tmdbRatingFrom(details.value), ...mdblistRatings].filter((entry) => entry !== null)
+    : mdblistRatings;
+
   const enrichment: Record<string, unknown> = {
     mediaKey,
     cast: [],
     crew: [],
     similar: [],
-    ratings: ratingsFrom(ratings, credential?.enabledSources ?? []),
+    ratings: ratingsOut,
     facts: null,
     fetchedAtEpochMillis: Date.now(),
   };
@@ -400,7 +470,7 @@ Deno.serve(async (req) => {
     enrichment.cast = credits.cast;
     enrichment.crew = credits.crew;
     enrichment.facts = factsFrom(details.value);
-    enrichment.similar = await similarFrom(details.value, type);
+    enrichment.similar = await similarFrom(tmdbKey, details.value, type);
   }
 
   const hasContent = (enrichment.cast as unknown[]).length > 0 ||
@@ -409,16 +479,14 @@ Deno.serve(async (req) => {
     (enrichment.ratings as unknown[]).length > 0;
 
   const detailsFailedTransiently = details !== null && !details.ok && details.transient;
-  const detailsSkipped = details === null;
   const ratingsFailedTransiently = credential !== null && ratings === null && imdbId !== null;
-  const nothingReliable = !hasContent && (detailsFailedTransiently || detailsSkipped ||
-    ratingsFailedTransiently);
+  const nothingReliable = !hasContent && (detailsFailedTransiently || ratingsFailedTransiently ||
+    resolution.transient);
 
-  if (nothingReliable && (detailsFailedTransiently || ratingsFailedTransiently ||
-    resolution.transient))
-  {
+  if (nothingReliable) {
     // A momentary failure must not be cached as "no data"; the client will
-    // retry on the next detail open instead.
+    // retry on the next detail open instead. A caller with no keys at all
+    // lands here with every transient flag false and gets an empty 200.
     return json({ error: "enrichment_unavailable" }, 502);
   }
   return json(enrichment);

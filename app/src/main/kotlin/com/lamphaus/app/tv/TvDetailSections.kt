@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
@@ -53,7 +55,6 @@ import java.util.Locale
  * with no Select action is never focusable (TV-FOC-01).
  */
 
-private val PersonTileShape = RoundedCornerShape(8.dp)
 
 @Composable
 private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
@@ -64,7 +65,14 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** Cast rail with portraits. Display-only: Select performs no action here. */
+/**
+ * Cast rail following the streaming-TV convention (Netflix, Disney+):
+ * circular headshots with the actor's name and character beneath. Display-
+ * only — Select performs no action here, so it is never focusable (TV-FOC-01).
+ */
+private val CastAvatarSize = 96.dp
+private val CastItemWidth = 116.dp
+
 @Composable
 internal fun TvPeopleRail(cast: List<PersonCredit>) {
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
@@ -78,39 +86,40 @@ internal fun TvPeopleRail(cast: List<PersonCredit>) {
         ) {
             items(cast, key = { credit -> "${credit.personId ?: credit.name}|${credit.role.orEmpty()}" }) { credit ->
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.width(CastItemWidth),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(width = 120.dp, height = 180.dp)
-                            .clip(PersonTileShape)
-                            .background(TvSurfaceTokens.card),
+                            .size(CastAvatarSize)
+                            .clip(CircleShape)
+                            .background(TvSurfaceTokens.card)
+                            .border(1.dp, TvSurfaceTokens.subtleBorder, CircleShape),
                     ) {
                         if (credit.profileUrl != null) {
                             AsyncImage(
                                 model = credit.profileUrl,
                                 contentDescription = null,
-                                modifier = Modifier.size(width = 120.dp, height = 180.dp),
+                                modifier = Modifier.size(CastAvatarSize),
                                 contentScale = ContentScale.Crop,
                             )
                         } else {
                             Text(
-                                text = credit.name.take(1).uppercase(),
+                                text = credit.name.trim().take(1).uppercase(),
                                 modifier = Modifier.align(Alignment.Center),
-                                style = MaterialTheme.typography.headlineMedium,
+                                style = MaterialTheme.typography.headlineSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                     Text(
                         text = credit.name,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                        style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.width(120.dp),
                     )
                     credit.role?.takeIf(String::isNotBlank)?.let { role ->
                         Text(
@@ -120,7 +129,6 @@ internal fun TvPeopleRail(cast: List<PersonCredit>) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.width(120.dp),
                         )
                     }
                 }

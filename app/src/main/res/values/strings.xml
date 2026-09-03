@@ -220,12 +220,12 @@
     <string name="rating_last_updated">Updated %1$s</string>
     <string name="detail_enrichment_failed">Ratings and credits could not be loaded.</string>
 
-    <!-- Discover categories (addon-declared genre options) -->
+    <string name="integrations_description">Connect the services that power artwork, cast, and ratings. Keys are stored server-side and never shown again.</string>
+    <string name="integration_provider_retired">This provider is no longer available. You can remove its saved key.</string>
     <string name="all_categories">All</string>
 
     <!-- Settings → Integrations -->
     <string name="integrations">Integrations</string>
-    <string name="integrations_description">Connect rating services to enrich detail pages. Credentials are stored server-side and never shown again.</string>
     <string name="integrations_sign_in_required">Sign in to connect integrations.</string>
     <string name="integrations_load_failed">Integrations could not be loaded. Try again.</string>
     <string name="integration_status_checking">Checking connection…</string>
