@@ -98,6 +98,8 @@ import com.lamphaus.app.ui.ContentMenuTarget
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.rememberReducedMotion
+import com.lamphaus.app.ui.metadataImdbScore
+import com.lamphaus.app.ui.RatingBadgeChip
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.WatchProgress
@@ -473,6 +475,14 @@ internal fun TvMediaCard(
     val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
     val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
     val ratingText = if (showRating) media.metadataPresentation().ratingText else null
+    // The catalog rating wears the IMDb mark only when the addon exposed an
+    // actual IMDb score; generic provider ratings keep the neutral star
+    // (SHR-PROD-05).
+    val imdbScore = if (showRating) {
+        metadataImdbScore(media.rating, media.ratingSource, "")
+    } else {
+        null
+    }
     val cardDescription = ratingText?.let {
         stringResource(R.string.media_card_description_rating, media.name, it)
     } ?: media.name
@@ -539,7 +549,30 @@ internal fun TvMediaCard(
                 modifier = Modifier.fillMaxWidth().height(cardHeight),
                 contentScale = ContentScale.Crop,
             )
-            ratingText?.let {
+            if (imdbScore != null && ratingText != null) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 10.dp)
+                        .clip(TvShapeTokens.card)
+                        .background(TvSurfaceTokens.ratingScrim)
+                        .border(
+                            width = 0.5.dp,
+                            color = TvSurfaceTokens.ratingBorder,
+                            shape = TvShapeTokens.card,
+                        )
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RatingBadgeChip(imdbScore)
+                    Text(
+                        text = ratingText,
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    )
+                }
+            } else if (ratingText != null) {
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -561,7 +594,7 @@ internal fun TvMediaCard(
                         style = MaterialTheme.typography.labelSmall,
                     )
                     Text(
-                        text = it,
+                        text = ratingText,
                         color = Color.White,
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
                     )

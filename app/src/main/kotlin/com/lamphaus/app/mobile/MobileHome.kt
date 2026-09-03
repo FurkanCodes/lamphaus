@@ -114,7 +114,11 @@ import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.ContentMenuTarget
 import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.menuActions
+import com.lamphaus.app.ui.RatingBadge
+import com.lamphaus.app.ui.RatingBadgeChip
+import com.lamphaus.app.ui.metadataImdbScore
 import com.lamphaus.core.model.MediaType
+import com.lamphaus.core.model.RatingSourceScore
 
 /** Zoom-settle applied to hero artwork while it crossfades during a swipe. */
 private const val HERO_ARTWORK_ZOOM = 0.06f
@@ -620,6 +624,10 @@ private fun HeroOverlayContent(
             presentation = media.metadataPresentation(maxGenres = 2),
             includeGenres = true,
             color = Color.White.copy(alpha = 0.88f),
+            ratingValueColor = Color.White,
+            ratings = listOfNotNull(
+                metadataImdbScore(media.rating, media.ratingSource, stringResource(R.string.source_imdb)),
+            ),
             modifier = Modifier.padding(top = 8.dp),
         )
         Row(
@@ -934,8 +942,10 @@ private fun PosterCard(
         (media.posterUrl.isNullOrBlank() && !media.backgroundUrl.isNullOrBlank())
     // Artwork carries the emotion: no name or metadata text on the card,
     // matching the TV design. The name stays available to TalkBack, and the
-    // rating appears as a small neutral overlay per the design system.
+    // rating appears as a small neutral overlay per the design system — the
+    // IMDb mark only when the addon exposed an actual IMDb score (SHR-PROD-05).
     val ratingText = media.metadataPresentation().ratingText
+    val imdbScore = metadataImdbScore(media.rating, media.ratingSource, "")
     val cardDescription = ratingText
         ?.let { stringResource(R.string.media_card_description_rating, media.name, it) }
         ?: media.name
@@ -985,7 +995,21 @@ private fun PosterCard(
                 modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
             )
         }
-        ratingText?.let { rating ->
+        imdbScore?.let { score ->
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RatingBadgeChip(score)
+                Text(ratingText!!, style = MaterialTheme.typography.labelSmall, color = Color.White)
+            }
+        } ?: ratingText?.let { rating ->
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1009,23 +1033,31 @@ internal fun MobileMetadataLine(
     includeGenres: Boolean,
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
+    ratings: List<RatingSourceScore> = emptyList(),
+    ratingValueColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
 ) {
     val values = buildList {
         presentation.year?.let { add(it.toString()) }
         presentation.contentRating?.let(::add)
         presentation.runtimeMinutes?.let { add(stringResource(R.string.minutes_format, it)) }
-        presentation.ratingText?.let { add(stringResource(R.string.rating_format, it)) }
         if (includeGenres && presentation.genres.isNotEmpty()) add(presentation.genres.joinToString(", "))
     }
-    if (values.isNotEmpty()) {
-        Text(
-            text = values.joinToString(" · "),
-            modifier = modifier,
-            style = MaterialTheme.typography.bodySmall,
-            color = color,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+    if (values.isEmpty() && ratings.isEmpty()) return
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (values.isNotEmpty()) {
+            Text(
+                text = values.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = color,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (ratings.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ratings.forEach { score -> RatingBadge(score, valueColor = ratingValueColor) }
+            }
+        }
     }
 }
 

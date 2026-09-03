@@ -166,74 +166,15 @@ internal fun TvSimilarRail(
     }
 }
 
-@Composable
-internal fun TvRatingsSection(
-    ratings: List<RatingSourceScore>,
-    onSelect: (RatingSourceScore) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
-        SectionTitle(stringResource(R.string.ratings_title))
-        LazyRow(
-            contentPadding = PaddingValues(
-                start = TvLayoutTokens.screenHorizontalPadding,
-                end = TvLayoutTokens.screenHorizontalPadding,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
-        ) {
-            items(ratings, key = RatingSourceScore::sourceId) { rating ->
-                // Two 412dp cards + 20dp gap fill the 844dp safe width exactly.
-                val valueText = "%.1f".format(Locale.ROOT, rating.normalizedTen)
-                val description = stringResource(R.string.rating_source_description, rating.displayName, valueText)
-                TvFocusableSurface(
-                    onClick = { onSelect(rating) },
-                    modifier = Modifier
-                        .width(412.dp)
-                        .height(100.dp)
-                        .semantics { contentDescription = description },
-                ) { focused ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = rating.displayName,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (focused) {
-                                TvFocusTokens.focusedContent
-                            } else {
-                                MaterialTheme.colorScheme.onBackground
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = valueText,
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = if (focused) {
-                                TvFocusTokens.focusedContent
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
 /**
- * Select affordance for a rating card: value, scale, votes, attribution and
+ * Select affordance for a rating badge: value, scale, votes, attribution and
  * data freshness. Never gated behind Back (TV-NAV-04): the dialog carries its
  * own visible Close action.
  */
 @Composable
 internal fun TvRatingDetailsDialog(
     rating: RatingSourceScore,
-    fetchedAtEpochMillis: Long,
+    fetchedAtEpochMillis: Long?,
     onDismiss: () -> Unit,
 ) {
     val closeFocus = remember { FocusRequester() }
@@ -276,14 +217,16 @@ internal fun TvRatingDetailsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    text = stringResource(
-                        R.string.rating_last_updated,
-                        DateUtils.getRelativeTimeSpanString(fetchedAtEpochMillis).toString(),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                fetchedAtEpochMillis?.let { fetchedAt ->
+                    Text(
+                        text = stringResource(
+                            R.string.rating_last_updated,
+                            DateUtils.getRelativeTimeSpanString(fetchedAt).toString(),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvAction(
                         label = stringResource(R.string.close),

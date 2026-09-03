@@ -12,6 +12,7 @@ import com.lamphaus.core.data.repository.reconcileProgress
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
 import com.lamphaus.core.data.cloud.CloudNotConfiguredException
+import com.lamphaus.core.data.cloud.ArtworkKeyInvalidException
 import com.lamphaus.core.data.cloud.ArtworkKeysNotConfiguredException
 import com.lamphaus.core.data.cloud.IntegrationInvalidCredentialException
 import com.lamphaus.core.model.IntegrationStatus
@@ -138,6 +139,17 @@ class AppViewModel(
     private var detailJob: Job? = null
     private var enrichmentJob: Job? = null
     private var sourceJob: Job? = null
+
+    /**
+     * Recently opened details so re-entering a title renders complete
+     * metadata instantly; the provider refresh below still lands behind it
+     * (SHR-ARC-13). Main-confined: all readers/writers run on viewModelScope.
+     */
+    private val recentlyLoadedDetails = object : LinkedHashMap<String, MediaDetail>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MediaDetail>): Boolean =
+            size > 24
+    }
+
     init {
         viewModelScope.launch {
             combine(
@@ -942,7 +954,12 @@ class AppViewModel(
     fun loadDetail(media: MediaPreview) {
         detailJob?.cancel()
         detailJob = viewModelScope.launch {
-            mutableState.update { it.copy(selectedDetail = MediaDetail(media), refreshing = true) }
+            // A recently opened title renders complete metadata instantly; the
+            // provider refresh below still lands behind it (SHR-ARC-13).
+            val cached = recentlyLoadedDetails[media.stableKey]
+            mutableState.update {
+                it.copy(selectedDetail = cached ?: MediaDetail(media), refreshing = cached == null)
+            }
             // Enrichment streams in independently of base metadata: sections
             // appear when ready without displacing the hero (TV-CNT-02).
             startDetailEnrichment(media)
@@ -966,29 +983,47 @@ class AppViewModel(
                 mutableState.update { it.copy(refreshing = false) }
                 return@launch
             }
-            val details = supervisorScope {
-                candidates.map { provider ->
-                    async {
-                        val manifest = container.providerClient.manifest(provider.manifestUrl)
-                        if (manifest !is ProviderResult.Success || !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)) {
-                            null
-                        } else {
-                            container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
+            // Progressive merge: each add-on's meta lands the moment it
+            // resolves instead of gating the screen on the slowest provider
+            // (SHR-PROD-04). A fresh detail request cancels this job, and the
+            // stable-key checks keep late responses from touching it.
+            var mergedAny = false
+            supervisorScope {
+                candidates.forEach { provider ->
+                    launch {
+                        runCatching {
+                            val manifest = container.providerClient.manifest(provider.manifestUrl)
+                            if (manifest !is ProviderResult.Success ||
+                                !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)
+                            ) {
+                                return@launch
+                            }
+                            val result = container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
+                            if (result !is ProviderResult.Success<MediaDetail>) return@launch
+                            mergedAny = true
+                            mutableState.update { current ->
+                                if (current.selectedDetail?.preview?.stableKey != media.stableKey) {
+                                    current
+                                } else {
+                                    current.copy(selectedDetail = current.selectedDetail?.merge(result.value))
+                                }
+                            }
                         }
                     }
-                }.awaitAll().filterIsInstance<ProviderResult.Success<MediaDetail>>().map(ProviderResult.Success<MediaDetail>::value)
-            }
-            if (details.isNotEmpty()) {
-                mutableState.update { current ->
-                    if (current.selectedDetail?.preview?.stableKey != media.stableKey) current
-                    else current.copy(selectedDetail = details.fold(MediaDetail(media), MediaDetail::merge), refreshing = false)
-                }
-            } else {
-                mutableState.update { current ->
-                    if (current.selectedDetail?.preview?.stableKey != media.stableKey) current
-                    else current.copy(refreshing = false, message = "No metadata provider could load this title.")
                 }
             }
+            mutableState.update { current ->
+                if (current.selectedDetail?.preview?.stableKey != media.stableKey) {
+                    current
+                } else if (!mergedAny) {
+                    current.copy(refreshing = false, message = "No metadata provider could load this title.")
+                } else {
+                    current.copy(refreshing = false)
+                }
+            }
+            state.value.selectedDetail
+                ?.takeIf { it.preview.stableKey == media.stableKey }
+                ?.let { recentlyLoadedDetails[media.stableKey] = it }
         }
     }
 
@@ -1053,6 +1088,20 @@ class AppViewModel(
         startDetailEnrichment(media, force = true)
     }
 
+    /**
+     * Credential changes (artwork TMDB key, integration credentials, enabled
+     * rating sources) change what the edge would return; the 12h cache would
+     * otherwise keep serving stale empty sections (SHR-ARC-05). Drops the
+     * cache and force-refreshes the open detail so sections recover at once
+     * (SHR-PROD-04). Absent when the build has no cloud.
+     */
+    private suspend fun invalidateDetailEnrichment() {
+        container.detailEnrichmentRepository?.let { repository ->
+            runCatching { repository.invalidate() }
+        }
+        state.value.selectedDetail?.preview?.let { startDetailEnrichment(it, force = true) }
+    }
+
     fun refreshArtworkKeyStatus() = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         refreshArtworkKeyStatus(userId)
@@ -1088,7 +1137,9 @@ class AppViewModel(
             showMessage("Paste a $displayName API key first.")
             return@launch
         }
-        container.cloudSyncGateway.saveArtworkKey(userId, provider, apiKey.trim())
+        val result = container.cloudSyncGateway.saveArtworkKey(userId, provider, apiKey.trim())
+        if (result.isSuccess) invalidateDetailEnrichment()
+        result
             .onSuccess {
                 mutableState.update { current ->
                     current.copy(
@@ -1100,13 +1151,23 @@ class AppViewModel(
                 }
                 showMessage("$displayName artwork key saved.")
             }
-            .onFailure { showMessage("Could not save the $displayName artwork key. Try again.") }
+            .onFailure { error ->
+                showMessage(
+                    when (error) {
+                        is ArtworkKeyInvalidException ->
+                            "The key was rejected by the provider. Check it and try again."
+                        else -> "Could not save the $displayName artwork key. Try again."
+                    },
+                )
+            }
     }
 
     fun deleteArtworkKey(provider: ArtworkProviderId) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         val displayName = state.value.artworkProviders.firstOrNull { it.provider == provider }?.displayName ?: provider.value
-        container.cloudSyncGateway.deleteArtworkKey(userId, provider)
+        val result = container.cloudSyncGateway.deleteArtworkKey(userId, provider)
+        if (result.isSuccess) invalidateDetailEnrichment()
+        result
             .onSuccess {
                 mutableState.update { current ->
                     current.copy(
@@ -1158,7 +1219,9 @@ class AppViewModel(
             showMessage("Paste an API key first.")
             return@launch
         }
-        container.integrationsGateway.saveCredential(userId, integration, credential.trim())
+        val result = container.integrationsGateway.saveCredential(userId, integration, credential.trim())
+        if (result.isSuccess) invalidateDetailEnrichment()
+        result
             .onSuccess {
                 showMessage("Integration connected.")
                 refreshIntegrations()
@@ -1178,7 +1241,9 @@ class AppViewModel(
 
     fun setIntegrationSources(integration: String, sources: List<String>) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
-        container.integrationsGateway.setEnabledSources(userId, integration, sources)
+        val result = container.integrationsGateway.setEnabledSources(userId, integration, sources)
+        if (result.isSuccess) invalidateDetailEnrichment()
+        result
             .onSuccess { refreshIntegrations() }
             .onFailure { error ->
                 if (error !is CloudNotConfiguredException) {
@@ -1189,7 +1254,9 @@ class AppViewModel(
 
     fun removeIntegration(integration: String) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
-        container.integrationsGateway.removeCredential(userId, integration)
+        val result = container.integrationsGateway.removeCredential(userId, integration)
+        if (result.isSuccess) invalidateDetailEnrichment()
+        result
             .onSuccess {
                 showMessage("Integration removed.")
                 refreshIntegrations()

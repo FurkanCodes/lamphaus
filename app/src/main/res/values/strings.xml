@@ -161,6 +161,7 @@
     <string name="about">About</string>
     <string name="about_lamphaus_body">Your library, compatible content sources, and playback in one calm television experience.</string>
     <string name="media_card_description_rating">%1$s, rated %2$s out of 10</string>
+    <string name="rating_badge_description">%1$s rating: %2$s</string>
     <string name="media_card_description_progress">%1$s, %2$d%% watched</string>
     <string name="continue_watching_time_left">%1$s left</string>
     <string name="save">Save</string>

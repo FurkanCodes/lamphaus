@@ -163,6 +163,11 @@ import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.app.ui.isRenderableHomeCatalogSection
 import com.lamphaus.app.ui.menuActions
+import com.lamphaus.app.ui.RatingBadge
+import com.lamphaus.app.ui.RatingBadgeChip
+import com.lamphaus.app.ui.metadataImdbScore
+import com.lamphaus.app.ui.orderedRatingScores
+import com.lamphaus.app.ui.ratingValueText
 
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.ArtworkAsset
@@ -1392,6 +1397,13 @@ private fun TvHero(
             TvMetadataLine(
                 presentation = resolvedMedia.metadataPresentation(maxGenres = 2),
                 includeGenres = true,
+                ratings = listOfNotNull(
+                    metadataImdbScore(
+                        resolvedMedia.rating,
+                        resolvedMedia.ratingSource,
+                        stringResource(R.string.source_imdb),
+                    ),
+                ),
                 modifier = Modifier.padding(top = 8.dp),
             )
             AnimatedVisibility(visible = focused) {
@@ -1423,23 +1435,72 @@ private fun TvMetadataLine(
     presentation: MediaMetadataPresentation,
     includeGenres: Boolean,
     modifier: Modifier = Modifier,
+    ratings: List<RatingSourceScore> = emptyList(),
+    onSelectRating: ((RatingSourceScore) -> Unit)? = null,
 ) {
     val values = buildList {
         presentation.year?.let { add(it.toString()) }
         presentation.contentRating?.let(::add)
         presentation.runtimeMinutes?.let { add(stringResource(R.string.minutes_format, it)) }
-        presentation.ratingText?.let { add(stringResource(R.string.rating_format, it)) }
         if (includeGenres && presentation.genres.isNotEmpty()) add(presentation.genres.joinToString(", "))
     }
-    if (values.isNotEmpty()) {
-        Text(
-            text = values.joinToString("  •  "),
-            modifier = modifier,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.76f),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+    if (values.isEmpty() && ratings.isEmpty()) return
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (values.isNotEmpty()) {
+            Text(
+                text = values.joinToString("  •  "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.76f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (ratings.isNotEmpty()) {
+            if (onSelectRating != null) {
+                TvRatingBadgeStrip(ratings = ratings, onSelect = onSelectRating)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ratings.forEach { score -> RatingBadge(score) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * D-pad-reachable rating badges next to the detail metadata. Select opens the
+ * source's rating details dialog, so focus only lands on actionable items
+ * (TV-FOC-01); the pale-container focus treatment matches TV-FOC-02.
+ */
+@Composable
+private fun TvRatingBadgeStrip(
+    ratings: List<RatingSourceScore>,
+    onSelect: (RatingSourceScore) -> Unit,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(ratings, key = RatingSourceScore::sourceId) { score ->
+            val valueText = ratingValueText(score)
+            val description = stringResource(R.string.rating_badge_description, score.displayName, valueText)
+            TvFocusableSurface(
+                onClick = { onSelect(score) },
+                modifier = Modifier.semantics { contentDescription = description },
+            ) { focused ->
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RatingBadgeChip(score)
+                    Text(
+                        text = valueText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2293,6 +2354,11 @@ private fun TvSourceMediaSummary(
 ) {
     val presentation = picker.media.metadataPresentation()
     val number = picker.episode?.numberParts()
+    val imdbScore = metadataImdbScore(
+        picker.media.rating,
+        picker.media.ratingSource,
+        stringResource(R.string.source_imdb),
+    )
     val metadata = buildList {
         number?.let {
             when {
@@ -2305,7 +2371,6 @@ private fun TvSourceMediaSummary(
         presentation.contentRating?.let(::add)
         presentation.year?.let { add(it.toString()) }
         presentation.genres.joinToString(", ").takeIf(String::isNotBlank)?.let(::add)
-        presentation.ratingText?.let { add(stringResource(R.string.rating_format, it)) }
     }.joinToString("  •  ")
     val description = picker.episode?.overview ?: picker.media.description
 
@@ -2347,6 +2412,10 @@ private fun TvSourceMediaSummary(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        imdbScore?.let { score ->
+            Spacer(Modifier.height(10.dp))
+            RatingBadge(score, valueColor = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -2476,6 +2545,15 @@ private fun TvDetailScreen(
                     TvMetadataLine(
                         presentation = detail.metadataPresentation(maxGenres = 2),
                         includeGenres = true,
+                        ratings = orderedRatingScores(
+                            metadata = metadataImdbScore(
+                                detail.preview.rating,
+                                detail.preview.ratingSource,
+                                stringResource(R.string.source_imdb),
+                            ),
+                            enrichment = enrichment?.ratings.orEmpty(),
+                        ),
+                        onSelectRating = { selectedRating = it },
                     )
                     Row(
                         modifier = Modifier.padding(top = 12.dp),
@@ -2575,14 +2653,6 @@ private fun TvDetailScreen(
                     )
                 }
             }
-            if (enrichment?.ratings.isNullOrEmpty() == false) {
-                item("ratings") {
-                    TvRatingsSection(
-                        ratings = enrichment!!.ratings,
-                        onSelect = { selectedRating = it },
-                    )
-                }
-            }
             enrichment?.facts?.takeIf { facts ->
                 facts.status != null || facts.originalLanguage != null ||
                     (facts.budgetUsd ?: 0) > 0 || (facts.revenueUsd ?: 0) > 0
@@ -2597,7 +2667,7 @@ private fun TvDetailScreen(
     selectedRating?.let { rating ->
         TvRatingDetailsDialog(
             rating = rating,
-            fetchedAtEpochMillis = enrichment?.fetchedAtEpochMillis ?: 0L,
+            fetchedAtEpochMillis = enrichment?.fetchedAtEpochMillis,
             onDismiss = { selectedRating = null },
         )
     }

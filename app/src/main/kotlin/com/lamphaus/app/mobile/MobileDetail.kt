@@ -89,6 +89,8 @@ import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
+import com.lamphaus.app.ui.metadataImdbScore
+import com.lamphaus.core.model.RatingSourceScore
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
 import com.lamphaus.core.model.ArtworkProviderId
@@ -144,11 +146,17 @@ internal fun MobileDetailScreen(
                     alignment = Alignment.CenterStart,
                 )
             }
-            Text(detail.preview.name, style = MaterialTheme.typography.headlineLarge)
             MobileMetadataLine(
                 presentation = detail.metadataPresentation(),
                 includeGenres = true,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ratings = listOfNotNull(
+                    metadataImdbScore(
+                        detail.preview.rating,
+                        detail.preview.ratingSource,
+                        stringResource(R.string.source_imdb),
+                    ),
+                ),
             )
             detail.preview.description
                 ?.takeIf(String::isNotBlank)
@@ -330,14 +338,18 @@ private fun MobileDetailHero(
                     contentScale = ContentScale.Fit,
                     alignment = Alignment.CenterStart,
                 )
-            } else {
-                Text(preview.name, style = MaterialTheme.typography.displayLarge, color = MobileTokens.textPrimary)
             }
-            Spacer(Modifier.height(8.dp))
             MobileMetadataLine(
                 presentation = preview.metadataPresentation(),
                 includeGenres = false,
                 color = MobileTokens.textMuted,
+                ratings = listOfNotNull(
+                    metadataImdbScore(
+                        preview.rating,
+                        preview.ratingSource,
+                        stringResource(R.string.source_imdb),
+                    ),
+                ),
             )
             resumeProgress?.let { progress ->
                 Spacer(Modifier.height(10.dp))
