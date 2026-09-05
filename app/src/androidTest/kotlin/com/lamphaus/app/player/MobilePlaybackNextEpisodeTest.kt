@@ -74,6 +74,18 @@ class MobilePlaybackNextEpisodeTest {
                     endingDataAvailable = false
                 },
                 onPlayerViewLayout = {},
+                onEnterPictureInPicture = {},
+                pictureInPictureAvailable = false,
+                inPictureInPicture = false,
+                subtitleStyle = com.lamphaus.core.model.SubtitleStyle(),
+                subtitleDelayMillis = 0L,
+                audioDelayMillis = 0L,
+                streamInfo = null,
+                onSubtitleDelay = {},
+                onAudioDelay = {},
+                onSubtitleStyle = {},
+                onLoadSidecarCues = { callback -> callback(emptyList()) },
+                onApplySyncByLine = { _, _ -> },
             )
         }
 

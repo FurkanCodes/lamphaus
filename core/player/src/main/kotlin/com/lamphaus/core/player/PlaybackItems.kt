@@ -16,11 +16,16 @@ fun PlaybackRequest.toMediaItem(): MediaItem {
             .setSelectionFlags(0)
             .build()
     }
-    return MediaItem.Builder()
+    // Opaque proxy URLs (e.g. /stream?id=…) carry no extension and no mime:
+    // leave mime unset so DefaultMediaSourceFactory sniffs progressive.
+    // HLS/DASH without extension or mime cannot play per Media3 docs and
+    // must supply source.mimeType upstream (provider fix, not player guess).
+    val builder = MediaItem.Builder()
         .setMediaId(videoId)
         .setUri(source.uri)
-        .setMimeType(source.mimeType)
         .setSubtitleConfigurations(subtitleConfigurations)
+    source.mimeType?.let(builder::setMimeType)
+    return builder
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(title)

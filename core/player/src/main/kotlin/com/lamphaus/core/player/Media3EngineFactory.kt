@@ -47,7 +47,7 @@ object Media3EngineFactory {
     fun createPlayer(context: Context, config: DevicePlaybackConfig = deviceConfig): ExoPlayer {
         val httpDataSource = DefaultHttpDataSource.Factory()
             .setUserAgent("Lamphaus/1.0")
-            .setAllowCrossProtocolRedirects(false)
+            .setAllowCrossProtocolRedirects(true)
         val resolvingDataSource = ResolvingDataSource.Factory(
             DefaultDataSource.Factory(context, httpDataSource),
         ) { dataSpec ->
@@ -98,13 +98,7 @@ object Media3EngineFactory {
             // ALWAYS permits non-seamless switches; those are physical
             // display-mode changes driven by display-mode matching (plan §2),
             // not this Media3 surface hint.
-            .setVideoChangeFrameRateStrategy(
-                when (config.frameRateMatching) {
-                    FrameRateMatching.OFF -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
-                    FrameRateMatching.SEAMLESS_ONLY, FrameRateMatching.ALWAYS ->
-                        C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
-                },
-            )
+            .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategy(config))
             .setLoadControl(
                 DefaultLoadControl.Builder()
                     // Large remuxes can fill a low-memory TV's heap long before the time-based
@@ -128,6 +122,33 @@ object Media3EngineFactory {
                 setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
             }
     }
+    /**
+     * Live session player in the same process (set by LamphausPlaybackService).
+     * Lets the activity apply the frame-rate hint without recreating the player.
+     */
+    @Volatile
+    var sessionPlayer: ExoPlayer? = null
+
+    /**
+     * Live-applies what ExoPlayer supports without recreation: the frame-rate
+     * switch hint. Audio caps, decoder priority, and HDR path stay
+     * construction-time and apply on next createPlayer (see toggle comment).
+     */
+    fun applyDeviceConfig(player: ExoPlayer, config: DevicePlaybackConfig) {
+        player.videoChangeFrameRateStrategy = videoChangeFrameRateStrategy(config)
+    }
+
+    /** Applies the frame-rate hint to the live session player when present. */
+    fun applyDeviceConfigToSession(config: DevicePlaybackConfig) {
+        sessionPlayer?.let { applyDeviceConfig(it, config) }
+    }
+
+    private fun videoChangeFrameRateStrategy(config: DevicePlaybackConfig): Int =
+        when (config.frameRateMatching) {
+            FrameRateMatching.OFF -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
+            FrameRateMatching.SEAMLESS_ONLY, FrameRateMatching.ALWAYS ->
+                C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
+        }
 }
 
 /** Process-wide config bridge for components built before settings load. */

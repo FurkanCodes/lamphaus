@@ -62,6 +62,26 @@
     <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
     <string name="spoiler_protection">Spoiler protection</string>
     <string name="playback">Playback</string>
+    <string name="player_subtitle_languages">Language</string>
+    <string name="player_subtitle_tracks">Track</string>
+    <string name="player_caption_lab">Caption lab</string>
+    <string name="player_subtitle_off">Off</string>
+    <string name="player_subtitle_no_captions">No captions</string>
+    <string name="player_subtitle_off_description">Choose a language to browse the tracks in this source.</string>
+    <string name="player_subtitle_language_unknown">Unknown</string>
+    <string name="player_subtitle_no_tracks_title">No matching tracks</string>
+    <string name="player_subtitle_no_tracks_body">This source did not report a subtitle for that language.</string>
+    <string name="player_subtitle_embedded_track">Embedded subtitle</string>
+    <string name="player_caption_preview">A quiet night for a great story.</string>
+    <string name="player_caption_preview_details">%1$d%% size · %2$s delay</string>
+    <plurals name="player_subtitle_track_count">
+        <item quantity="one">%1$d track</item>
+        <item quantity="other">%1$d tracks</item>
+    </plurals>
+    <plurals name="player_subtitle_track_count_active">
+        <item quantity="one">%1$d track · Active</item>
+        <item quantity="other">%1$d tracks · Active</item>
+    </plurals>
     <string name="episode_playback">Episode playback</string>
     <string name="skip_intro">Skip intro</string>
     <string name="skip_intro_description">Show a skip button when exact intro timestamps are available.</string>

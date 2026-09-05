@@ -1,6 +1,7 @@
 package com.lamphaus.app.player
 
 import android.app.Activity
+import android.os.Build
 import android.view.Display
 import com.lamphaus.core.model.DevicePlaybackConfig
 import com.lamphaus.core.model.DisplayModeCandidate
@@ -27,7 +28,12 @@ class PlaybackDisplayModeController(
 ) {
     data class DisplayModeDecision(val appliedMode: DisplayModeCandidate?, val reason: String)
 
-    private val display: Display? = activity.display
+    @Suppress("DEPRECATION")
+    private val display: Display? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        activity.display
+    } else {
+        activity.windowManager.defaultDisplay
+    }
     private val originalModeId = display?.mode?.modeId
 
     private var pendingFormat: Triple<Int, Int, Float>? = null
@@ -116,9 +122,15 @@ class PlaybackDisplayModeController(
             it.physicalWidth == current.width && it.physicalHeight == current.height &&
                 kotlin.math.abs(it.refreshRate - current.refreshRateHz) < 0.01f
         } ?: return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
         return currentMode.alternativeRefreshRates.any {
             kotlin.math.abs(it - target.refreshRateHz) < 0.01f
         }
+    }
+
+    /** Reports why matching was skipped without changing the display mode. */
+    fun reportSkipped(reason: String) {
+        onModeDecision(DisplayModeDecision(null, reason))
     }
 
     /** Restores the original display mode; call on end, failure, and destroy. */

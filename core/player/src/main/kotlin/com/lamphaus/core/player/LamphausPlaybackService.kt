@@ -13,6 +13,7 @@ class LamphausPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         val player = Media3EngineFactory.createPlayer(this)
+        Media3EngineFactory.sessionPlayer = player
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val sessionActivity = launchIntent?.let {
             PendingIntent.getActivity(
@@ -84,6 +85,7 @@ class LamphausPlaybackService : MediaSessionService() {
             release()
         }
         mediaSession = null
+        Media3EngineFactory.sessionPlayer = null
         super.onDestroy()
     }
 

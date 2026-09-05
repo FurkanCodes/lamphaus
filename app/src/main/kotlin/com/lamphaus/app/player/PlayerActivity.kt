@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
@@ -44,6 +45,8 @@ import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.SpoilerProtectionSettings
+import com.lamphaus.core.model.ProfilePlaybackPreferences
+import com.lamphaus.core.model.SubtitleDefaultMode
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.WatchProgress
@@ -90,9 +93,19 @@ class PlayerActivity : ComponentActivity() {
     private var subtitleCues: List<com.lamphaus.core.model.SubtitleCue> = emptyList()
     private var uiPlayer: Player? = null
     private val subtitleStyleState = mutableStateOf(com.lamphaus.core.model.SubtitleStyle())
+    private val subtitleDelayState = mutableStateOf(0L)
+    private val audioDelayState = mutableStateOf(0L)
+    private val pictureInPictureState = mutableStateOf(false)
+    private val profilePlaybackPreferencesState = mutableStateOf(ProfilePlaybackPreferences())
     private val streamInfoState = mutableStateOf<String?>(null)
     private var displayTickJob: Job? = null
+    private var deviceConfigJob: Job? = null
+    private var attachedPlayerView: android.view.View? = null
     private var audioRouteFingerprint: String? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
+    private var subtitleStyleSaveJob: Job? = null
+    private var subtitleDelaySaveJob: Job? = null
+    private var audioDelaySaveJob: Job? = null
 
     /** Position of the last progress write; guards against redundant periodic saves. */
     @Volatile
@@ -134,11 +147,12 @@ class PlayerActivity : ComponentActivity() {
             )
         }
         lifecycleScope.launch {
-            val signedIn = container.accountGateway.state.value as? AccountState.SignedIn
-            val profileId = signedIn?.userId
-                ?: container.preferences.settings.first().activeProfileId
+            val profileId = activePlaybackProfileId()
                 ?: return@launch
-            subtitleStyleState.value = container.playbackPreferencesRepository.profilePreferences(profileId).subtitleStyle
+            val preferences = container.playbackPreferencesRepository.profilePreferences(profileId)
+            profilePlaybackPreferencesState.value = preferences
+            subtitleStyleState.value = preferences.subtitleStyle
+            controller?.let { applyTrackDefaults(it, preferences) }
         }
         registerAudioRouteListener()
         connect(playback)
@@ -147,6 +161,13 @@ class PlayerActivity : ComponentActivity() {
                 playbackSettingsState.value = settings.playback
                 spoilerProtectionState.value = settings.spoilerProtection
                 loadSegments(requestState.value, settings.playback)
+            }
+        }
+        // Frame-rate hint applies live without recreating the player; audio/
+        // decoder/HDR knobs stay construction-time and apply on next playback.
+        deviceConfigJob = lifecycleScope.launch {
+            container.preferences.settings.collectLatest { settings ->
+                Media3EngineFactory.applyDeviceConfigToSession(settings.devicePlayback)
             }
         }
         setContent {
@@ -168,7 +189,14 @@ class PlayerActivity : ComponentActivity() {
                     onDismissNextEpisodeMessage = { nextEpisodeMessageState.value = null },
                     onDismissNextEpisodeCard = ::dismissNextEpisodeCard,
                     onPlayerViewLayout = ::updatePipSourceRect,
+                    onEnterPictureInPicture = ::enterPlayerPictureInPicture,
+                    pictureInPictureAvailable = packageManager.hasSystemFeature(
+                        PackageManager.FEATURE_PICTURE_IN_PICTURE,
+                    ),
+                    inPictureInPicture = pictureInPictureState.value,
                     subtitleStyle = subtitleStyleState.value,
+                    subtitleDelayMillis = subtitleDelayState.value,
+                    audioDelayMillis = audioDelayState.value,
                     streamInfo = streamInfoState.value,
                     onSubtitleDelay = ::applySubtitleDelay,
                     onAudioDelay = ::updateAudioRouteDelay,
@@ -194,6 +222,7 @@ class PlayerActivity : ComponentActivity() {
                     val delayed = com.lamphaus.core.player.DelayedCuePlayer(mediaController)
                     uiPlayer = delayed
                     controllerState.value = mediaController
+                    applyTrackDefaults(mediaController, profilePlaybackPreferencesState.value)
                     mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
                     mediaController.addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -210,7 +239,10 @@ class PlayerActivity : ComponentActivity() {
                                 .flatMap { group -> (0 until group.length).asSequence().map(group::getTrackFormat) }
                                 .firstOrNull { it.frameRate > 0f }
                                 ?.frameRate
-                                ?: return
+                            if (frameRate == null) {
+                                displayModeController?.reportSkipped("frame rate unknown, matching skipped")
+                                return
+                            }
                             displayModeController?.onVideoFormat(videoSize.width, videoSize.height, frameRate)
                         }
 
@@ -221,19 +253,7 @@ class PlayerActivity : ComponentActivity() {
                     mediaController.prepare()
                     mediaController.play()
                     startProgressPulse()
-                    // Restore the remembered subtitle timing for this source (plan §4).
-                    lifecycleScope.launch {
-                        val signedIn = container.accountGateway.state.value as? AccountState.SignedIn ?: return@launch
-                        val fingerprint = playback.source.uri.substringBefore('?').hashCode().toString(16)
-                        val selection = container.playbackPreferencesRepository.sourceSelection(
-                            signedIn.userId,
-                            playback.mediaKey,
-                            fingerprint,
-                        )
-                        selection?.takeIf { it.subtitleDelayMillis != 0L }?.let {
-                            applySubtitleDelay(it.subtitleDelayMillis)
-                        }
-                    }
+                    restoreSourceTiming(playback)
                 }
             },
             ContextCompat.getMainExecutor(this),
@@ -247,6 +267,32 @@ class PlayerActivity : ComponentActivity() {
         segmentLookupJob = lifecycleScope.launch {
             segmentsState.value = container.skipRepository.segments(media, playback.episode)
         }
+    }
+
+    private fun applyTrackDefaults(player: Player, preferences: ProfilePlaybackPreferences) {
+        val parameters = player.trackSelectionParameters.buildUpon()
+        val audioLanguages = listOf(
+            preferences.audioLanguageTag,
+            preferences.secondaryAudioLanguageTag,
+        ).filter(String::isNotBlank).distinct()
+        if (audioLanguages.isNotEmpty()) {
+            parameters.setPreferredAudioLanguages(*audioLanguages.toTypedArray())
+        }
+        val subtitleLanguages = listOf(
+            preferences.preferredSubtitleLanguageTag,
+            preferences.secondarySubtitleLanguageTag,
+        ).filter(String::isNotBlank).distinct()
+        when (preferences.subtitleDefaultMode) {
+            SubtitleDefaultMode.OFF -> parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            SubtitleDefaultMode.FORCED_ONLY -> parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            SubtitleDefaultMode.PREFERRED_LANGUAGE -> {
+                parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                if (subtitleLanguages.isNotEmpty()) {
+                    parameters.setPreferredTextLanguages(*subtitleLanguages.toTypedArray())
+                }
+            }
+        }
+        player.trackSelectionParameters = parameters.build()
     }
 
     private fun playNextEpisode() {
@@ -392,6 +438,7 @@ class PlayerActivity : ComponentActivity() {
         nextEpisodeMessageState.value = null
         nextEpisodeDismissedVideoId.value = null
         loadSegments(next, playbackSettingsState.value)
+        restoreSourceTiming(next)
         controller?.apply {
             setMediaItem(next.toMediaItem())
             prepare()
@@ -402,15 +449,31 @@ class PlayerActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (!isTelevision && controller?.isPlaying == true) {
-            enterPictureInPictureMode(
-                PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build(),
-            )
+            enterPlayerPictureInPicture()
         }
     }
 
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pictureInPictureState.value = isInPictureInPictureMode
+    }
+
+    private fun enterPlayerPictureInPicture() {
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            return
+        }
+        enterPictureInPictureMode(
+            PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .build(),
+        )
+    }
+
     private fun updatePipSourceRect(playerView: android.view.View) {
+        attachedPlayerView = playerView
         if (isTelevision || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val sourceRect = Rect()
         if (!playerView.getGlobalVisibleRect(sourceRect)) return
@@ -441,9 +504,16 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        audioDeviceCallback?.let { callback ->
+            (getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
+                ?.unregisterAudioDeviceCallback(callback)
+        }
+        audioDeviceCallback = null
         displayModeController?.restore()
         displayTickJob?.cancel()
         displayTickJob = null
+        deviceConfigJob?.cancel()
+        deviceConfigJob = null
         progressPulseJob?.cancel()
         progressPulseJob = null
         segmentLookupJob?.cancel()
@@ -452,6 +522,10 @@ class PlayerActivity : ComponentActivity() {
         if (playback != null) {
             PlaybackHeaderRegistry.end(playback.source.uri, playback.source.subtitles.map { it.url })
         }
+        (attachedPlayerView as? androidx.media3.ui.PlayerView)?.player = null
+        attachedPlayerView = null
+        (uiPlayer as? com.lamphaus.core.player.DelayedCuePlayer)?.release()
+        uiPlayer = null
         controllerFuture?.let(MediaController::releaseFuture)
         controllerFuture = null
         controllerState.value = null
@@ -490,20 +564,22 @@ class PlayerActivity : ComponentActivity() {
      */
     private fun registerAudioRouteListener() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        val listener = object : AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = onRoutesChanged()
-            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = onRoutesChanged()
-
-            private fun onRoutesChanged() {
-                val fingerprint = audioRouteFingerprint(audioManager)
-                audioRouteFingerprint = fingerprint
-                container.applicationScope.launch {
-                    val settings = container.playbackPreferencesRepository.audioRouteSettings(fingerprint)
-                    Media3EngineFactory.audioDelayProcessor.delayMillis = settings.audioDelayMillis
-                }
+        fun refreshRoute() {
+            val fingerprint = audioRouteFingerprint(audioManager)
+            audioRouteFingerprint = fingerprint
+            container.applicationScope.launch {
+                val settings = container.playbackPreferencesRepository.audioRouteSettings(fingerprint)
+                audioDelayState.value = settings.audioDelayMillis
+                Media3EngineFactory.audioDelayProcessor.delayMillis = settings.audioDelayMillis
             }
         }
+        val listener = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refreshRoute()
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = refreshRoute()
+        }
+        audioDeviceCallback = listener
         audioManager.registerAudioDeviceCallback(listener, null)
+        refreshRoute()
     }
 
     /**
@@ -531,11 +607,10 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    fun applySyncByLine(cueStartMillis: Long) {
-        val position = controller?.currentPosition ?: return
+    fun applySyncByLine(capturedVideoTimeMillis: Long, cueStartMillis: Long) {
         applySubtitleDelay(
             com.lamphaus.core.model.syncByLineDelayMillis(
-                capturedVideoTimeMillis = position,
+                capturedVideoTimeMillis = capturedVideoTimeMillis,
                 selectedCueStartMillis = cueStartMillis,
             ),
         )
@@ -546,6 +621,34 @@ class PlayerActivity : ComponentActivity() {
      * playback (plan §4) and remembers it per profile/video/source.
      */
     fun applySubtitleDelay(delayMillis: Long) {
+        applySubtitleDelayToEngine(delayMillis)
+        val playback = request ?: return
+        subtitleDelaySaveJob?.cancel()
+        subtitleDelaySaveJob = container.applicationScope.launch {
+            delay(250)
+            val userId = activePlaybackProfileId()
+                ?: return@launch
+            val fingerprint = playback.source.uri.substringBefore('?').hashCode().toString(16)
+            val current = container.playbackPreferencesRepository.sourceSelection(
+                userId,
+                playback.mediaKey,
+                fingerprint,
+            ) ?: com.lamphaus.core.model.SourcePlaybackSelection(
+                profileId = userId,
+                mediaKey = playback.mediaKey,
+                sourceFingerprint = fingerprint,
+            )
+            container.playbackPreferencesRepository.saveSourceSelection(
+                current.copy(
+                    subtitleDelayMillis = delayMillis,
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
+    private fun applySubtitleDelayToEngine(delayMillis: Long) {
+        subtitleDelayState.value = delayMillis
         (uiPlayer as? com.lamphaus.core.player.DelayedCuePlayer)?.delayMillis = delayMillis
         controller?.sendCustomCommand(
             androidx.media3.session.SessionCommand(
@@ -554,17 +657,21 @@ class PlayerActivity : ComponentActivity() {
             ),
             android.os.Bundle.EMPTY,
         )
-        val playback = request ?: return
-        val userId = (container.accountGateway.state.value as? AccountState.SignedIn)?.userId ?: return
-        container.applicationScope.launch {
-            container.playbackPreferencesRepository.saveSourceSelection(
-                com.lamphaus.core.model.SourcePlaybackSelection(
-                    profileId = userId,
-                    mediaKey = playback.mediaKey,
-                    sourceFingerprint = playback.source.uri.substringBefore('?').hashCode().toString(16),
-                    subtitleDelayMillis = delayMillis,
-                ),
+    }
+
+    private fun restoreSourceTiming(playback: PlaybackRequest) {
+        subtitleDelayState.value = 0L
+        applySubtitleDelayToEngine(0L)
+        lifecycleScope.launch {
+            val profileId = activePlaybackProfileId()
+                ?: return@launch
+            val fingerprint = playback.source.uri.substringBefore('?').hashCode().toString(16)
+            val selection = container.playbackPreferencesRepository.sourceSelection(
+                profileId,
+                playback.mediaKey,
+                fingerprint,
             )
+            applySubtitleDelayToEngine(selection?.subtitleDelayMillis ?: 0L)
         }
     }
 
@@ -580,7 +687,7 @@ class PlayerActivity : ComponentActivity() {
                 android.os.Bundle().apply {
                     putString(
                         EXTRA_STYLE_JSON,
-                        Json { ignoreUnknownKeys = true }.encodeToString(
+                        JSON.encodeToString(
                             com.lamphaus.core.model.SubtitleStyle.serializer(),
                             style,
                         ),
@@ -589,9 +696,10 @@ class PlayerActivity : ComponentActivity() {
             ),
             android.os.Bundle.EMPTY,
         )
-        container.applicationScope.launch {
-            val userId = (container.accountGateway.state.value as? AccountState.SignedIn)?.userId
-                ?: container.preferences.settings.first().activeProfileId ?: return@launch
+        subtitleStyleSaveJob?.cancel()
+        subtitleStyleSaveJob = container.applicationScope.launch {
+            delay(250)
+            val userId = activePlaybackProfileId() ?: return@launch
             val current = container.playbackPreferencesRepository.profilePreferences(userId)
             container.playbackPreferencesRepository.saveProfilePreferences(
                 userId,
@@ -602,9 +710,12 @@ class PlayerActivity : ComponentActivity() {
 
     /** Applies and remembers the delay for the current route (audio panel entry point). */
     fun updateAudioRouteDelay(millis: Long) {
+        audioDelayState.value = millis
         Media3EngineFactory.audioDelayProcessor.delayMillis = millis
         val fingerprint = audioRouteFingerprint ?: return
-        container.applicationScope.launch {
+        audioDelaySaveJob?.cancel()
+        audioDelaySaveJob = container.applicationScope.launch {
+            delay(250)
             container.playbackPreferencesRepository.saveAudioRouteSettings(
                 com.lamphaus.core.model.AudioRouteSettings(
                     routeFingerprint = fingerprint,
@@ -678,6 +789,10 @@ class PlayerActivity : ComponentActivity() {
             } ?: Log.d(PROGRESS_LOG_TAG, "cloud sync skipped: not signed in")
         }
     }
+
+    private suspend fun activePlaybackProfileId(): String? =
+        container.preferences.settings.first().activeProfileId
+            ?: (container.accountGateway.state.value as? AccountState.SignedIn)?.userId
 
     companion object {
         private const val PROGRESS_LOG_TAG = "Lamphaus.Progress"

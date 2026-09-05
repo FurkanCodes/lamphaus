@@ -33,6 +33,8 @@ import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSettings
+import com.lamphaus.core.model.DevicePlaybackConfig
+import com.lamphaus.core.model.ProfilePlaybackPreferences
 import com.lamphaus.core.model.PlaybackSource
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.StreamCandidate
@@ -170,6 +172,7 @@ class AppViewModel(
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
                     playbackSettings = settings.playback,
+                    devicePlaybackConfig = settings.devicePlayback,
                 )
             }.collectLatest { snapshot ->
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
@@ -222,12 +225,23 @@ class AppViewModel(
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
                         playbackSettings = snapshot.playbackSettings,
+                        devicePlaybackConfig = snapshot.devicePlaybackConfig,
                         initialContentLoading = if (accountChanged || nextUserId == null) {
                             true
                         } else {
                             current.initialContentLoading
                         },
                     )
+                }
+                val profilePlaybackPreferences = activeId?.let {
+                    container.playbackPreferencesRepository.profilePreferences(it)
+                } ?: ProfilePlaybackPreferences()
+                mutableState.update { current ->
+                    if (current.activeProfileId == activeId) {
+                        current.copy(profilePlaybackPreferences = profilePlaybackPreferences)
+                    } else {
+                        current
+                    }
                 }
                 if (activeId != snapshot.activeProfileId) container.preferences.setActiveProfile(activeId)
                 if (snapshot.account is AccountState.SignedIn) {
@@ -1839,6 +1853,21 @@ class AppViewModel(
         container.preferences.setPlaybackSettings(settings)
     }
 
+    // Frame-rate hint applies live via applyDeviceConfigToSession; audioOutputMode/
+    // decoderPriority/downmixMode/HDR path apply on next createPlayer (next playback).
+    fun setDevicePlaybackConfig(config: DevicePlaybackConfig) = viewModelScope.launch {
+        container.preferences.setDevicePlayback(config)
+    }
+
+    fun setProfilePlaybackPreferences(preferences: ProfilePlaybackPreferences) = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        val saved = preferences.copy(updatedAtEpochMillis = System.currentTimeMillis())
+        container.playbackPreferencesRepository.saveProfilePreferences(profileId, saved)
+        mutableState.update { current ->
+            if (current.activeProfileId == profileId) current.copy(profilePlaybackPreferences = saved) else current
+        }
+    }
+
 
 
     fun dismissMessage() = mutableState.update { it.copy(message = null) }
@@ -2472,6 +2501,7 @@ class AppViewModel(
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
         val playbackSettings: PlaybackSettings,
+        val devicePlaybackConfig: DevicePlaybackConfig,
     )
 
     companion object {

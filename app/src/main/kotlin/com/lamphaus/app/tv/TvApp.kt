@@ -183,6 +183,9 @@ import com.lamphaus.core.model.DetailEnrichment
 import com.lamphaus.core.model.RatingSourceScore
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
+import com.lamphaus.core.model.FrameRateMatching
+import com.lamphaus.core.model.ResolutionMatching
+import com.lamphaus.core.model.SubtitleDefaultMode
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
 import kotlinx.coroutines.delay
@@ -3164,6 +3167,7 @@ private enum class TvSettingsSection(
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     SOURCES(R.string.addons, Icons.Outlined.Add),
     INTEGRATIONS(R.string.integrations, Icons.Outlined.Extension),
+    PLAYBACK(R.string.playback, Icons.Outlined.PlayArrow),
     APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
     SPOILERS(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ABOUT(R.string.about, Icons.Outlined.Info),
@@ -3215,12 +3219,147 @@ private fun TvSettings(
                 TvSettingsSection.PROFILES -> TvProfilesSettings(state, viewModel)
                 TvSettingsSection.SOURCES -> TvSourcesSettings(state, viewModel)
                 TvSettingsSection.INTEGRATIONS -> TvIntegrationsSettings(state, viewModel)
+                TvSettingsSection.PLAYBACK -> TvPlaybackSettings(state, viewModel)
                 TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
                 TvSettingsSection.SPOILERS -> TvSpoilerSettings(state, viewModel)
                 TvSettingsSection.ABOUT -> TvAboutSettings()
             }
         }
     }
+}
+
+@Composable
+private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
+    val profile = state.profilePlaybackPreferences
+    val device = state.devicePlaybackConfig
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
+    ) {
+        item {
+            Text(stringResource(R.string.playback), style = MaterialTheme.typography.headlineSmall)
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = "Default audio",
+                description = "Original first, then your preferred language",
+                value = tvPlaybackLanguageLabel(profile.audioLanguageTag),
+                onClick = {
+                    val index = TV_PLAYER_LANGUAGE_OPTIONS.indexOfFirst { it.first == profile.audioLanguageTag }
+                    val next = TV_PLAYER_LANGUAGE_OPTIONS[(index + 1).coerceAtLeast(0) % TV_PLAYER_LANGUAGE_OPTIONS.size]
+                    viewModel.setProfilePlaybackPreferences(profile.copy(audioLanguageTag = next.first))
+                },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = "Default subtitles",
+                description = "Applied when this title has no remembered choice",
+                value = tvSubtitleDefaultLabel(profile.subtitleDefaultMode),
+                onClick = {
+                    val entries = SubtitleDefaultMode.entries
+                    viewModel.setProfilePlaybackPreferences(
+                        profile.copy(subtitleDefaultMode = entries[(entries.indexOf(profile.subtitleDefaultMode) + 1) % entries.size]),
+                    )
+                },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = "Original colors",
+                description = "Keep HDR and Dolby Vision color mapping when this display supports it",
+                checked = profile.originalColors,
+                onCheckedChange = {
+                    viewModel.setProfilePlaybackPreferences(profile.copy(originalColors = it))
+                },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = "Match frame rate",
+                description = "Change refresh rate to reduce judder",
+                value = tvFrameRateMatchingLabel(device.frameRateMatching),
+                onClick = {
+                    val entries = FrameRateMatching.entries
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(frameRateMatching = entries[(entries.indexOf(device.frameRateMatching) + 1) % entries.size]),
+                    )
+                },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = "Match resolution",
+                description = "Switch to the source resolution when the display offers it",
+                checked = device.resolutionMatching == ResolutionMatching.MATCH_SOURCE,
+                onCheckedChange = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(
+                            resolutionMatching = if (it) ResolutionMatching.MATCH_SOURCE else ResolutionMatching.OFF,
+                        ),
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvSettingsChoiceRow(
+    title: String,
+    description: String,
+    value: String,
+    onClick: () -> Unit,
+) {
+    TvFocusableSurface(
+        onClick = onClick,
+        role = Role.Button,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp),
+    ) { focused ->
+        val primary = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground
+        val secondary = if (focused) {
+            TvFocusTokens.focusedContent.copy(alpha = 0.76f)
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = primary)
+                Text(description, style = MaterialTheme.typography.bodySmall, color = secondary)
+            }
+            Text(value, style = MaterialTheme.typography.titleSmall, color = primary)
+        }
+    }
+}
+
+private val TV_PLAYER_LANGUAGE_OPTIONS = listOf(
+    "" to "Original / device",
+    "en" to "English",
+    "tr" to "Turkish",
+    "de" to "German",
+    "es" to "Spanish",
+    "fr" to "French",
+    "ja" to "Japanese",
+    "ko" to "Korean",
+)
+
+private fun tvPlaybackLanguageLabel(tag: String): String =
+    TV_PLAYER_LANGUAGE_OPTIONS.firstOrNull { it.first == tag }?.second ?: java.util.Locale.forLanguageTag(tag).displayLanguage
+
+private fun tvSubtitleDefaultLabel(mode: SubtitleDefaultMode): String = when (mode) {
+    SubtitleDefaultMode.OFF -> "Off"
+    SubtitleDefaultMode.FORCED_ONLY -> "Forced only"
+    SubtitleDefaultMode.PREFERRED_LANGUAGE -> "Preferred language"
+}
+
+private fun tvFrameRateMatchingLabel(mode: FrameRateMatching): String = when (mode) {
+    FrameRateMatching.OFF -> "Off"
+    FrameRateMatching.SEAMLESS_ONLY -> "Seamless only"
+    FrameRateMatching.ALWAYS -> "Always"
 }
 
 @Composable

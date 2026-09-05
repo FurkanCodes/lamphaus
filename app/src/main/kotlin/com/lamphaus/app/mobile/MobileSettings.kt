@@ -92,6 +92,9 @@ import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.NextEpisodePolicy
 import com.lamphaus.core.model.NextEpisodeThresholdMode
 import com.lamphaus.core.model.PlaybackSettings
+import com.lamphaus.core.model.FrameRateMatching
+import com.lamphaus.core.model.ResolutionMatching
+import com.lamphaus.core.model.SubtitleDefaultMode
 import java.util.Locale
 import com.lamphaus.core.model.ProfileKind
 
@@ -178,7 +181,62 @@ private fun SettingsRootMenu(onSelect: (SettingsSection) -> Unit) {
 @Composable
 private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
     val playback = state.playbackSettings
+    val profile = state.profilePlaybackPreferences
+    val device = state.devicePlaybackConfig
+    var choiceDialog by remember { mutableStateOf<PlaybackChoiceDialog?>(null) }
     SettingsPage(title = stringResource(R.string.playback)) {
+        item {
+            SettingsCard("Language and color defaults") {
+                ListItem(
+                    headlineContent = { Text("Default audio") },
+                    supportingContent = { Text("Original first, then the preferred language") },
+                    trailingContent = { Text(playbackLanguageLabel(profile.audioLanguageTag)) },
+                    modifier = Modifier.clickable(role = Role.Button) { choiceDialog = PlaybackChoiceDialog.AUDIO },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                ListItem(
+                    headlineContent = { Text("Default subtitles") },
+                    supportingContent = { Text("Used when a title has no remembered choice") },
+                    trailingContent = { Text(subtitleDefaultLabel(profile.subtitleDefaultMode)) },
+                    modifier = Modifier.clickable(role = Role.Button) { choiceDialog = PlaybackChoiceDialog.SUBTITLES },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = "Original colors",
+                    description = "Keep HDR and Dolby Vision color mapping when the display supports it",
+                    checked = profile.originalColors,
+                    onCheckedChange = {
+                        viewModel.setProfilePlaybackPreferences(profile.copy(originalColors = it))
+                    },
+                )
+            }
+        }
+        item {
+            SettingsCard("Display matching") {
+                ListItem(
+                    headlineContent = { Text("Match frame rate") },
+                    supportingContent = { Text("Change refresh rate to reduce judder") },
+                    trailingContent = { Text(frameRateMatchingLabel(device.frameRateMatching)) },
+                    modifier = Modifier.clickable(role = Role.Button) { choiceDialog = PlaybackChoiceDialog.FRAME_RATE },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = "Match resolution",
+                    description = "On TV, switch to the source resolution when the display offers it",
+                    checked = device.resolutionMatching == ResolutionMatching.MATCH_SOURCE,
+                    onCheckedChange = {
+                        viewModel.setDevicePlaybackConfig(
+                            device.copy(
+                                resolutionMatching = if (it) ResolutionMatching.MATCH_SOURCE else ResolutionMatching.OFF,
+                            ),
+                        )
+                    },
+                )
+            }
+        }
         item {
             SettingsCard(stringResource(R.string.episode_playback)) {
                 PlaybackSettingRow(
@@ -215,6 +273,86 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
     }
+    choiceDialog?.let { dialog ->
+        val options = when (dialog) {
+            PlaybackChoiceDialog.AUDIO -> PLAYER_LANGUAGE_OPTIONS.map { (tag, label) ->
+                PlaybackChoice(label, profile.audioLanguageTag == tag) {
+                    viewModel.setProfilePlaybackPreferences(profile.copy(audioLanguageTag = tag))
+                }
+            }
+            PlaybackChoiceDialog.SUBTITLES -> SubtitleDefaultMode.entries.map { mode ->
+                PlaybackChoice(subtitleDefaultLabel(mode), profile.subtitleDefaultMode == mode) {
+                    viewModel.setProfilePlaybackPreferences(profile.copy(subtitleDefaultMode = mode))
+                }
+            }
+            PlaybackChoiceDialog.FRAME_RATE -> FrameRateMatching.entries.map { mode ->
+                PlaybackChoice(frameRateMatchingLabel(mode), device.frameRateMatching == mode) {
+                    viewModel.setDevicePlaybackConfig(device.copy(frameRateMatching = mode))
+                }
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { choiceDialog = null },
+            title = {
+                Text(
+                    when (dialog) {
+                        PlaybackChoiceDialog.AUDIO -> "Default audio"
+                        PlaybackChoiceDialog.SUBTITLES -> "Default subtitles"
+                        PlaybackChoiceDialog.FRAME_RATE -> "Match frame rate"
+                    },
+                )
+            },
+            text = {
+                Column {
+                    options.forEach { option ->
+                        ListItem(
+                            headlineContent = { Text(option.label) },
+                            trailingContent = { if (option.selected) Text("✓") },
+                            modifier = Modifier.clickable(role = Role.RadioButton) {
+                                option.onClick()
+                                choiceDialog = null
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { choiceDialog = null }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+}
+
+private enum class PlaybackChoiceDialog { AUDIO, SUBTITLES, FRAME_RATE }
+
+private data class PlaybackChoice(val label: String, val selected: Boolean, val onClick: () -> Unit)
+
+private val PLAYER_LANGUAGE_OPTIONS = listOf(
+    "" to "Original / device default",
+    "en" to "English",
+    "tr" to "Turkish",
+    "de" to "German",
+    "es" to "Spanish",
+    "fr" to "French",
+    "ja" to "Japanese",
+    "ko" to "Korean",
+)
+
+private fun playbackLanguageLabel(tag: String): String =
+    PLAYER_LANGUAGE_OPTIONS.firstOrNull { it.first == tag }?.second ?: Locale.forLanguageTag(tag).displayLanguage
+
+private fun subtitleDefaultLabel(mode: SubtitleDefaultMode): String = when (mode) {
+    SubtitleDefaultMode.OFF -> "Off"
+    SubtitleDefaultMode.FORCED_ONLY -> "Forced only"
+    SubtitleDefaultMode.PREFERRED_LANGUAGE -> "Preferred language"
+}
+
+private fun frameRateMatchingLabel(mode: FrameRateMatching): String = when (mode) {
+    FrameRateMatching.OFF -> "Off"
+    FrameRateMatching.SEAMLESS_ONLY -> "Seamless only"
+    FrameRateMatching.ALWAYS -> "Always"
 }
 
 /**

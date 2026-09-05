@@ -17,6 +17,8 @@ import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PairingSession
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSettings
+import com.lamphaus.core.model.DevicePlaybackConfig
+import com.lamphaus.core.model.ProfilePlaybackPreferences
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.StreamCandidate
@@ -210,6 +212,8 @@ data class AppUiState(
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playbackSettings: PlaybackSettings = PlaybackSettings(),
+    val profilePlaybackPreferences: ProfilePlaybackPreferences = ProfilePlaybackPreferences(),
+    val devicePlaybackConfig: DevicePlaybackConfig = DevicePlaybackConfig(),
     val pairedDevices: List<PairedDevice> = emptyList(),
     val initialContentLoading: Boolean = true,
     val refreshing: Boolean = false,
@@ -242,6 +246,7 @@ data class AppUiState(
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,
+        devicePlaybackConfig = devicePlaybackConfig,
         initialContentLoading = false,
     )
 }
