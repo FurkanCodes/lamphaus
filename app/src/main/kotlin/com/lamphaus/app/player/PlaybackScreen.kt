@@ -60,6 +60,32 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -149,11 +175,11 @@ internal val PlayerFont = FontFamily(
     Font(R.font.inter_semi_bold, FontWeight.SemiBold),
 )
 
-private enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, INFO }
+internal enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, DISPLAY, MORE, INFO }
 
 private enum class PlayerEditor { TIMING, STYLE }
 
-private data class PlayerSnapshot(
+internal data class PlayerSnapshot(
     val playing: Boolean = false,
     val buffering: Boolean = true,
     val positionMillis: Long = 0,
@@ -211,11 +237,15 @@ internal fun PlaybackScreen(
     onSubtitleStyle: (SubtitleStyle) -> Unit,
     onLoadSidecarCues: ((List<SubtitleCue>) -> Unit) -> Unit,
     onApplySyncByLine: (Long, Long) -> Unit,
+    onControlsVisibilityChanged: (Boolean) -> Unit = {},
 ) {
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
     var controlsVisible by remember { mutableStateOf(true) }
+    var resizeMode by rememberSaveable { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var panel by remember { mutableStateOf<PlayerPanel?>(null) }
     var editor by remember { mutableStateOf<PlayerEditor?>(null) }
+    var editorReturnTarget by remember { mutableStateOf<PlayerEditor?>(null) }
+    var panelParent by remember { mutableStateOf<PlayerPanel?>(null) }
     var returnFocusPanel by remember { mutableStateOf<PlayerPanel?>(null) }
     var controlsFocusVersion by remember { mutableLongStateOf(0L) }
     var interactionVersion by remember { mutableLongStateOf(0L) }
@@ -258,6 +288,11 @@ internal fun PlaybackScreen(
     }
 
     fun closePanel() {
+        if (panelParent != null) {
+            panel = panelParent
+            panelParent = null
+            return
+        }
         panel = null
         editor = null
         controlsFocusVersion++
@@ -304,6 +339,10 @@ internal fun PlaybackScreen(
         if (!controlsVisible && panel == null) rootFocus.requestFocus()
     }
 
+    LaunchedEffect(controlsVisible, inPictureInPicture, panel) {
+        onControlsVisibilityChanged(!inPictureInPicture && (controlsVisible || panel != null))
+    }
+
     LaunchedEffect(inPictureInPicture) {
         if (inPictureInPicture) {
             controlsVisible = false
@@ -325,6 +364,7 @@ internal fun PlaybackScreen(
         }
     }
 
+    PlaybackTheme(isTelevision) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -403,6 +443,7 @@ internal fun PlaybackScreen(
                 }
             },
             update = { view ->
+                view.resizeMode = resizeMode
                 view.player = player
                 view.keepScreenOn = player?.isPlaying == true
                 // Keep captions above the control gradient while chrome is visible
@@ -433,10 +474,10 @@ internal fun PlaybackScreen(
                     strokeWidth = 3.dp,
                 )
                 Text(
-                    text = "Loading…",
+                    text = stringResource(R.string.player_loading),
                     color = PlayerOnSurface,
                     fontFamily = PlayerFont,
-                    fontSize = if (isTelevision) 16.sp else 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
         }
@@ -454,7 +495,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (!inPictureInPicture && controlsVisible && snapshot.errorMessage == null) {
+        if (!inPictureInPicture && controlsVisible && panel == null && snapshot.errorMessage == null) {
             PlayerControls(
                 request = request,
                 snapshot = snapshot,
@@ -475,6 +516,8 @@ internal fun PlaybackScreen(
                 onPanel = {
                     returnFocusPanel = it
                     panel = it
+                    panelParent = null
+                    editorReturnTarget = null
                     editor = null
                     revealControls()
                 },
@@ -574,7 +617,7 @@ internal fun PlaybackScreen(
 
         panel?.takeUnless { inPictureInPicture }?.let { activePanel ->
             if (activePanel == PlayerPanel.INFO) {
-                PlayerStreamInfoPanel(streamInfo = streamInfo, onClose = ::closePanel)
+                PlayerStreamInfoPanel(streamInfo = streamInfo, isTelevision = isTelevision, onClose = ::closePanel)
             } else if (editor == PlayerEditor.TIMING) {
                 PlayerTimingEditor(
                     isTelevision = isTelevision,
@@ -604,6 +647,7 @@ internal fun PlaybackScreen(
                     audioDelayMillis = audioDelayMillis,
                     onAudioDelay = onAudioDelay,
                     onOpenEditor = { opened ->
+                        editorReturnTarget = opened
                         editor = opened
                         revealControls()
                     },
@@ -611,277 +655,15 @@ internal fun PlaybackScreen(
                     subtitleDelayMillis = subtitleDelayMillis,
                     onSubtitleDelay = onSubtitleDelay,
                     subtitleStyle = subtitleStyle,
+                    resizeMode = resizeMode,
+                    onResizeMode = { resizeMode = it },
+                    onPanel = { panelParent = panel; panel = it },
+                    editorReturnTarget = editorReturnTarget,
+                    onOpenExternally = onOpenExternally,
                 )
             }
         }
     }
-}
-
-@Composable
-private fun PlayerControls(
-    request: PlaybackRequest,
-    snapshot: PlayerSnapshot,
-    isTelevision: Boolean,
-    onInteraction: () -> Unit,
-    onTogglePlay: () -> Unit,
-    onReplay: () -> Unit,
-    onSeekBack: () -> Unit,
-    onSeekForward: () -> Unit,
-    onSeekTo: (Long) -> Unit,
-    onEnterPictureInPicture: () -> Unit,
-    pictureInPictureAvailable: Boolean,
-    canPlayNext: Boolean,
-    nextEpisodeLoading: Boolean,
-    onNextEpisode: () -> Unit,
-    focusPanel: PlayerPanel?,
-    focusRequestVersion: Long,
-    onPanel: (PlayerPanel) -> Unit,
-    segments: List<PlaybackSegment> = emptyList(),
-    onExit: () -> Unit = {},
-) {
-    val playFocus = remember { FocusRequester() }
-    val audioFocus = remember { FocusRequester() }
-    val subtitlesFocus = remember { FocusRequester() }
-    val speedFocus = remember { FocusRequester() }
-    val ended = snapshot.durationMillis > 0 && snapshot.positionMillis >= snapshot.durationMillis - 1_000
-    val subtitlesActive = remember(snapshot.tracks) {
-        snapshot.tracks.groups.any { group ->
-            group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any(group::isTrackSelected)
-        }
-    }
-    val speedActive = snapshot.speed != 1f
-    LaunchedEffect(focusRequestVersion) {
-        when (focusPanel) {
-            PlayerPanel.AUDIO -> audioFocus
-            PlayerPanel.SUBTITLES -> subtitlesFocus
-            PlayerPanel.SPEED -> speedFocus
-            else -> playFocus
-        }.requestFocus()
-    }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (isTelevision) {
-            // JetStream contract (plan §5): 844dp lower information/seeker
-            // frame on the 960dp canvas = 58dp safe margins on each side.
-            // Title, timeline with time labels, Info affordance, and the four
-            // 40dp visual action icons (48dp touch targets). The CC/Audio/
-            // Settings entries open the 216x320dp contextual menus.
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .width(844.dp)
-                    .padding(bottom = 40.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                PlayerTitle(request, true)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    PlayerTime(snapshot.positionMillis)
-                    PlayerProgress(
-                        positionMillis = snapshot.positionMillis,
-                        bufferedPositionMillis = snapshot.bufferedPositionMillis,
-                        durationMillis = snapshot.durationMillis,
-                        modifier = Modifier.weight(1f),
-                        onSeekTo = onSeekTo,
-                        onInteraction = onInteraction,
-                        segments = segments,
-                    )
-                    PlayerRemaining(snapshot.positionMillis, snapshot.durationMillis)
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                ) {
-                    PlayerTextButton(
-                        label = "Info",
-                        onClick = { onPanel(PlayerPanel.INFO) },
-                    )
-                    Spacer(Modifier.weight(1f))
-                    PlayerActionButton(
-                        icon = Icons.Rounded.Replay10,
-                        label = "Rewind 10 seconds",
-                    ) {
-                        onSeekBack(); onInteraction()
-                    }
-                    PlayerActionButton(
-                        icon = when {
-                            ended -> Icons.Rounded.Replay
-                            snapshot.playing -> Icons.Rounded.Pause
-                            else -> Icons.Rounded.PlayArrow
-                        },
-                        label = when {
-                            ended -> "Replay"
-                            snapshot.playing -> "Pause"
-                            else -> "Play"
-                        },
-                        visualSize = 30.dp,
-                        containerSize = 56.dp,
-                        primary = true,
-                        modifier = Modifier.focusRequester(playFocus),
-                    ) {
-                        if (ended) onReplay() else onTogglePlay()
-                        onInteraction()
-                    }
-                    PlayerActionButton(
-                        icon = Icons.Rounded.FastForward,
-                        label = "Forward 10 seconds",
-                    ) {
-                        onSeekForward(); onInteraction()
-                    }
-                    if (canPlayNext) {
-                        PlayerActionButton(
-                            icon = Icons.Rounded.SkipNext,
-                            label = "Next episode",
-                        ) {
-                            if (!nextEpisodeLoading) onNextEpisode()
-                            onInteraction()
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    PlayerActionButton(
-                        icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                        label = "Audio",
-                        modifier = Modifier.focusRequester(audioFocus),
-                    ) { onPanel(PlayerPanel.AUDIO) }
-                    PlayerActionButton(
-                        icon = Icons.Rounded.ClosedCaption,
-                        label = if (subtitlesActive) "Subtitles, on" else "Subtitles",
-                        active = subtitlesActive,
-                        modifier = Modifier.focusRequester(subtitlesFocus),
-                    ) { onPanel(PlayerPanel.SUBTITLES) }
-                    PlayerActionButton(
-                        icon = Icons.Rounded.Settings,
-                        label = if (speedActive) "Playback speed, ${snapshot.speed} times" else "Playback speed",
-                        active = speedActive,
-                        modifier = Modifier.focusRequester(speedFocus),
-                    ) { onPanel(PlayerPanel.SPEED) }
-                    if (pictureInPictureAvailable) {
-                        PlayerActionButton(
-                            icon = Icons.Rounded.PictureInPictureAlt,
-                            label = "Picture in picture",
-                        ) {
-                            onEnterPictureInPicture()
-                            onInteraction()
-                        }
-                    }
-                }
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
-                            WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
-                        ),
-                    )
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                PlayerActionButton(
-                    icon = Icons.Rounded.Close,
-                    label = "Close player",
-                    onClick = onExit,
-                )
-                PlayerTitle(request, false, Modifier.weight(1f))
-                if (pictureInPictureAvailable) {
-                    PlayerActionButton(
-                        icon = Icons.Rounded.PictureInPictureAlt,
-                        label = "Picture in picture",
-                        onClick = {
-                            onEnterPictureInPicture()
-                            onInteraction()
-                        },
-                    )
-                }
-            }
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
-                            WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
-                        ),
-                    )
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    PlayerTime(snapshot.positionMillis)
-                    PlayerProgress(
-                        positionMillis = snapshot.positionMillis,
-                        bufferedPositionMillis = snapshot.bufferedPositionMillis,
-                        durationMillis = snapshot.durationMillis,
-                        modifier = Modifier.weight(1f),
-                        onSeekTo = onSeekTo,
-                        onInteraction = onInteraction,
-                        segments = segments,
-                    )
-                    PlayerRemaining(snapshot.positionMillis, snapshot.durationMillis)
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                ) {
-                    PlayerActionButton(
-                        icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                        label = "Audio",
-                        modifier = Modifier.focusRequester(audioFocus),
-                    ) { onPanel(PlayerPanel.AUDIO) }
-                    PlayerActionButton(
-                        icon = Icons.Rounded.ClosedCaption,
-                        label = if (subtitlesActive) "Subtitles, on" else "Subtitles",
-                        active = subtitlesActive,
-                        modifier = Modifier.focusRequester(subtitlesFocus),
-                    ) { onPanel(PlayerPanel.SUBTITLES) }
-                    Spacer(Modifier.weight(1f))
-                    PlayerActionButton(Icons.Rounded.Replay10, "Rewind 10 seconds") {
-                        onSeekBack(); onInteraction()
-                    }
-                    PlayerActionButton(
-                        icon = when {
-                            ended -> Icons.Rounded.Replay
-                            snapshot.playing -> Icons.Rounded.Pause
-                            else -> Icons.Rounded.PlayArrow
-                        },
-                        label = when {
-                            ended -> "Replay"
-                            snapshot.playing -> "Pause"
-                            else -> "Play"
-                        },
-                        visualSize = 28.dp,
-                        containerSize = 52.dp,
-                        primary = true,
-                        modifier = Modifier.focusRequester(playFocus),
-                        onClick = {
-                            if (ended) onReplay() else onTogglePlay()
-                            onInteraction()
-                        },
-                    )
-                    PlayerActionButton(Icons.Rounded.FastForward, "Forward 10 seconds") {
-                        onSeekForward(); onInteraction()
-                    }
-                    Spacer(Modifier.weight(1f))
-                    PlayerActionButton(
-                        icon = Icons.Rounded.Settings,
-                        label = if (speedActive) "Playback speed, ${snapshot.speed} times" else "Playback speed",
-                        active = speedActive,
-                        modifier = Modifier.focusRequester(speedFocus),
-                    ) { onPanel(PlayerPanel.SPEED) }
-                }
-            }
-        }
     }
 }
 
@@ -951,14 +733,14 @@ private fun PlaybackCueActions(
 
 
 @Composable
-private fun PlayerTitle(request: PlaybackRequest, isTelevision: Boolean, modifier: Modifier = Modifier) {
+internal fun PlayerTitle(request: PlaybackRequest, isTelevision: Boolean, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = request.title,
             color = PlayerOnSurface,
             fontFamily = PlayerFont,
             fontWeight = FontWeight.Medium,
-            fontSize = if (isTelevision) 24.sp else 20.sp,
+            style = if (isTelevision) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -967,7 +749,7 @@ private fun PlayerTitle(request: PlaybackRequest, isTelevision: Boolean, modifie
                 text = it,
                 color = PlayerOnSurfaceMuted,
                 fontFamily = PlayerFont,
-                fontSize = if (isTelevision) 16.sp else 14.sp,
+                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -977,7 +759,7 @@ private fun PlayerTitle(request: PlaybackRequest, isTelevision: Boolean, modifie
 
 
 @Composable
-private fun PlayerActionButton(
+internal fun PlayerActionButton(
     icon: ImageVector,
     label: String,
     modifier: Modifier = Modifier,
@@ -987,6 +769,14 @@ private fun PlayerActionButton(
     containerSize: androidx.compose.ui.unit.Dp = 48.dp,
     onClick: () -> Unit,
 ) {
+    if (!LocalPlayerTelevision.current) {
+        FilledIconButton(onClick = onClick, modifier = modifier.size(containerSize),
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = if (primary) PlayerFocused else Color.Black.copy(alpha = .48f),
+                contentColor = if (primary) PlayerFocusedContent else if (active) PlayerPrimary else PlayerOnSurface,
+            )) { Icon(icon, label, Modifier.size(visualSize)) }
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = modifier
@@ -1009,7 +799,8 @@ private fun PlayerActionButton(
             .clickable(onClick = onClick)
             .semantics {
                 role = Role.Button
-                contentDescription = if (active) "$label, on" else label
+                contentDescription = label
+                selected = active
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -1036,13 +827,23 @@ private fun PlayerActionButton(
     }
 }
 @Composable
-private fun PlayerSettingButton(
+internal fun PlayerSettingButton(
     icon: ImageVector,
     label: String,
     active: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+    if (!LocalPlayerTelevision.current) {
+        TextButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+            colors = ButtonDefaults.textButtonColors(contentColor = if (active) PlayerPrimary else PlayerOnSurface)) {
+            Icon(icon, null, Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
@@ -1064,7 +865,8 @@ private fun PlayerSettingButton(
             .clickable(onClick = onClick)
             .semantics {
                 role = Role.Button
-                contentDescription = if (active) "$label, on" else label
+                contentDescription = label
+                selected = active
             }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1100,8 +902,9 @@ private fun PlayerSettingButton(
     }
 }
 
+@kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun PlayerProgress(
+internal fun PlayerProgress(
     positionMillis: Long,
     bufferedPositionMillis: Long,
     durationMillis: Long,
@@ -1110,6 +913,30 @@ private fun PlayerProgress(
     onInteraction: () -> Unit,
     segments: List<PlaybackSegment> = emptyList(),
 ) {
+    val seekDescription = stringResource(R.string.player_seek)
+    if (!LocalPlayerTelevision.current) {
+        var scrubPosition by remember { mutableStateOf<Float?>(null) }
+        Slider(
+            value = scrubPosition ?: positionMillis.toFloat().coerceIn(0f, durationMillis.coerceAtLeast(1L).toFloat()),
+            onValueChange = { scrubPosition = it; onInteraction() },
+            onValueChangeFinished = { scrubPosition?.let { onSeekTo(it.toLong()) }; scrubPosition = null },
+            valueRange = 0f..durationMillis.coerceAtLeast(1L).toFloat(),
+            enabled = durationMillis > 0,
+            modifier = modifier.heightIn(min = 48.dp).semantics { contentDescription = seekDescription },
+            thumb = { Box(Modifier.size(12.dp).background(PlayerPrimary, CircleShape)) },
+            track = { state ->
+                Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+                    val radius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                    val played = state.value / durationMillis.coerceAtLeast(1L)
+                    val buffered = bufferedPositionMillis.toFloat() / durationMillis.coerceAtLeast(1L)
+                    drawRoundRect(PlayerTrack, cornerRadius = radius)
+                    drawRoundRect(PlayerBuffered, size = size.copy(width = size.width * buffered.coerceIn(0f, 1f)), cornerRadius = radius)
+                    drawRoundRect(PlayerPrimary, size = size.copy(width = size.width * played.coerceIn(0f, 1f)), cornerRadius = radius)
+                }
+            },
+        )
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     val played = if (durationMillis > 0) positionMillis.toFloat() / durationMillis else 0f
     val buffered = if (durationMillis > 0) bufferedPositionMillis.toFloat() / durationMillis else 0f
@@ -1118,8 +945,15 @@ private fun PlayerProgress(
             .height(48.dp)
             .onFocusChanged { focused = it.isFocused }
             .semantics {
-                role = Role.Button
-                contentDescription = "Seek, ${positionMillis.asPlaybackTime()} of ${durationMillis.asPlaybackTime()}"
+                contentDescription = seekDescription
+                progressBarRangeInfo = ProgressBarRangeInfo(played.coerceIn(0f, 1f), 0f..1f)
+                setProgress { fraction ->
+                    if (durationMillis <= 0) false else {
+                        onSeekTo((durationMillis * fraction.coerceIn(0f, 1f)).toLong())
+                        onInteraction()
+                        true
+                    }
+                }
             }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || durationMillis <= 0L) return@onPreviewKeyEvent false
@@ -1188,7 +1022,7 @@ private fun PlayerProgress(
 }
 
 @Composable
-private fun PlayerTime(milliseconds: Long) {
+internal fun PlayerTime(milliseconds: Long) {
     Text(
         text = milliseconds.asPlaybackTime(),
         color = PlayerOnSurface,
@@ -1199,7 +1033,7 @@ private fun PlayerTime(milliseconds: Long) {
 }
 
 @Composable
-private fun PlayerRemaining(positionMillis: Long, durationMillis: Long) {
+internal fun PlayerRemaining(positionMillis: Long, durationMillis: Long) {
     val remaining = (durationMillis - positionMillis).coerceAtLeast(0L)
     Text(
         text = "−${remaining.asPlaybackTime()}",
@@ -1219,171 +1053,99 @@ private fun PlayerSettingsPanel(
     onAudioDelay: (Long) -> Unit,
     onOpenEditor: (PlayerEditor) -> Unit,
     onClose: () -> Unit,
-    subtitleDelayMillis: Long = 0L,
-    onSubtitleDelay: (Long) -> Unit = {},
-    subtitleStyle: SubtitleStyle = SubtitleStyle(),
+    subtitleDelayMillis: Long,
+    onSubtitleDelay: (Long) -> Unit,
+    subtitleStyle: SubtitleStyle,
+    resizeMode: Int,
+    onResizeMode: (Int) -> Unit,
+    onPanel: (PlayerPanel) -> Unit,
+    onOpenExternally: () -> Unit,
+    editorReturnTarget: PlayerEditor?,
 ) {
     val firstFocus = remember(panel) { FocusRequester() }
-    val title = when (panel) {
-        PlayerPanel.AUDIO -> "Audio"
-        PlayerPanel.SUBTITLES -> "Subtitles"
-        PlayerPanel.SPEED -> "Playback speed"
-        else -> ""
-    }
+    val title = stringResource(when (panel) {
+        PlayerPanel.AUDIO -> R.string.player_audio
+        PlayerPanel.SUBTITLES -> R.string.player_subtitles
+        PlayerPanel.SPEED -> R.string.player_speed
+        PlayerPanel.DISPLAY -> R.string.player_display
+        PlayerPanel.MORE -> R.string.player_more
+        PlayerPanel.INFO -> R.string.player_info
+    })
     val options = when (panel) {
         PlayerPanel.AUDIO -> snapshot.tracks.options(C.TRACK_TYPE_AUDIO)
         PlayerPanel.SUBTITLES -> snapshot.tracks.options(C.TRACK_TYPE_TEXT)
         else -> emptyList()
     }
     val audioUsesAutoSelection = player?.hasOverride(C.TRACK_TYPE_AUDIO) == false
-    LaunchedEffect(panel, options.size) { firstFocus.requestFocus() }
-
-    val panelWidth = when {
-        !isTelevision -> null
-        panel == PlayerPanel.AUDIO -> 724.dp
-        panel == PlayerPanel.SUBTITLES -> 844.dp
-        else -> 280.dp
-    }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.58f))
-            .clickable(onClick = onClose),
-    ) {
-        Column(
-            modifier = Modifier
-                .align(if (isTelevision) Alignment.BottomStart else Alignment.BottomCenter)
-                .padding(
-                    start = if (isTelevision) 58.dp else 16.dp,
-                    end = if (isTelevision) 0.dp else 16.dp,
-                    bottom = if (isTelevision) 48.dp else 16.dp,
-                )
-                .then(panelWidth?.let(Modifier::width) ?: Modifier.fillMaxWidth())
-                .heightIn(max = 420.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(PlayerBackground.copy(alpha = 0.98f))
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                .clickable(enabled = false) { }
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column {
-                    Text(
-                        text = title,
-                        color = PlayerOnSurface,
-                        fontFamily = PlayerFont,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 20.sp,
-                    )
-                    if (isTelevision && (panel == PlayerPanel.AUDIO || panel == PlayerPanel.SUBTITLES)) {
-                        Text(
-                            text = if (panel == PlayerPanel.AUDIO) {
-                                "Choose a track and fine-tune output timing"
-                            } else {
-                                "Choose a track, then adjust timing or appearance"
-                            },
-                            color = PlayerOnSurfaceMuted,
-                            fontFamily = PlayerFont,
-                            fontSize = 13.sp,
-                        )
+    LaunchedEffect(panel) { if (isTelevision) firstFocus.requestFocus() }
+    PlayerOverlayLayout(title, isTelevision, onClose,
+        tvWidth = if (panel == PlayerPanel.SUBTITLES) 844.dp else 724.dp) {
+        when (panel) {
+            PlayerPanel.AUDIO -> {
+                if (isTelevision) {
+                    Row(Modifier.fillMaxWidth().heightIn(max = 360.dp),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        PlayerTrackList(options, C.TRACK_TYPE_AUDIO, player, true,
+                            audioUsesAutoSelection, firstFocus, modifier = Modifier.weight(1f))
+                        PlayerAudioTimingControls(audioDelayMillis, onAudioDelay,
+                            Modifier.width(268.dp).verticalScroll(rememberScrollState()))
                     }
+                } else {
+                    PlayerTrackList(options, C.TRACK_TYPE_AUDIO, player, true,
+                        audioUsesAutoSelection, firstFocus, compactRows = true,
+                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                        footer = { PlayerAudioTimingControls(audioDelayMillis, onAudioDelay) })
                 }
-                PlayerTextButton(label = "Done", onClick = onClose)
             }
-
-            when (panel) {
-                PlayerPanel.AUDIO -> {
-                    if (isTelevision) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        ) {
-                            PlayerTrackList(
-                                options = options,
-                                trackType = C.TRACK_TYPE_AUDIO,
-                                player = player,
-                                includeAutomatic = true,
-                                automaticSelected = audioUsesAutoSelection,
-                                firstFocus = firstFocus,
-                                modifier = Modifier.weight(1f),
-                            )
-                            PlayerAudioTimingControls(
-                                delayMillis = audioDelayMillis,
-                                onDelay = onAudioDelay,
-                                modifier = Modifier.width(250.dp),
-                            )
-                        }
-                    } else {
-                        PlayerAudioTimingControls(
-                            delayMillis = audioDelayMillis,
-                            onDelay = onAudioDelay,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        PlayerTrackList(
-                            options = options,
-                            trackType = C.TRACK_TYPE_AUDIO,
-                            player = player,
-                            includeAutomatic = true,
-                            automaticSelected = audioUsesAutoSelection,
-                            firstFocus = firstFocus,
-                            compactRows = true,
-                            modifier = Modifier.heightIn(max = 300.dp),
-                        )
-                    }
+            PlayerPanel.SUBTITLES -> {
+                if (isTelevision) {
+                    TvSubtitleRailPanel(options, player, firstFocus, subtitleStyle, subtitleDelayMillis,
+                        onSubtitleDelay, { onOpenEditor(PlayerEditor.TIMING) },
+                        { onOpenEditor(PlayerEditor.STYLE) }, Modifier.fillMaxWidth().height(360.dp), editorReturnTarget)
+                } else {
+                    PlayerTrackList(options, C.TRACK_TYPE_TEXT, player, false, false, firstFocus,
+                        compactRows = true, modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                        footer = {
+                            MobileSubtitleToolbar(subtitleStyle, subtitleDelayMillis,
+                                { onOpenEditor(PlayerEditor.TIMING) }, { onOpenEditor(PlayerEditor.STYLE) })
+                        })
                 }
-                PlayerPanel.SUBTITLES -> {
-                    if (isTelevision) {
-                        TvSubtitleRailPanel(
-                            options = options,
-                            player = player,
-                            firstFocus = firstFocus,
-                            subtitleStyle = subtitleStyle,
-                            subtitleDelayMillis = subtitleDelayMillis,
-                            onSubtitleDelay = onSubtitleDelay,
-                            onTiming = { onOpenEditor(PlayerEditor.TIMING) },
-                            onStyle = { onOpenEditor(PlayerEditor.STYLE) },
-                            modifier = Modifier.fillMaxWidth().weight(1f),
-                        )
-                    } else {
-                        PlayerTrackList(
-                            options = options,
-                            trackType = C.TRACK_TYPE_TEXT,
-                            player = player,
-                            includeAutomatic = false,
-                            automaticSelected = false,
-                            firstFocus = firstFocus,
-                            compactRows = true,
-                            modifier = Modifier.fillMaxWidth().weight(1f),
-                        )
-                        MobileSubtitleToolbar(
-                            subtitleStyle = subtitleStyle,
-                            subtitleDelayMillis = subtitleDelayMillis,
-                            onTiming = { onOpenEditor(PlayerEditor.TIMING) },
-                            onStyle = { onOpenEditor(PlayerEditor.STYLE) },
-                        )
-                    }
-                }
-                PlayerPanel.SPEED -> {
-                    LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                        itemsIndexed(PLAYBACK_SPEEDS, key = { _, item -> item }) { index, speed ->
-                            PlayerChoiceRow(
-                                title = if (speed == 1f) "Normal" else "${speed}×",
-                                supportingText = null,
-                                selected = snapshot.speed == speed,
-                                modifier = if (index == 0) Modifier.focusRequester(firstFocus) else Modifier,
-                            ) {
-                                player?.setPlaybackSpeed(speed)
-                            }
-                        }
-                    }
-                }
-                PlayerPanel.INFO -> Unit
             }
+            PlayerPanel.SPEED -> {
+                val selectedIndex = PLAYBACK_SPEEDS.indexOf(snapshot.speed).coerceAtLeast(0)
+                LazyColumn(Modifier.heightIn(max = 360.dp), state = rememberLazyListState(selectedIndex)) {
+                    itemsIndexed(PLAYBACK_SPEEDS, key = { _, speed -> speed }) { index, speed ->
+                        PlayerChoiceRow(
+                            title = if (speed == 1f) stringResource(R.string.player_speed_normal) else "${speed}×",
+                            supportingText = null, selected = snapshot.speed == speed,
+                            modifier = if (index == selectedIndex) Modifier.focusRequester(firstFocus) else Modifier,
+                        ) { player?.setPlaybackSpeed(speed) }
+                    }
+                }
+            }
+            PlayerPanel.DISPLAY -> {
+                val modes = listOf(AspectRatioFrameLayout.RESIZE_MODE_FIT,
+                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM, AspectRatioFrameLayout.RESIZE_MODE_FILL)
+                val labels = listOf(R.string.player_fit, R.string.player_zoom, R.string.player_fill)
+                val details = listOf(R.string.player_fit_detail, R.string.player_zoom_detail, R.string.player_fill_detail)
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    itemsIndexed(modes) { index, mode ->
+                        PlayerChoiceRow(stringResource(labels[index]), stringResource(details[index]), resizeMode == mode,
+                            modifier = if (resizeMode == mode) Modifier.focusRequester(firstFocus) else Modifier,
+                        ) { onResizeMode(mode) }
+                    }
+                }
+            }
+            PlayerPanel.MORE -> LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                item {
+                    PlayerChoiceRow(stringResource(R.string.player_speed), "${snapshot.speed}×", false,
+                        Modifier.focusRequester(firstFocus), actionRole = Role.Button) { onPanel(PlayerPanel.SPEED) }
+                }
+                item { PlayerChoiceRow(stringResource(R.string.player_display), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.DISPLAY) } }
+                item { PlayerChoiceRow(stringResource(R.string.player_info), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.INFO) } }
+                item { PlayerChoiceRow(stringResource(R.string.player_external), null, false, actionRole = Role.Button, onClick = onOpenExternally) }
+            }
+            PlayerPanel.INFO -> Unit
         }
     }
 }
@@ -1404,12 +1166,12 @@ private fun MobileSubtitleToolbar(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PlayerTextButton(
-            label = "Sync · ${formatSignedDelay(subtitleDelayMillis)}",
+            label = stringResource(R.string.player_sync_toolbar, formatSignedDelay(subtitleDelayMillis)),
             onClick = onTiming,
             modifier = Modifier.weight(1f),
         )
         PlayerTextButton(
-            label = "Style · ${subtitleStyle.sizePercent}%",
+            label = stringResource(R.string.player_style_toolbar, subtitleStyle.sizePercent),
             onClick = onStyle,
             modifier = Modifier.weight(1f),
         )
@@ -1433,6 +1195,7 @@ private fun TvSubtitleRailPanel(
     onTiming: () -> Unit,
     onStyle: () -> Unit,
     modifier: Modifier = Modifier,
+    editorReturnTarget: PlayerEditor? = null,
 ) {
     val configuration = LocalConfiguration.current
     val displayLocale = configuration.locales[0]
@@ -1466,6 +1229,7 @@ private fun TvSubtitleRailPanel(
         }
     }
     val visibleOptions = groupedOptions[browsedLanguageKey].orEmpty()
+    val activeLanguageIndex = languageItems.indexOfFirst { it.key == activeLanguageKey }.coerceAtLeast(0)
 
     Row(
         modifier = modifier.fillMaxHeight(),
@@ -1473,10 +1237,11 @@ private fun TvSubtitleRailPanel(
     ) {
         PlayerRailColumn(
             title = stringResource(R.string.player_subtitle_languages),
-            modifier = Modifier.width(184.dp),
+            modifier = Modifier.weight(0.23f),
         ) {
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 286.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                state = rememberLazyListState(activeLanguageIndex),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 itemsIndexed(languageItems, key = { _, item -> item.key }) { index, item ->
@@ -1497,7 +1262,7 @@ private fun TvSubtitleRailPanel(
                             )
                         },
                         selected = item.key == activeLanguageKey,
-                        modifier = if (index == 0) Modifier.focusRequester(firstFocus) else Modifier,
+                        modifier = if (index == activeLanguageIndex && editorReturnTarget == null) Modifier.focusRequester(firstFocus) else Modifier,
                     ) {
                         browsedLanguageKey = item.key
                         if (isOff) player?.clearTrackOverride(C.TRACK_TYPE_TEXT, disabled = true)
@@ -1508,7 +1273,7 @@ private fun TvSubtitleRailPanel(
 
         PlayerRailColumn(
             title = stringResource(R.string.player_subtitle_tracks),
-            modifier = Modifier.width(300.dp),
+            modifier = Modifier.weight(0.385f),
         ) {
             when {
                 browsedLanguageKey == SUBTITLE_LANGUAGE_OFF -> PlayerRailEmptyState(
@@ -1520,7 +1285,7 @@ private fun TvSubtitleRailPanel(
                     body = stringResource(R.string.player_subtitle_no_tracks_body),
                 )
                 else -> LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 286.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     itemsIndexed(visibleOptions, key = { _, item -> item.id }) { _, option ->
@@ -1540,7 +1305,7 @@ private fun TvSubtitleRailPanel(
 
         PlayerRailColumn(
             title = stringResource(R.string.player_caption_lab),
-            modifier = Modifier.width(300.dp),
+            modifier = Modifier.weight(0.385f).verticalScroll(rememberScrollState()),
         ) {
             PlayerCaptionPreviewCard(
                 style = subtitleStyle,
@@ -1552,6 +1317,8 @@ private fun TvSubtitleRailPanel(
                 subtitleStyle = subtitleStyle,
                 subtitleDelayMillis = subtitleDelayMillis,
                 onSubtitleDelay = onSubtitleDelay,
+                timingModifier = if (editorReturnTarget == PlayerEditor.TIMING) Modifier.focusRequester(firstFocus) else Modifier,
+                styleModifier = if (editorReturnTarget == PlayerEditor.STYLE) Modifier.focusRequester(firstFocus) else Modifier,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -1669,24 +1436,29 @@ private fun PlayerTrackList(
     includeAutomatic: Boolean,
     automaticSelected: Boolean,
     firstFocus: FocusRequester,
-    compactRows: Boolean = false,
     modifier: Modifier = Modifier,
+    compactRows: Boolean = false,
+    footer: (@Composable () -> Unit)? = null,
 ) {
+    val initialIndex = remember(options.map(TrackOption::id)) {
+        if (automaticSelected) 0 else (options.indexOfFirst(TrackOption::selected) + 1).coerceAtLeast(0)
+    }
     LazyColumn(
         modifier = modifier,
+        state = rememberLazyListState(initialIndex),
         contentPadding = PaddingValues(vertical = 2.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (includeAutomatic) {
             item("automatic") {
                 PlayerChoiceRow(
-                    title = "Automatic",
+                    title = stringResource(R.string.player_automatic),
                     supportingText = options.firstOrNull(TrackOption::selected)?.let { selected ->
                         listOfNotNull(selected.title, selected.supportingText).joinToString(" · ")
-                    } ?: "Best supported track",
+                    } ?: stringResource(R.string.player_best_track),
                     selected = automaticSelected,
                     compact = compactRows,
-                    modifier = Modifier.focusRequester(firstFocus),
+                    modifier = if (initialIndex == 0) Modifier.focusRequester(firstFocus) else Modifier,
                 ) {
                     player?.clearTrackOverride(trackType, disabled = false)
                 }
@@ -1694,11 +1466,11 @@ private fun PlayerTrackList(
         } else {
             item("off") {
                 PlayerChoiceRow(
-                    title = "Off",
-                    supportingText = "No subtitles",
+                    title = stringResource(R.string.player_subtitle_off),
+                    supportingText = stringResource(R.string.player_subtitle_no_captions),
                     selected = options.none(TrackOption::selected),
                     compact = compactRows,
-                    modifier = Modifier.focusRequester(firstFocus),
+                    modifier = if (initialIndex == 0) Modifier.focusRequester(firstFocus) else Modifier,
                 ) {
                     player?.clearTrackOverride(trackType, disabled = true)
                 }
@@ -1708,9 +1480,9 @@ private fun PlayerTrackList(
             item("empty") {
                 Text(
                     text = if (trackType == C.TRACK_TYPE_AUDIO) {
-                        "No selectable audio tracks were reported by this source."
+                        stringResource(R.string.player_no_audio)
                     } else {
-                        "No subtitle tracks were reported by this source."
+                        stringResource(R.string.player_no_subtitles)
                     },
                     color = PlayerOnSurfaceMuted,
                     fontFamily = PlayerFont,
@@ -1719,17 +1491,19 @@ private fun PlayerTrackList(
                 )
             }
         }
-        itemsIndexed(options, key = { _, item -> item.id }) { _, option ->
+        itemsIndexed(options, key = { _, item -> item.id }) { index, option ->
             PlayerChoiceRow(
                 title = option.title,
                 supportingText = option.supportingText,
                 selected = option.selected && (!includeAutomatic || !automaticSelected),
                 enabled = option.supported,
                 compact = compactRows,
+                modifier = if (index + 1 == initialIndex) Modifier.focusRequester(firstFocus) else Modifier,
             ) {
                 player?.selectTrack(trackType, option)
             }
         }
+        if (footer != null) item("tools") { footer() }
     }
 }
 
@@ -1747,28 +1521,28 @@ private fun PlayerAudioTimingControls(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = "Audio timing",
+            text = stringResource(R.string.player_audio_timing),
             color = PlayerOnSurface,
             fontFamily = PlayerFont,
             fontWeight = FontWeight.Medium,
             fontSize = 16.sp,
         )
         Text(
-            text = "Saved for the current output route",
+            text = stringResource(R.string.player_audio_route),
             color = PlayerOnSurfaceMuted,
             fontFamily = PlayerFont,
             fontSize = 12.sp,
         )
         PlayerStepper(
             value = if (delayMillis == 0L) "0 ms" else "%+d ms".format(delayMillis),
-            decreaseLabel = "Decrease audio delay",
-            increaseLabel = "Increase audio delay",
+            decreaseLabel = stringResource(R.string.player_audio_earlier),
+            increaseLabel = stringResource(R.string.player_audio_later),
             onDecrease = { onDelay(stepAudioDelay(delayMillis, -1)) },
             onReset = { onDelay(0L) },
             onIncrease = { onDelay(stepAudioDelay(delayMillis, 1)) },
         )
         Text(
-            text = "Negative values play audio earlier; positive values play it later.",
+            text = stringResource(R.string.player_audio_delay_help),
             color = PlayerOnSurfaceMuted,
             fontFamily = PlayerFont,
             fontSize = 12.sp,
@@ -1784,6 +1558,8 @@ private fun PlayerSubtitleTools(
     subtitleStyle: SubtitleStyle = SubtitleStyle(),
     subtitleDelayMillis: Long = 0L,
     onSubtitleDelay: (Long) -> Unit = {},
+    timingModifier: Modifier = Modifier,
+    styleModifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
@@ -1793,23 +1569,24 @@ private fun PlayerSubtitleTools(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         PlayerChoiceRow(
-            title = "Timing and sync",
-            supportingText = "Manual delay or sync by spoken line · ${formatSignedDelay(subtitleDelayMillis)}",
+            title = stringResource(R.string.player_sync),
+            supportingText = stringResource(R.string.player_sync_details, formatSignedDelay(subtitleDelayMillis)),
             selected = subtitleDelayMillis != 0L,
             onClick = onTiming,
+            modifier = timingModifier,
+            actionRole = Role.Button,
         )
         PlayerChoiceRow(
-            title = "Appearance",
-            supportingText = "${subtitleStyle.sizePercent}% · " + if (subtitleStyle.preserveEmbeddedStyles) {
-                "Original styling"
-            } else {
-                "Custom style"
-            },
+            title = stringResource(R.string.player_appearance),
+            supportingText = stringResource(R.string.player_style_details, subtitleStyle.sizePercent,
+                stringResource(if (subtitleStyle.preserveEmbeddedStyles) R.string.player_original_style else R.string.player_custom_style)),
             selected = false,
             onClick = onStyle,
+            modifier = styleModifier,
+            actionRole = Role.Button,
         )
         PlayerDelayRow(
-            label = "Quick sync",
+            label = stringResource(R.string.player_quick_sync),
             valueText = formatSignedDelay(subtitleDelayMillis),
             onStep = { steps -> onSubtitleDelay(stepSubtitleDelay(subtitleDelayMillis, steps * 10)) },
             onReset = { onSubtitleDelay(0L) },
@@ -1825,8 +1602,31 @@ private fun PlayerChoiceRow(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     compact: Boolean = false,
+    actionRole: Role = Role.RadioButton,
     onClick: () -> Unit,
 ) {
+    val interactionModifier = when (actionRole) {
+        Role.Button -> Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        Role.Checkbox -> Modifier.toggleable(value = selected, enabled = enabled, role = Role.Checkbox) { onClick() }
+        else -> Modifier.selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+    }
+    if (!LocalPlayerTelevision.current) {
+        ListItem(
+            headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+            supportingContent = supportingText?.let { { Text(it, style = MaterialTheme.typography.bodyMedium) } },
+            trailingContent = {
+                when (actionRole) {
+                    Role.Button -> Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null)
+                    Role.Checkbox -> Checkbox(selected, onCheckedChange = null, enabled = enabled)
+                    else -> RadioButton(selected, onClick = null, enabled = enabled)
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else Color.Transparent),
+            modifier = modifier.then(interactionModifier),
+        )
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     Row(
         modifier = modifier
@@ -1846,7 +1646,7 @@ private fun PlayerChoiceRow(
                 color = if (focused) PlayerPrimary else Color.Transparent,
                 shape = RoundedCornerShape(4.dp),
             )
-            .clickable(enabled = enabled, onClick = onClick)
+            .then(interactionModifier)
             .padding(
                 horizontal = if (compact) 16.dp else 22.dp,
                 vertical = if (compact) 9.dp else 14.dp,
@@ -1865,7 +1665,7 @@ private fun PlayerChoiceRow(
                 fontFamily = PlayerFont,
                 fontWeight = FontWeight.Medium,
                 fontSize = 16.sp,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             supportingText?.let {
@@ -1874,7 +1674,7 @@ private fun PlayerChoiceRow(
                     color = if (focused) PlayerFocusedContent.copy(alpha = 0.74f) else PlayerOnSurfaceMuted,
                     fontFamily = PlayerFont,
                     fontSize = 13.sp,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -1882,7 +1682,7 @@ private fun PlayerChoiceRow(
         if (selected) {
             Icon(
                 imageVector = Icons.Rounded.Check,
-                contentDescription = "Selected",
+                contentDescription = null,
                 tint = if (focused) PlayerFocusedContent else PlayerPrimary,
             )
         }
@@ -1890,43 +1690,13 @@ private fun PlayerChoiceRow(
 }
 
 @Composable
-private fun PlayerStreamInfoPanel(
-    streamInfo: String?,
-    onClose: () -> Unit,
-) {
+private fun PlayerStreamInfoPanel(streamInfo: String?, isTelevision: Boolean, onClose: () -> Unit) {
     val closeFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { closeFocus.requestFocus() }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.44f))
-            .clickable(onClick = onClose),
-    ) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .width(560.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(PlayerBackground)
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                .padding(28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = "Stream info",
-                color = PlayerOnSurface,
-                fontFamily = PlayerFont,
-                fontWeight = FontWeight.Medium,
-                fontSize = 20.sp,
-            )
-            Text(
-                text = streamInfo ?: "Stream details are not available yet.",
-                color = PlayerOnSurfaceMuted,
-                fontFamily = PlayerFont,
-                fontSize = 15.sp,
-            )
-            PlayerTextButton(label = "Close", onClick = onClose, modifier = Modifier.focusRequester(closeFocus))
-        }
+    LaunchedEffect(Unit) { if (isTelevision) closeFocus.requestFocus() }
+    PlayerOverlayLayout(stringResource(R.string.player_info), isTelevision, onClose, tvWidth = 560.dp) {
+        Text(streamInfo ?: stringResource(R.string.player_info_empty),
+            style = MaterialTheme.typography.bodyLarge, color = PlayerOnSurfaceMuted)
+        PlayerTextButton(stringResource(R.string.player_done), onClose, Modifier.focusRequester(closeFocus))
     }
 }
 
@@ -1947,183 +1717,43 @@ private fun PlayerTimingEditor(
     val visibleCues = remember(cues, capturedPositionMillis) {
         capturedPositionMillis?.let { nearbySubtitleCues(cues, it) }.orEmpty()
     }
-    LaunchedEffect(Unit) { initialFocus.requestFocus() }
-    LaunchedEffect(capturedPositionMillis, loadingCues, visibleCues.size) {
-        if (capturedPositionMillis != null && !loadingCues && visibleCues.isNotEmpty()) {
-            delay(80)
-            initialFocus.requestFocus()
-        }
-    }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.68f))
-            .clickable(onClick = onClose),
-    ) {
-        Column(
-            modifier = Modifier
-                .align(if (isTelevision) Alignment.Center else Alignment.BottomCenter)
-                .padding(
-                    horizontal = if (isTelevision) 58.dp else 16.dp,
-                    vertical = if (isTelevision) 40.dp else 16.dp,
-                )
-                .then(if (isTelevision) Modifier.width(720.dp) else Modifier.fillMaxWidth())
-                .heightIn(max = if (isTelevision) 430.dp else 560.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(PlayerBackground)
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                .clickable(enabled = false) { }
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column {
-                    Text(
-                        text = "Subtitle timing",
-                        color = PlayerOnSurface,
-                        fontFamily = PlayerFont,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 20.sp,
-                    )
-                    Text(
-                        text = "Changes apply immediately without restarting playback",
-                        color = PlayerOnSurfaceMuted,
-                        fontFamily = PlayerFont,
-                        fontSize = 13.sp,
-                    )
-                }
-                PlayerTextButton(label = "Done", onClick = onClose)
+    LaunchedEffect(Unit) { if (isTelevision) initialFocus.requestFocus() }
+    PlayerOverlayLayout(stringResource(R.string.player_timing), isTelevision, onClose, tvWidth = 560.dp) {
+        LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item("delay") {
+                PlayerDelayRow(stringResource(R.string.player_manual_delay), formatSignedDelay(subtitleDelayMillis),
+                    { onSubtitleDelay(stepSubtitleDelay(subtitleDelayMillis, it)) }, { onSubtitleDelay(0) })
             }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(PlayerSurface.copy(alpha = 0.56f))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                PlayerDelayRow(
-                    label = "Manual delay",
-                    valueText = formatSignedDelay(subtitleDelayMillis),
-                    onStep = { steps -> onSubtitleDelay(stepSubtitleDelay(subtitleDelayMillis, steps)) },
-                    onReset = { onSubtitleDelay(0L) },
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        PlayerTextButton(
-                            label = "−5s",
-                            onClick = { onSubtitleDelay(clampSubtitleDelayMillis(subtitleDelayMillis - 5_000L)) },
-                            modifier = Modifier.weight(1f),
-                        )
-                        PlayerTextButton(
-                            label = "−1s",
-                            onClick = { onSubtitleDelay(clampSubtitleDelayMillis(subtitleDelayMillis - 1_000L)) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        PlayerTextButton(
-                            label = "+1s",
-                            onClick = { onSubtitleDelay(clampSubtitleDelayMillis(subtitleDelayMillis + 1_000L)) },
-                            modifier = Modifier.weight(1f),
-                        )
-                        PlayerTextButton(
-                            label = "+5s",
-                            onClick = { onSubtitleDelay(clampSubtitleDelayMillis(subtitleDelayMillis + 5_000L)) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-                Text(
-                    "Negative shows subtitles earlier; positive shows them later.",
-                    color = PlayerOnSurfaceMuted,
-                    fontFamily = PlayerFont,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 18.dp),
-                )
+            item("help") {
+                Text(stringResource(R.string.player_subtitle_delay_help), color = PlayerOnSurfaceMuted,
+                    style = MaterialTheme.typography.bodyMedium)
             }
-
-            if (capturedPositionMillis == null) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = "When you hear a spoken line, press Sync now. Then choose that line below.",
-                        color = PlayerOnSurfaceMuted,
-                        fontFamily = PlayerFont,
-                        fontSize = 14.sp,
-                    )
-                    PlayerTextButton(
-                        label = "Sync now",
-                        onClick = {
-                            capturedPositionMillis = currentPositionMillis
-                            loadingCues = true
-                            onLoadSidecarCues { loaded ->
-                                cues = loaded
-                                loadingCues = false
-                            }
-                        },
-                        modifier = Modifier.focusRequester(initialFocus),
-                    )
+            item("sync") {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(stringResource(R.string.player_sync_help), color = PlayerOnSurfaceMuted,
+                        style = MaterialTheme.typography.bodyMedium)
+                    PlayerTextButton(stringResource(if (capturedPositionMillis == null) R.string.player_sync_now
+                        else R.string.player_capture_again), onClick = {
+                        capturedPositionMillis = currentPositionMillis
+                        loadingCues = true
+                        onLoadSidecarCues { cues = it; loadingCues = false }
+                    }, modifier = Modifier.focusRequester(initialFocus))
                 }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Captured at ${capturedPositionMillis!!.asPlaybackTime()} · choose the line you heard",
-                        color = PlayerOnSurface,
-                        fontFamily = PlayerFont,
-                        fontSize = 14.sp,
-                    )
-                    PlayerTextButton(label = "Capture again", onClick = { capturedPositionMillis = null })
+            }
+            if (capturedPositionMillis != null) {
+                item("captured") {
+                    Text(stringResource(R.string.player_sync_capture, capturedPositionMillis!!.asPlaybackTime()),
+                        color = PlayerOnSurface, style = MaterialTheme.typography.bodyMedium)
                 }
-                when {
-                    loadingCues -> Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(Modifier.size(28.dp), color = PlayerPrimary, strokeWidth = 2.dp)
-                    }
-                    cues.isEmpty() -> {
-                        Text(
-                            text = "No text sidecar available; use manual delay.",
-                            color = PlayerOnSurfaceMuted,
-                            fontFamily = PlayerFont,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(vertical = 24.dp),
-                        )
-                    }
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 230.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        itemsIndexed(visibleCues, key = { _, item -> "${item.startMillis}:${item.endMillis}" }) { index, cue ->
-                            PlayerChoiceRow(
-                                title = cue.text.replace("\n", " ").replace(Regex("\\{\\\\[^{}]*}"), "").take(96),
-                                supportingText = cue.startMillis.asPlaybackTime(),
-                                selected = false,
-                                modifier = if (index == visibleCues.size / 2) {
-                                    Modifier.focusRequester(initialFocus)
-                                } else {
-                                    Modifier
-                                },
-                            ) {
-                                onApplySyncByLine(capturedPositionMillis!!, cue.startMillis)
-                            }
-                        }
+                if (loadingCues) item("loading") { CircularProgressIndicator(Modifier.size(28.dp), color = PlayerPrimary) }
+                else if (cues.isEmpty()) item("empty") {
+                    Text(stringResource(R.string.player_sync_no_sidecar), color = PlayerOnSurfaceMuted,
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+                else itemsIndexed(visibleCues, key = { index, cue -> "$index:${cue.startMillis}" }) { _, cue ->
+                    PlayerChoiceRow(cue.text.replace("\n", " "), cue.startMillis.asPlaybackTime(), false) {
+                        onApplySyncByLine(capturedPositionMillis!!, cue.startMillis)
                     }
                 }
             }
@@ -2166,6 +1796,23 @@ private fun PlayerDelayRow(
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (!LocalPlayerTelevision.current) {
+        Row(modifier.fillMaxWidth().padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            PlayerDelayLabel(label, valueText, Modifier.weight(1f))
+            FilledTonalIconButton(onClick = { onStep(-1) }) {
+                Icon(Icons.Rounded.Remove, stringResource(R.string.player_decrease_value, label))
+            }
+            FilledTonalIconButton(onClick = onReset) {
+                Icon(Icons.Rounded.Replay, stringResource(R.string.player_reset_value, label))
+            }
+            FilledTonalIconButton(onClick = { onStep(1) }) {
+                Icon(Icons.Rounded.Add, stringResource(R.string.player_increase_value, label))
+            }
+        }
+        return
+    }
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
@@ -2177,7 +1824,7 @@ private fun PlayerDelayRow(
                 PlayerDelayLabel(label, valueText)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlayerTextButton(label = "−", onClick = { onStep(-1) })
-                    PlayerTextButton(label = "Reset", onClick = onReset)
+                    PlayerTextButton(label = stringResource(R.string.player_reset), onClick = onReset)
                     PlayerTextButton(label = "+", onClick = { onStep(1) })
                 }
             }
@@ -2188,7 +1835,7 @@ private fun PlayerDelayRow(
             ) {
                 PlayerDelayLabel(label, valueText, Modifier.weight(1f))
                 PlayerTextButton(label = "−", onClick = { onStep(-1) })
-                PlayerTextButton(label = "Reset", onClick = onReset)
+                PlayerTextButton(label = stringResource(R.string.player_reset), onClick = onReset)
                 PlayerTextButton(label = "+", onClick = { onStep(1) })
             }
         }
@@ -2212,68 +1859,27 @@ private fun PlayerStyleEditor(
 ) {
     val firstFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { firstFocus.requestFocus() }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.68f))
-            .clickable(onClick = onClose),
-    ) {
-        Column(
-            modifier = Modifier
-                .align(if (isTelevision) Alignment.Center else Alignment.BottomCenter)
-                .padding(
-                    horizontal = if (isTelevision) 58.dp else 16.dp,
-                    vertical = if (isTelevision) 40.dp else 16.dp,
-                )
-                .then(if (isTelevision) Modifier.width(844.dp) else Modifier.fillMaxWidth())
-                .heightIn(max = if (isTelevision) 460.dp else 600.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(PlayerBackground)
-                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                .clickable(enabled = false) { }
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column {
-                    Text(
-                        text = "Subtitle appearance",
-                        color = PlayerOnSurface,
-                        fontFamily = PlayerFont,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 20.sp,
-                    )
-                    Text(
-                        text = "Every change is previewed and saved to this profile",
-                        color = PlayerOnSurfaceMuted,
-                        fontFamily = PlayerFont,
-                        fontSize = 13.sp,
-                    )
-                }
-                PlayerTextButton(
-                    label = "Reset all",
-                    onClick = { onStyleChange(SubtitleStyle()) },
-                    modifier = Modifier.focusRequester(firstFocus),
-                )
-                PlayerTextButton(label = "Done", onClick = onClose)
+    PlayerOverlayLayout(stringResource(R.string.player_appearance), isTelevision, onClose, tvWidth = 560.dp) {
+        LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item("preview") { PlayerSubtitlePreview(style) }
+            item("reset") {
+                PlayerTextButton(stringResource(R.string.player_reset_all),
+                    { onStyleChange(SubtitleStyle()) }, Modifier.focusRequester(firstFocus))
             }
-            PlayerSubtitlePreview(style)
+            item("presets") {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 PlayerTextButton(
-                    label = "Default",
+                    label = stringResource(R.string.player_preset_default),
                     onClick = { onStyleChange(SubtitleStyle()) },
                     modifier = Modifier.weight(1f),
                 )
                 PlayerTextButton(
-                    label = "Cinema",
+                    label = stringResource(R.string.player_preset_cinema),
                     modifier = Modifier.weight(1f),
                     onClick = {
                         onStyleChange(
@@ -2294,7 +1900,7 @@ private fun PlayerStyleEditor(
                     },
                 )
                 PlayerTextButton(
-                    label = "Accessible",
+                    label = stringResource(R.string.player_preset_accessible),
                     modifier = Modifier.weight(1f),
                     onClick = {
                         onStyleChange(
@@ -2315,14 +1921,11 @@ private fun PlayerStyleEditor(
                     },
                 )
             }
-            LazyColumn(
-                modifier = Modifier.weight(1f, fill = false),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            }
                 item("size") {
                     PlayerDelayRow(
-                        label = "Text size (${style.sizePercent}%)",
-                        valueText = "50 - 300",
+                        label = stringResource(R.string.player_text_size),
+                        valueText = "${style.sizePercent}%",
                         onStep = { steps ->
                             onStyleChange(style.copy(sizePercent = SubtitleStylePolicy.clampSizePercent(style.sizePercent + steps * 10)))
                         },
@@ -2331,7 +1934,7 @@ private fun PlayerStyleEditor(
                 }
                 item("position") {
                     PlayerDelayRow(
-                        label = "Position",
+                        label = stringResource(R.string.player_position),
                         valueText = "${(style.verticalPositionFraction * 100).toInt()}%",
                         onStep = { steps ->
                             onStyleChange(
@@ -2347,7 +1950,7 @@ private fun PlayerStyleEditor(
                 }
                 item("text-opacity") {
                     PlayerDelayRow(
-                        label = "Text opacity",
+                        label = stringResource(R.string.player_text_opacity),
                         valueText = "${(SubtitleStylePolicy.clampOpacity(style.textOpacity) * 100).toInt()}%",
                         onStep = { steps ->
                             onStyleChange(
@@ -2359,23 +1962,24 @@ private fun PlayerStyleEditor(
                 }
                 item("bold") {
                     PlayerChoiceRow(
-                        title = "Bold",
+                        title = stringResource(R.string.player_bold),
                         supportingText = null,
                         selected = style.bold,
+                        actionRole = Role.Checkbox,
                     ) {
                         onStyleChange(style.copy(bold = !style.bold))
                     }
                 }
                 item("text-color") {
                     SubtitleColorRow(
-                        label = "Text color",
+                        label = stringResource(R.string.player_text_color),
                         selected = style.textColor,
                         colors = SUBTITLE_TEXT_COLORS,
                     ) { onStyleChange(style.copy(textColor = it)) }
                 }
                 item("background-opacity") {
                     PlayerDelayRow(
-                        label = "Background",
+                        label = stringResource(R.string.player_caption_background),
                         valueText = "${(SubtitleStylePolicy.clampOpacity(style.backgroundOpacity) * 100).toInt()}%",
                         onStep = { steps ->
                             onStyleChange(
@@ -2392,9 +1996,10 @@ private fun PlayerStyleEditor(
                 }
                 item("outline") {
                     PlayerChoiceRow(
-                        title = "Outline",
+                        title = stringResource(R.string.player_outline),
                         supportingText = if (style.outlineEnabled) "Enabled · ${style.outlineWidthDp} dp" else "Disabled",
                         selected = style.outlineEnabled,
+                        actionRole = Role.Checkbox,
                     ) {
                         onStyleChange(style.copy(outlineEnabled = !style.outlineEnabled))
                     }
@@ -2402,7 +2007,7 @@ private fun PlayerStyleEditor(
                 if (style.outlineEnabled) {
                     item("outline-width") {
                         PlayerDelayRow(
-                            label = "Outline width",
+                            label = stringResource(R.string.player_outline_width),
                             valueText = "${style.outlineWidthDp} dp",
                             onStep = { steps ->
                                 onStyleChange(
@@ -2418,7 +2023,7 @@ private fun PlayerStyleEditor(
                     }
                     item("outline-color") {
                         SubtitleColorRow(
-                            label = "Outline color",
+                            label = stringResource(R.string.player_outline_color),
                             selected = style.outlineColor,
                             colors = SUBTITLE_OUTLINE_COLORS,
                         ) { onStyleChange(style.copy(outlineColor = it)) }
@@ -2426,57 +2031,30 @@ private fun PlayerStyleEditor(
                 }
                 item("preserve") {
                     PlayerChoiceRow(
-                        title = "Keep original styling",
-                        supportingText = "Embedded ASS/SSA look",
+                        title = stringResource(R.string.player_preserve_styles),
+                        supportingText = stringResource(R.string.player_preserve_styles_detail),
                         selected = style.preserveEmbeddedStyles,
+                        actionRole = Role.Checkbox,
                     ) {
                         onStyleChange(style.copy(preserveEmbeddedStyles = !style.preserveEmbeddedStyles))
                     }
                 }
-            }
         }
     }
 }
 
 @Composable
 private fun PlayerSubtitlePreview(style: SubtitleStyle) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(124.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(Color.Black)
-            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(4.dp)),
-        contentAlignment = Alignment.BottomCenter,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier.padding(bottom = 14.dp, start = 16.dp, end = 16.dp),
-        ) {
-            Text(
-                text = "This is how subtitles will look",
-                color = Color(style.textColor).copy(alpha = SubtitleStylePolicy.clampOpacity(style.textOpacity)),
-                fontFamily = PlayerFont,
-                fontWeight = if (style.bold) FontWeight.Bold else FontWeight.Normal,
-                fontSize = (17f * style.sizePercent / 100f).coerceIn(11f, 34f).sp,
-                lineHeight = (22f * style.sizePercent / 100f).coerceIn(14f, 40f).sp,
-                modifier = Modifier
-                    .background(
-                        Color(style.backgroundColor).copy(
-                            alpha = SubtitleStylePolicy.clampOpacity(style.backgroundOpacity),
-                        ),
-                    )
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-            )
-            Text(
-                text = "${style.sizePercent}% · ${if (style.preserveEmbeddedStyles) "original styling kept" else "custom style"}",
-                color = PlayerOnSurfaceMuted,
-                fontFamily = PlayerFont,
-                fontSize = 12.sp,
-            )
-        }
-    }
+    val sample = stringResource(R.string.player_caption_preview)
+    AndroidView(
+        factory = { context -> androidx.media3.ui.SubtitleView(context) },
+        update = { view ->
+            SubtitleStyleApplier.apply(view, style)
+            view.setCues(listOf(androidx.media3.common.text.Cue.Builder().setText(sample).build()))
+        },
+        modifier = Modifier.fillMaxWidth().height(160.dp).background(Color.Black)
+            .semantics { contentDescription = sample },
+    )
 }
 
 @Composable
@@ -2486,19 +2064,30 @@ private fun SubtitleColorRow(
     colors: List<Long>,
     onSelected: (Long) -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
             text = label,
             color = PlayerOnSurface,
             fontFamily = PlayerFont,
             fontSize = 15.sp,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
         )
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
         colors.forEach { value ->
+            val colorName = stringResource(when (value) {
+                0xFFFFFFFFL -> R.string.player_color_white
+                0xFFFFD54FL -> R.string.player_color_yellow
+                0xFF80DEEDL -> R.string.player_color_cyan
+                0xFFA5D6A7L -> R.string.player_color_green
+                0xFF000000L -> R.string.player_color_black
+                else -> R.string.player_color_charcoal
+            })
             var focused by remember { mutableStateOf(false) }
             Box(
                 modifier = Modifier
@@ -2510,7 +2099,8 @@ private fun SubtitleColorRow(
                         color = if (focused) PlayerPrimary else if (value == selected) PlayerOnSurface else PlayerOnSurfaceMuted.copy(alpha = 0.42f),
                         shape = RoundedCornerShape(4.dp),
                     )
-                    .clickable { onSelected(value) }
+                    .selectable(selected = value == selected, role = Role.RadioButton) { onSelected(value) }
+                    .semantics { contentDescription = "$label: $colorName" }
                     .padding(8.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -2521,6 +2111,7 @@ private fun SubtitleColorRow(
                         .background(Color(value)),
                 )
             }
+        }
         }
     }
 }
@@ -2560,6 +2151,12 @@ private fun PlayerTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (!LocalPlayerTelevision.current) {
+        TextButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp)) {
+            Text(label, style = MaterialTheme.typography.labelLarge)
+        }
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = modifier

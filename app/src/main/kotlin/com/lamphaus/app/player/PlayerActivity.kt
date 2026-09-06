@@ -14,12 +14,12 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import android.view.WindowManager
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
@@ -125,7 +125,7 @@ class PlayerActivity : ComponentActivity() {
         requestState.value = playback
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
+        enableEdgeToEdge()
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -203,6 +203,16 @@ class PlayerActivity : ComponentActivity() {
                     onSubtitleStyle = ::applySubtitleStyle,
                     onLoadSidecarCues = ::loadSidecarCues,
                     onApplySyncByLine = ::applySyncByLine,
+                    onControlsVisibilityChanged = { visible ->
+                        if (!isTelevision && !pictureInPictureState.value) {
+                            WindowInsetsControllerCompat(window, window.decorView).apply {
+                                isAppearanceLightStatusBars = false
+                                isAppearanceLightNavigationBars = false
+                                if (visible) show(WindowInsetsCompat.Type.systemBars())
+                                else hide(WindowInsetsCompat.Type.systemBars())
+                            }
+                        }
+                    },
                 )
             }
         }
