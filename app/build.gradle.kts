@@ -1,9 +1,21 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.android.baselineprofile)
 }
+
+// Single tracked version identity consumed by Gradle and release tooling
+// (plan §2). Never reuse a published versionCode for different bytes.
+val versionProps = Properties()
+rootProject.file("gradle/version.properties").inputStream().use(versionProps::load)
+val releaseVersionName: String = versionProps.getProperty("versionName")
+val releaseVersionCode: Int = versionProps.getProperty("versionCode").toInt()
+val updateFeedUrl: String =
+    providers.gradleProperty("lamphaus.updateFeedUrl").orNull
+        ?: "https://raw.githubusercontent.com/furkancodes/lamphaus/release-metadata/updates/v1/index.json"
 
 val supabaseUrl = providers.gradleProperty("lamphaus.supabaseUrl").orNull.orEmpty()
 val supabasePublishableKey = providers.gradleProperty("lamphaus.supabasePublishableKey").orNull.orEmpty()
@@ -17,8 +29,8 @@ android {
         applicationId = "com.lamphaus.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         buildConfigField("boolean", "CLOUD_CONFIGURED", cloudConfigured.toString())
@@ -27,6 +39,10 @@ android {
         buildConfigField("String", "CAST_APPLICATION_ID", "\"${providers.gradleProperty("lamphaus.castAppId").orNull.orEmpty()}\"")
         buildConfigField("String", "EMAIL_LINK_DOMAIN", "\"${providers.gradleProperty("lamphaus.emailLinkDomain").orNull ?: "links.lamphaus.app"}\"")
         buildConfigField("String", "WEB_CLIENT_ID", "\"${providers.gradleProperty("lamphaus.webClientId").orNull.orEmpty()}\"")
+        buildConfigField("String", "UPDATE_FEED_URL", "\"$updateFeedUrl\"")
+        // Production update discovery only; debug/staging builds never poll it.
+        buildConfigField("boolean", "UPDATES_ENABLED", "false")
+        buildConfigField("boolean", "BENCHMARK_FIXTURES", "false")
     }
 
     buildTypes {
@@ -46,10 +62,21 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             buildConfigField("boolean", "DIAGNOSTICS_DEFAULT", "false")
+            buildConfigField("boolean", "UPDATES_ENABLED", "true")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        // Isolated updater QA: separate package/certificate/feed, release
+        // optimization mirrored so A→B rehearsal matches production.
+        create("updaterQa") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".updaterqa"
+            versionNameSuffix = "-updaterqa"
+            buildConfigField("String", "UPDATE_FEED_URL", "\"https://raw.githubusercontent.com/furkancodes/lamphaus/release-metadata-qa/updates/v1/index.json\"")
+            buildConfigField("boolean", "UPDATES_ENABLED", "true")
+            matchingFallbacks += listOf("release")
         }
     }
 
@@ -73,6 +100,13 @@ android {
         warningsAsErrors = true
         lintConfig = file("lint.xml")
         disable += setOf("GradleDependency", "AndroidGradlePluginVersion", "OldTargetApi")
+    }
+
+    // Generated profiles ship in the universal APK without regenerating
+    // during normal assembly (plan §7).
+    baselineProfile {
+        saveInSrc = true
+        automaticGenerationDuringBuild = false
     }
 }
 
@@ -138,4 +172,25 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+androidComponents {
+    finalizeDsl { extension ->
+        extension.buildTypes.filter { it.name == "benchmarkRelease" || it.name == "nonMinifiedRelease" }.forEach { target ->
+            target.apply {
+                applicationIdSuffix = ".benchmark"
+                versionNameSuffix = "-benchmark"
+                // Baseline Profile output must retain source class names so it
+                // can be rewritten for each independently obfuscated release.
+                isMinifyEnabled = false
+                isShrinkResources = isMinifyEnabled
+                buildConfigField("boolean", "BENCHMARK_FIXTURES", "true")
+                buildConfigField("boolean", "CLOUD_CONFIGURED", "false")
+                buildConfigField("boolean", "UPDATES_ENABLED", "false")
+                buildConfigField("String", "SUPABASE_URL", "\"\"")
+                buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"\"")
+            }
+            extension.sourceSets.getByName(target.name).assets.srcDir("src/benchmark/assets")
+        }
+    }
 }

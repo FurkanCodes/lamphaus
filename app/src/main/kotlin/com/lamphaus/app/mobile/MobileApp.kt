@@ -76,6 +76,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -91,6 +92,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.rememberReducedMotion
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import com.lamphaus.app.ui.ContentMenuAction
 import com.lamphaus.app.ui.ContentMenuTarget
 
@@ -119,12 +121,11 @@ internal enum class MobileDestination(
 /** Rows with content required before the signed-in home is revealed. */
 private const val STARTUP_READY_ROWS = 2
 
-/** Warm-up window so the first rows' images decode behind the loading cover. */
-private const val STARTUP_WARM_MILLIS = 900L
-
 /** Hard cap so slow or failed home loads still reveal the app. */
 private const val STARTUP_MAX_WAIT_MILLIS = 8_000L
 
+/** Bound for the readiness wait so a missing frame clock still reveals. */
+private const val STARTUP_FRAME_WAIT_MILLIS = 1_000L
 @Composable
 fun MobileApp(
     viewModel: AppViewModel,
@@ -133,6 +134,7 @@ fun MobileApp(
     onEmailLink: (String) -> Unit,
     onPlay: (PlaybackRequest) -> Unit,
     onExternalPlay: (String) -> Unit,
+    updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     LamphausMobileTheme {
@@ -184,9 +186,12 @@ fun MobileApp(
         LaunchedEffect(startupGate.contentReady) {
             if (startupGate.contentReady) {
                 if (!startupGate.initiallyResident) {
-                    // Images need a decode window on a cold start; content
-                    // already resident in a warm process reveals immediately.
-                    delay(STARTUP_WARM_MILLIS)
+                    // Readiness-driven: reveal after the first composed frame
+                    // carrying content (bounded), not a fixed warm-up delay.
+                    // Content already resident in a warm process skips the wait.
+                    withTimeoutOrNull(STARTUP_FRAME_WAIT_MILLIS) {
+                        withFrameNanos { }
+                    }
                 }
                 startupGate.onWarmUpElapsed()
             }
@@ -196,6 +201,11 @@ fun MobileApp(
                 delay(STARTUP_MAX_WAIT_MILLIS)
                 startupGate.onContentTimeout()
             }
+        }
+        // Usable-content signal for startup metrics: satisfied by genuinely
+        // usable Home/sign-in content, never the splash (plan §7).
+        androidx.activity.compose.ReportDrawnWhen {
+            startupGate.phase != MobileStartupPhase.Startup
         }
         Surface(
             modifier = Modifier.fillMaxSize(),
@@ -212,9 +222,10 @@ fun MobileApp(
                             onGoogleSignIn = onGoogleSignIn,
                             onEmailLink = onEmailLink,
                             onDevelopmentSession = viewModel::openDevelopmentSession,
+                            onCheckUpdates = updateViewModel?.let { uvm -> { uvm.checkManual() } },
                         )
                     },
-                    signedIn = { MobileSignedInApp(state, viewModel, widthSizeClass) },
+                    signedIn = { MobileSignedInApp(state, viewModel, widthSizeClass, updateViewModel) },
                 )
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
                 MobileContentMenuSheet(
@@ -225,6 +236,17 @@ fun MobileApp(
                     onDismiss = viewModel::dismissContentMenu,
                     onAction = viewModel::onContentMenuAction,
                 )
+                // In-app update prompts (plan §4). Deferred while another modal
+                // owns the screen; never steals focus from an ongoing task.
+                if (updateViewModel != null && com.lamphaus.app.update.UpdateCoordinator.enabled()) {
+                    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+                    com.lamphaus.app.update.MobileUpdateHost(
+                        updateViewModel = updateViewModel,
+                        updateState = updateState,
+                        widthSizeClass = widthSizeClass,
+                        modalOpen = state.contentMenu.target != null,
+                    )
+                }
             }
         }
         }
@@ -404,6 +426,7 @@ internal fun MobileSignInScreen(
     onGoogleSignIn: () -> Unit,
     onEmailLink: (String) -> Unit,
     onDevelopmentSession: () -> Unit,
+    onCheckUpdates: (() -> Unit)? = null,
 ) {
     var email by rememberSaveable { mutableStateOf("") }
     Column(
@@ -446,6 +469,13 @@ internal fun MobileSignInScreen(
             )
             TextButton(onClick = onDevelopmentSession) { Text(stringResource(R.string.open_development_session)) }
         }
+        // Updates work signed out without backend auth (plan §4).
+        if (onCheckUpdates != null && com.lamphaus.app.update.UpdateCoordinator.enabled()) {
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = onCheckUpdates, modifier = Modifier.height(48.dp)) {
+                Text(stringResource(R.string.update_check))
+            }
+        }
     }
 }
 
@@ -455,6 +485,7 @@ private fun MobileSignedInApp(
     state: AppUiState,
     viewModel: AppViewModel,
     widthSizeClass: WindowWidthSizeClass,
+    updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
 ) {
     var destination by rememberSaveable { mutableStateOf(MobileDestination.HOME) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -522,7 +553,7 @@ private fun MobileSignedInApp(
         }
         settingsOpen -> {
             BackHandler { settingsOpen = false }
-            MobileSettingsScreen(state, viewModel, onBack = { settingsOpen = false })
+            MobileSettingsScreen(state, viewModel, onBack = { settingsOpen = false }, updateViewModel = updateViewModel)
         }
         else -> {
             val compact = widthSizeClass == WindowWidthSizeClass.Compact

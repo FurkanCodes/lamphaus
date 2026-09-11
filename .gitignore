@@ -2,6 +2,9 @@
 .kotlin/
 .idea/
 **/build/
+**/.cxx/
+__pycache__/
+*.py[cod]
 local.properties
 *.iml
 *.jks
@@ -11,6 +14,10 @@ firebase-debug.log
 .firebase/
 captures/
 app/release/
+dist/
+release/signing.properties
+release/keys/*
+!release/keys/.gitignore
 functions/node_modules/
 functions/lib/
 .DS_Store

@@ -25,6 +25,11 @@ class TvActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels {
         AppViewModel.factory((application as LamphausApplication).container)
     }
+    private val updateViewModel: com.lamphaus.app.update.UpdateViewModel by viewModels {
+        com.lamphaus.app.update.UpdateViewModel.factory(
+            (application as LamphausApplication).container.updateCoordinator,
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,14 +54,21 @@ class TvActivity : ComponentActivity() {
                 }
             }
         })
+        (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
         setContent {
             TvApp(
                 viewModel = viewModel,
                 initialSearch = intent?.getStringExtra(SearchManager.QUERY),
                 onPlay = { startActivity(PlayerActivity.intent(this, it)) },
                 onExternalPlay = ::openExternalPlayback,
+                updateViewModel = updateViewModel,
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (application as LamphausApplication).container.updateCoordinator.onForegroundReturn()
     }
 
     override fun onNewIntent(intent: Intent) {

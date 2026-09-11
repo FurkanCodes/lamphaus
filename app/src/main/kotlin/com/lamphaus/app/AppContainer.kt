@@ -50,6 +50,20 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 class AppContainer(context: Context) {
+    private val applicationContext = context.applicationContext
+
+    /** Only test APKs carry this generated clip; no production session or network is involved. */
+    suspend fun benchmarkMediaUri(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        check(BuildConfig.BENCHMARK_FIXTURES)
+        val clip = java.io.File(applicationContext.filesDir, "benchmark.mp4")
+        if (!clip.exists()) {
+            applicationContext.assets.open("benchmark.mp4").use { input ->
+                clip.outputStream().use(input::copyTo)
+            }
+        }
+        android.net.Uri.fromFile(clip).toString()
+    }
+
     private val database = Room.databaseBuilder(
         context,
         LamphausDatabase::class.java,
@@ -127,7 +141,9 @@ class AppContainer(context: Context) {
     }
     private val sessionRecovery = supabase?.let(::SupabaseSessionRecovery)
 
-    private val localAccount = LocalAccountGateway()
+    private val localAccount = LocalAccountGateway().apply {
+        if (BuildConfig.BENCHMARK_FIXTURES) openDevelopmentSession()
+    }
     val accountGateway: AccountGateway = if (supabase != null) {
         SupabaseAccountGateway(supabase, checkNotNull(sessionRecovery))
     } else {
@@ -176,6 +192,18 @@ class AppContainer(context: Context) {
     } else {
         LocalIntegrationsGateway()
     }
+    /**
+     * Dedicated update stack (plan §4, SHR-ARC-02/14). Independent of account
+     * sync and the large application ViewModel; application-scoped so checks
+     * and reconciliation outlive any single screen.
+     */
+    val updatePreferences = com.lamphaus.app.update.UpdatePreferences(context)
+    val updateRepository = com.lamphaus.app.update.UpdateRepository(context, updatePreferences)
+    val updateDownloader = com.lamphaus.app.update.UpdateDownloader(context, updatePreferences)
+    val updateInstaller = com.lamphaus.app.update.UpdateInstaller(context)
+    val updateCoordinator = com.lamphaus.app.update.UpdateCoordinator(
+        context, updateRepository, updatePreferences, updateDownloader, updateInstaller,
+    )
     fun openDevelopmentSession() {
         check(BuildConfig.DEBUG) { "Development sessions are disabled in this build." }
         localAccount.openDevelopmentSession()

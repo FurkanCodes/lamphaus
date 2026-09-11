@@ -66,7 +66,7 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * Cast rail following the streaming-TV convention (Netflix, Disney+):
+ * Cast rail following the streaming-TV convention:
  * circular headshots with the actor's name and character beneath. Display-
  * only — Select performs no action here, so it is never focusable (TV-FOC-01).
  */

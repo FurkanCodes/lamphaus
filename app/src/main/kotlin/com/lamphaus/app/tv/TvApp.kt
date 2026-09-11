@@ -200,6 +200,7 @@ fun TvApp(
     initialSearch: String?,
     onPlay: (PlaybackRequest) -> Unit,
     onExternalPlay: (String) -> Unit,
+    updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var menuReturnFocus by remember { mutableStateOf<FocusRequester?>(null) }
@@ -249,6 +250,10 @@ fun TvApp(
                 viewModel.configurationLaunchHandled()
             }
         }
+        // Usable-content signal: Home/pairing content, never a splash (plan §7).
+        androidx.activity.compose.ReportDrawnWhen {
+            state.account != AccountState.Loading
+        }
         Surface(
             modifier = Modifier.fillMaxSize(),
             colors = SurfaceDefaults.colors(
@@ -274,7 +279,7 @@ fun TvApp(
                 when (state.account) {
                     AccountState.Loading -> TvLoading()
                     AccountState.SignedOut -> TvPairingScreen(state, viewModel)
-                    is AccountState.SignedIn -> TvSignedIn(state, viewModel, initialSearch)
+                    is AccountState.SignedIn -> TvSignedIn(state, viewModel, initialSearch, updateViewModel)
                 }
                 state.message?.let { message ->
                     LaunchedEffect(message) {
@@ -320,6 +325,29 @@ fun TvApp(
                             viewModel.onContentMenuAction(action)
                         },
                     )
+                }
+                // In-app update dialog (plan §4, TV-NAV-02/04/05). Shown only when
+                // no content menu owns focus and playback is not active; origin
+                // focus returns to the previously focused item on dismiss.
+                if (updateViewModel != null && com.lamphaus.app.update.UpdateCoordinator.enabled()) {
+                    val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+                    val modalOpen = state.contentMenu.target != null || state.sourcePicker != null
+                    LaunchedEffect(modalOpen) { updateViewModel.setPresentationBlocked(modalOpen) }
+                    if (!modalOpen) {
+                        com.lamphaus.app.update.TvUpdateDialog(
+                            state = updateState,
+                            installedVersion = com.lamphaus.app.BuildConfig.VERSION_NAME,
+                            onUpdate = { updateViewModel.download() },
+                            onLater = { updateViewModel.defer() },
+                            onInstall = {
+                                updateViewModel.install(hostResumed = true, playbackActive = false)
+                            },
+                            onCancel = { updateViewModel.cancel() },
+                            onRetry = { updateViewModel.retry() },
+                            onDismissError = { updateViewModel.cancel() },
+                            onFocusRestored = { restoreMenuFocus = true },
+                        )
+                    }
                 }
             }
         }
@@ -665,12 +693,12 @@ internal object TvTestTags {
     const val PairingRefresh = "pairing_refresh"
     const val PairingDevelopment = "pairing_development"
 }
-
 @Composable
 private fun TvSignedIn(
     state: AppUiState,
     viewModel: AppViewModel,
     initialSearch: String?,
+    updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
 ) {
     val initialDestination = if (initialSearch.isNullOrBlank()) TvDestination.HOME else TvDestination.SEARCH
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
@@ -872,6 +900,7 @@ private fun TvSignedIn(
                         viewModel = viewModel,
                         sectionFocusRequester = contentFocus.getValue(TvDestination.SETTINGS),
                         topNavigationRequester = navFocus.getValue(TvDestination.SETTINGS),
+                        updateViewModel = updateViewModel,
                     )
                 }
             }
@@ -3178,6 +3207,7 @@ private fun TvSettings(
     viewModel: AppViewModel,
     sectionFocusRequester: FocusRequester,
     topNavigationRequester: FocusRequester,
+    updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
 ) {
     var section by rememberSaveable { mutableStateOf(TvSettingsSection.PROFILES) }
     Row(
@@ -3222,7 +3252,7 @@ private fun TvSettings(
                 TvSettingsSection.PLAYBACK -> TvPlaybackSettings(state, viewModel)
                 TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
                 TvSettingsSection.SPOILERS -> TvSpoilerSettings(state, viewModel)
-                TvSettingsSection.ABOUT -> TvAboutSettings()
+                TvSettingsSection.ABOUT -> TvAboutSettings(updateViewModel)
             }
         }
     }
@@ -4033,7 +4063,14 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
 }
 
 @Composable
-private fun TvAboutSettings() {
+private fun TvAboutSettings(updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null) {
+    val collected: androidx.compose.runtime.State<com.lamphaus.app.update.UpdateUiState>? =
+        if (updateViewModel != null) {
+            updateViewModel.state.collectAsStateWithLifecycle()
+        } else {
+            null
+        }
+    val updateState = collected?.value ?: com.lamphaus.app.update.UpdateUiState()
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.about), style = MaterialTheme.typography.headlineSmall)
         Column(
@@ -4049,6 +4086,26 @@ private fun TvAboutSettings() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
+        }
+        // Manual update checks live in the existing About pane (plan §4).
+        if (updateViewModel != null && com.lamphaus.app.update.UpdateCoordinator.enabled()) {
+            val status = when (updateState.phase) {
+                com.lamphaus.app.update.UpdatePhase.UpToDate ->
+                    stringResource(R.string.update_up_to_date)
+                com.lamphaus.app.update.UpdatePhase.CheckFailed ->
+                    stringResource(R.string.update_check_failed)
+                com.lamphaus.app.update.UpdatePhase.NoCompatible ->
+                    stringResource(R.string.update_no_compatible)
+                com.lamphaus.app.update.UpdatePhase.WaitingForStable ->
+                    stringResource(R.string.update_waiting_stable)
+                else -> null
+            }
+            if (status != null) {
+                Text(status, style = MaterialTheme.typography.bodyMedium)
+            }
+            TvSettingsRow(onClick = { updateViewModel.checkManual() }) {
+                Text(stringResource(R.string.update_check), style = MaterialTheme.typography.bodyLarge)
+            }
         }
     }
 }

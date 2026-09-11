@@ -36,6 +36,11 @@ class MobileActivity : ComponentActivity() {
     private val viewModel: AppViewModel by viewModels {
         AppViewModel.factory((application as LamphausApplication).container)
     }
+    private val updateViewModel: com.lamphaus.app.update.UpdateViewModel by viewModels {
+        com.lamphaus.app.update.UpdateViewModel.factory(
+            (application as LamphausApplication).container.updateCoordinator,
+        )
+    }
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,6 +67,9 @@ class MobileActivity : ComponentActivity() {
             }
         })
         handleIncomingIntent(intent)
+        // Update checks never delay first display; the coordinator schedules
+        // them asynchronously (plan §4, SHR-ARC-10).
+        (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
         setContent {
             MobileApp(
                 viewModel = viewModel,
@@ -70,8 +78,14 @@ class MobileActivity : ComponentActivity() {
                 onEmailLink = ::sendEmailLink,
                 onPlay = { startActivity(PlayerActivity.intent(this, it)) },
                 onExternalPlay = ::openExternalPlayback,
+                updateViewModel = updateViewModel,
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (application as LamphausApplication).container.updateCoordinator.onForegroundReturn()
     }
 
     override fun onNewIntent(intent: Intent) {

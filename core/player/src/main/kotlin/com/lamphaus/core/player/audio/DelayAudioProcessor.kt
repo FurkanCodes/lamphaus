@@ -39,7 +39,7 @@ class DelayAudioProcessor : BaseAudioProcessor() {
         return if (active) inputAudioFormat else AudioProcessor.AudioFormat.NOT_SET
     }
 
-    override fun isActive(): Boolean = active
+    override fun isActive(): Boolean = active && super.isActive()
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         val remaining = inputBuffer.remaining()

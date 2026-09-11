@@ -447,7 +447,7 @@ internal fun PlaybackScreen(
                 view.player = player
                 view.keepScreenOn = player?.isPlaying == true
                 // Keep captions above the control gradient while chrome is visible
-                // (Netflix/Stremio pattern), at rest position during clean viewing.
+                // (common streaming pattern), at rest position during clean viewing.
                 val liftedStyle = if (controlsVisible || panel != null) {
                     subtitleStyle.copy(
                         verticalPositionFraction = (subtitleStyle.verticalPositionFraction - 0.10f).coerceIn(0f, 1f),

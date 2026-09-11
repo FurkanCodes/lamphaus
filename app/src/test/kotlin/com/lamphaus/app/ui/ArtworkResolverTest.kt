@@ -62,7 +62,7 @@ class ArtworkResolverTest {
             ),
         ).resolve(media)
         assertEquals("https://catalog.example/poster.jpg", partial.media.posterUrl)
-        assertEquals("https://image.tmdb.org/t/p/original/custom.jpg", partial.media.backgroundUrl)
+        assertEquals("https://image.tmdb.org/t/p/w1280/custom.jpg", partial.media.backgroundUrl)
         assertEquals(media.posterUrl, invalid.media.posterUrl)
         assertEquals(media.backgroundUrl, invalid.media.backgroundUrl)
         assertFalse(invalid.hasOverride)
@@ -90,5 +90,20 @@ class ArtworkResolverTest {
 
         assertEquals("https://profile.example/poster.jpg", overridden.media.posterUrl)
         assertTrue(overridden.hasOverride)
+    }
+
+    @Test
+    fun `small surfaces request a bounded backdrop variant`() {
+        val overrides = mapOf(
+            media.stableKey to ArtworkOverride(
+                profileId = "profile",
+                mediaKey = media.stableKey,
+                backdrop = ArtworkAsset(ArtworkProviderId.TMDB, "/custom.jpg"),
+            ),
+        )
+        val hero = ArtworkResolver(overrides).resolve(media)
+        val card = ArtworkResolver(overrides, backdropSize = "w780").resolve(media)
+        assertEquals("https://image.tmdb.org/t/p/w1280/custom.jpg", hero.media.backgroundUrl)
+        assertEquals("https://image.tmdb.org/t/p/w780/custom.jpg", card.media.backgroundUrl)
     }
 }

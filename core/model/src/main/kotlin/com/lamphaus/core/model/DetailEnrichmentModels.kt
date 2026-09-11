@@ -86,7 +86,7 @@ fun MediaPreview.enrichmentMediaKey(): String = when {
     else -> "provider:${providerIds.minOrNull() ?: "unknown"}:${type.wireName()}:$id"
 }
 
-/** Stremio wire spelling ("movie"/"series") used by both edge contracts. */
+/** Add-on wire spelling ("movie"/"series") used by both edge contracts. */
 fun MediaType.wireName(): String = when (this) {
     MediaType.MOVIE -> "movie"
     MediaType.SERIES -> "series"

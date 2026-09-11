@@ -1,0 +1,17 @@
+# Production signing identity (public part only — never secrets).
+# The private APK key lives outside the repo; passwords in macOS Keychain with an
+# encrypted offline backup verified before first publication.
+# See docs/RELEASE_RUNBOOK.md.
+production.packageId=com.lamphaus.app
+production.minSdk=26
+# SHA-256 of the production APK signing certificate. `prepare` fails when the
+# built APK fingerprint differs or credentials are missing; never substitutes debug keys.
+production.signerFingerprint=
+# Canonical feed endpoint consumed by the app (BuildConfig) and website.
+production.feedUrl=https://raw.githubusercontent.com/furkancodes/lamphaus/release-metadata/updates/v1/index.json
+production.feedRepo=furkancodes/lamphaus
+production.metadataBranch=release-metadata
+# Trusted metadata signing key IDs (primary + offline recovery). Public keys are
+# embedded in the app and website; rotation is documented in the runbook.
+metadata.primaryKeyId=lamphaus-metadata-1
+metadata.recoveryKeyId=lamphaus-metadata-recovery-1

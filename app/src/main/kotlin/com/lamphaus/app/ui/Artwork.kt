@@ -25,11 +25,17 @@ internal data class ArtworkResolution(
 
 internal class ArtworkResolver(
     private val overrides: Map<String, ArtworkOverride>,
+    /**
+     * TMDB override backdrop variant. `w1280` bounds decoding for hero
+     * surfaces (TV `844×320dp`, mobile hero) instead of `original`; small
+     * card surfaces pass `w780` (plan §7, QA-08).
+     */
+    private val backdropSize: String = "w1280",
 ) {
     fun resolve(media: MediaPreview): ArtworkResolution {
         val override = overrides[media.stableKey]
         val posterUrl = artworkImageUrl(override?.poster, "w500")
-        val backdropUrl = artworkImageUrl(override?.backdrop, "original")
+        val backdropUrl = artworkImageUrl(override?.backdrop, backdropSize)
         val logoUrl = artworkImageUrl(override?.logo, "w500")
         return ArtworkResolution(
             media = media.copy(
@@ -44,7 +50,7 @@ internal class ArtworkResolver(
     fun hasOverrideFor(media: MediaPreview, preferBackdrop: Boolean): Boolean {
         val override = overrides[media.stableKey] ?: return false
         val asset = if (preferBackdrop) override.backdrop else override.poster
-        return artworkImageUrl(asset, if (preferBackdrop) "original" else "w500") != null
+        return artworkImageUrl(asset, if (preferBackdrop) backdropSize else "w500") != null
     }
 
     companion object {

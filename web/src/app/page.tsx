@@ -55,8 +55,14 @@ export default function HomePage() {
           </p>
           <div className="rise rise-3 mt-9 flex flex-wrap items-center gap-4">
             <Link
-              href="/pair/"
+              href="/download/"
               className="rounded-card bg-primary px-6 py-3 font-medium text-on-primary transition duration-[160ms] ease-out hover:brightness-95"
+            >
+              Download beta
+            </Link>
+            <Link
+              href="/pair/"
+              className="rounded-card bg-white/[0.06] px-6 py-3 font-medium text-fg transition duration-[160ms] ease-out hover:bg-white/10"
             >
               Pair a TV
             </Link>

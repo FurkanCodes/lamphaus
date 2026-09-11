@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.SegmentedButton
@@ -50,6 +51,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -71,6 +73,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -110,10 +113,15 @@ internal enum class SettingsSection(
     ARTWORK(R.string.artwork, Icons.Outlined.Image),
     PRIVACY(R.string.privacy, Icons.Outlined.Lock),
     ACCOUNT(R.string.account, Icons.Outlined.AccountCircle),
+    UPDATES(R.string.update_check, Icons.Outlined.SystemUpdate),
 }
-
 @Composable
-internal fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, onBack: () -> Unit) {
+internal fun MobileSettingsScreen(
+    state: AppUiState,
+    viewModel: AppViewModel,
+    onBack: () -> Unit,
+    updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
+) {
     var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     LaunchedEffect(Unit) { viewModel.refreshArtworkKeyStatus() }
     BackHandler(enabled = section != null) { section = null }
@@ -144,6 +152,7 @@ internal fun MobileSettingsScreen(state: AppUiState, viewModel: AppViewModel, on
             SettingsSection.ARTWORK -> SettingsArtworkPage(state, viewModel)
             SettingsSection.PRIVACY -> SettingsPrivacyPage(state, viewModel)
             SettingsSection.ACCOUNT -> SettingsAccountPage(state, viewModel)
+            SettingsSection.UPDATES -> SettingsUpdatesPage(updateViewModel)
         }
     }
 }
@@ -162,6 +171,9 @@ private fun SettingsRootMenu(onSelect: (SettingsSection) -> Unit) {
         add(SettingsSection.PRIVACY)
         if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
             add(SettingsSection.ACCOUNT)
+        }
+        if (com.lamphaus.app.update.UpdateCoordinator.enabled()) {
+            add(SettingsSection.UPDATES)
         }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -1004,6 +1016,99 @@ private fun ConsentRow(title: String, checked: Boolean, onChecked: (Boolean) -> 
         headlineContent = { Text(title) },
         trailingContent = { Switch(checked, onChecked) },
         modifier = Modifier.sizeIn(minHeight = 48.dp).semantics(mergeDescendants = true) {},
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
+}
+
+/**
+ * Updates section (plan §4, MOB-SET-03/04/06). Secondary navigation entry for
+ * manual checks, channel choice (beta vs stable-only, no downgrade), and
+ * check status. Failures stay local with retry (SHR-PROD-04).
+ */
+@Composable
+private fun SettingsUpdatesPage(updateViewModel: com.lamphaus.app.update.UpdateViewModel?) {
+    val collected: androidx.compose.runtime.State<com.lamphaus.app.update.UpdateUiState>? =
+        if (updateViewModel != null) {
+            updateViewModel.state.collectAsStateWithLifecycle()
+        } else {
+            null
+        }
+    val updateState = collected?.value ?: com.lamphaus.app.update.UpdateUiState()
+    var channel by androidx.compose.runtime.remember(updateViewModel) {
+        androidx.compose.runtime.mutableStateOf(
+            updateViewModel?.channel() ?: com.lamphaus.app.update.UpdateChannel.BETA,
+        )
+    }
+    SettingsPage(title = stringResource(R.string.update_check)) {
+        item {
+            SettingsCard(title = stringResource(R.string.update_channel_beta)) {
+                Text(
+                    stringResource(R.string.update_channel_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                UpdateChannelOption(
+                    label = stringResource(R.string.update_channel_beta),
+                    selected = channel == com.lamphaus.app.update.UpdateChannel.BETA,
+                    onClick = {
+                        channel = com.lamphaus.app.update.UpdateChannel.BETA
+                        updateViewModel?.setChannel(channel)
+                    },
+                )
+                UpdateChannelOption(
+                    label = stringResource(R.string.update_channel_stable),
+                    selected = channel == com.lamphaus.app.update.UpdateChannel.STABLE,
+                    onClick = {
+                        channel = com.lamphaus.app.update.UpdateChannel.STABLE
+                        updateViewModel?.setChannel(channel)
+                    },
+                )
+            }
+        }
+        item {
+            SettingsCard(title = stringResource(R.string.update_check)) {
+                val status = when (updateState.phase) {
+                    com.lamphaus.app.update.UpdatePhase.UpToDate ->
+                        stringResource(R.string.update_up_to_date)
+                    com.lamphaus.app.update.UpdatePhase.CheckFailed ->
+                        stringResource(R.string.update_check_failed)
+                    com.lamphaus.app.update.UpdatePhase.NoCompatible ->
+                        stringResource(R.string.update_no_compatible)
+                    com.lamphaus.app.update.UpdatePhase.WaitingForStable ->
+                        stringResource(R.string.update_waiting_stable)
+                    com.lamphaus.app.update.UpdatePhase.Checking ->
+                        stringResource(R.string.loading)
+                    else -> null
+                }
+                if (status != null) {
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+                Button(
+                    onClick = { updateViewModel?.checkManual() },
+                    enabled = updateViewModel != null &&
+                        updateState.phase != com.lamphaus.app.update.UpdatePhase.Checking,
+                    modifier = Modifier.padding(16.dp).height(48.dp).fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.update_check))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateChannelOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(label) },
+        trailingContent = { RadioButton(selected = selected, onClick = onClick) },
+        modifier = Modifier
+            .sizeIn(minHeight = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
 }

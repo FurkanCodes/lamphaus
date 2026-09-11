@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Lamphaus signed release-feed envelope",
+  "type": "object",
+  "required": ["keyId", "payloadBase64", "signatureBase64"],
+  "properties": {
+    "keyId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "payloadBase64": { "type": "string", "minLength": 1 },
+    "signatureBase64": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}

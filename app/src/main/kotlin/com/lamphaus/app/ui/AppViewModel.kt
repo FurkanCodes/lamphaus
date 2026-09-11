@@ -1461,6 +1461,19 @@ class AppViewModel(
         sourceJob?.cancel()
         sourceJob = viewModelScope.launch {
             if (media.id.startsWith("fixture:")) {
+                if (BuildConfig.BENCHMARK_FIXTURES) {
+                    val uri = container.benchmarkMediaUri()
+                    mutableState.update {
+                        it.copy(playbackRequest = PlaybackRequest(
+                            mediaKey = media.stableKey,
+                            videoId = episode?.id ?: media.id,
+                            title = media.name,
+                            preview = media,
+                            source = PlaybackSource(uri = uri, mimeType = "video/mp4"),
+                        ))
+                    }
+                    return@launch
+                }
                 showMessage("Fixture artwork has no media source. Install a stream add-on to play content.")
                 return@launch
             }
@@ -1975,7 +1988,7 @@ class AppViewModel(
                     mutableState.update { it.copy(refreshing = true) }
                     return@launch
                 }
-                val preview = if (BuildConfig.DEBUG && account.userId == "local-development") {
+                val preview = if ((BuildConfig.DEBUG || BuildConfig.BENCHMARK_FIXTURES) && account.userId == "local-development") {
                     listOf(
                         CatalogSection(
                             id = "preview",
@@ -2260,6 +2273,7 @@ class AppViewModel(
     }
 
     private fun ensureDefaultCatalog(providers: List<ProviderSubscription>) {
+        if (BuildConfig.BENCHMARK_FIXTURES) return
         val developmentSources = providers.filter { BuildConfig.DEBUG && it.id == DEVELOPMENT_SOURCE_ID }
         val existing = providers.firstOrNull {
             it.id == CINEMETA_PROVIDER_ID || it.manifestUrl == CINEMETA_MANIFEST_URL
@@ -2307,6 +2321,11 @@ class AppViewModel(
         val now = System.currentTimeMillis()
         val profile = Profile(UUID.randomUUID().toString(), "Home", "moon", ProfileKind.ADULT, updatedAtEpochMillis = now)
         container.libraryRepository.saveProfile(profile, null)
+        if (BuildConfig.BENCHMARK_FIXTURES) {
+            PreviewMedia.items.forEach { media ->
+                container.libraryRepository.saveLibrary(LibraryEntry(profile.id, media.stableKey, media, now, now))
+            }
+        }
         (state.value.account as? AccountState.SignedIn)?.userId?.let { container.cloudSyncGateway.saveProfile(it, profile) }
         container.preferences.setActiveProfile(profile.id)
     }

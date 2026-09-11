@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "revision": 7,
+  "publishedAt": "2026-09-01T10:00:00Z",
+  "releases": [
+    {
+      "channel": "beta",
+      "versionCode": 2,
+      "versionName": "1.0.0-beta.1",
+      "tag": "v1.0.0-beta.1",
+      "commit": "bd6d95e feat(player): modernize playback chrome and subtitle editors",
+      "publishedAt": "2026-09-01T10:00:00Z",
+      "minSdk": 26,
+      "changelog": "- First beta: library, playback, and provider setup.\n- Known limits: 32-bit ARM smoke-tested on emulator only.",
+      "releasePageUrl": "https://github.com/furkancodes/lamphaus/releases/tag/v1.0.0-beta.1",
+      "apk": {
+        "packageId": "com.lamphaus.app",
+        "url": "https://github.com/furkancodes/lamphaus/releases/download/v1.0.0-beta.1/lamphaus-v1.0.0-beta.1-vc2.apk",
+        "abis": ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
+        "byteLength": 48211328,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "signerFingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD"
+      }
+    },
+    {
+      "channel": "stable",
+      "versionCode": 3,
+      "versionName": "1.0.0",
+      "tag": "v1.0.0",
+      "commit": "0000000 chore(release): promote 1.0.0",
+      "publishedAt": "2026-09-05T10:00:00Z",
+      "minSdk": 26,
+      "changelog": "- Stable promotion of the beta series.",
+      "releasePageUrl": "https://github.com/furkancodes/lamphaus/releases/tag/v1.0.0",
+      "apk": {
+        "packageId": "com.lamphaus.app",
+        "url": "https://github.com/furkancodes/lamphaus/releases/download/v1.0.0/lamphaus-v1.0.0-vc3.apk",
+        "abis": ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
+        "byteLength": 48220000,
+        "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+        "signerFingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD"
+      }
+    }
+  ],
+  "withdrawnVersionCodes": []
+}
