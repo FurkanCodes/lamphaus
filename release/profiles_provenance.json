@@ -1,0 +1,11 @@
+{
+  "generatedAt": "2026-09-10T21:38:43Z",
+  "sourceCommit": "e1c5cbede093d05f897029ebbf4ca680e183659e",
+  "profileKind": "startup",
+  "profileSha256": "22f2048efe899e7d72994f4fdd3282699de1c674a02eba586b678a6a578e9959",
+  "devices": {
+    "mobile": "2506BPN68G physical phone",
+    "tv": "sdk_google_atv64_arm64 Android 16 emulator"
+  },
+  "rules": ["QA-07", "QA-08"]
+}

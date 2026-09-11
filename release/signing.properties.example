@@ -4,6 +4,10 @@
 # See docs/RELEASE_RUNBOOK.md.
 production.packageId=com.lamphaus.app
 production.minSdk=26
+production.storeFile=/absolute/path/outside/repository/lamphaus-release.jks
+production.keyAlias=lamphaus
+production.keychainService=app.lamphaus.release.keystore
+production.keychainAccount=lamphaus-release
 # SHA-256 of the production APK signing certificate. `prepare` fails when the
 # built APK fingerprint differs or credentials are missing; never substitutes debug keys.
 production.signerFingerprint=

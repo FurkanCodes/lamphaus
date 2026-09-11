@@ -20,6 +20,16 @@ val updateFeedUrl: String =
 val supabaseUrl = providers.gradleProperty("lamphaus.supabaseUrl").orNull.orEmpty()
 val supabasePublishableKey = providers.gradleProperty("lamphaus.supabasePublishableKey").orNull.orEmpty()
 val cloudConfigured = supabaseUrl.isNotBlank() && supabasePublishableKey.isNotBlank()
+val releaseStorePath = providers.environmentVariable("LAMPHAUS_RELEASE_STORE_FILE").orNull
+val releaseKeyAlias = providers.environmentVariable("LAMPHAUS_RELEASE_KEY_ALIAS").orNull
+val releaseStorePassword = providers.environmentVariable("LAMPHAUS_RELEASE_STORE_PASSWORD").orNull
+val releaseKeyPassword = providers.environmentVariable("LAMPHAUS_RELEASE_KEY_PASSWORD").orNull
+val releaseSigningConfigured = listOf(
+    releaseStorePath,
+    releaseKeyAlias,
+    releaseStorePassword,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.lamphaus.app"
@@ -45,6 +55,17 @@ android {
         buildConfigField("boolean", "BENCHMARK_FIXTURES", "false")
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("production") {
+                storeFile = file(checkNotNull(releaseStorePath))
+                keyAlias = releaseKeyAlias
+                storePassword = releaseStorePassword
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -59,6 +80,7 @@ android {
             matchingFallbacks += listOf("debug")
         }
         release {
+            signingConfig = signingConfigs.findByName("production")
             isMinifyEnabled = true
             isShrinkResources = true
             buildConfigField("boolean", "DIAGNOSTICS_DEFAULT", "false")
@@ -72,6 +94,7 @@ android {
         // optimization mirrored so A→B rehearsal matches production.
         create("updaterQa") {
             initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".updaterqa"
             versionNameSuffix = "-updaterqa"
             buildConfigField("String", "UPDATE_FEED_URL", "\"https://raw.githubusercontent.com/furkancodes/lamphaus/release-metadata-qa/updates/v1/index.json\"")

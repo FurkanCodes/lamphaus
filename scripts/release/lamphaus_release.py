@@ -61,6 +61,29 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, text=True, capture_output=True, **kw)
 
 
+def git(*args: str) -> str:
+    p = run(["git", *args], cwd=ROOT)
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr.strip() or f"git {' '.join(args)} failed")
+    return p.stdout.strip()
+
+
+def require_clean_tree() -> None:
+    if git("status", "--porcelain"):
+        raise RuntimeError("working tree is not clean; commit or remove changes before preparing")
+
+
+def sign_bytes(private_key: Path, payload: bytes) -> bytes:
+    p = subprocess.run(
+        ["openssl", "dgst", "-sha256", "-sign", str(private_key)],
+        input=payload,
+        capture_output=True,
+    )
+    if p.returncode != 0:
+        raise RuntimeError(p.stderr.decode(errors="replace").strip() or "metadata signing failed")
+    return p.stdout
+
+
 def read_properties(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for line in path.read_text().splitlines():
@@ -85,6 +108,16 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
+
+
+def keychain_password(service: str, account: str) -> str:
+    p = run(["security", "find-generic-password", "-s", service, "-a", account, "-w"])
+    if p.returncode != 0 or not p.stdout.strip():
+        raise RuntimeError(f"missing macOS Keychain item {service}/{account}")
+    return p.stdout.strip()
+
+
 def cmd_profiles(args: argparse.Namespace) -> int:
     """Generate mobile+TV profiles on separate targets, merge, record provenance."""
     del args
@@ -193,7 +226,8 @@ def cmd_prepare(args: argparse.Namespace) -> int:
             return fail(f"missing release notes {notes}")
         if run(["git", "ls-files", "--error-unmatch", str(notes.relative_to(ROOT))], cwd=ROOT).returncode != 0:
             return fail("release notes not committed")
-        if run(["git", "ls-files", "--error-unmatch", "app/src/main/baselineProfiles/baseline-prof.txt"], cwd=ROOT).returncode != 0:
+        profile_path = "app/src/main/generated/baselineProfiles/startup-prof.txt"
+        if run(["git", "ls-files", "--error-unmatch", profile_path], cwd=ROOT).returncode != 0:
             return fail("baseline profiles not committed (run `profiles` first)")
         if not PROVENANCE_FILE.exists():
             return fail("missing release/profiles_provenance.json")
@@ -204,6 +238,15 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         expected_fp = signing.get("production.signerFingerprint", "")
         if not expected_fp:
             return fail("production.signerFingerprint not configured (see signing.properties.example)")
+        store_file = signing.get("production.storeFile", "")
+        key_alias = signing.get("production.keyAlias", "")
+        keychain_service = signing.get("production.keychainService", "")
+        keychain_account = signing.get("production.keychainAccount", "")
+        if not all((store_file, key_alias, keychain_service, keychain_account)):
+            return fail("production signing location or Keychain identity is incomplete")
+        if not Path(store_file).expanduser().is_file():
+            return fail("production keystore is missing")
+        password = keychain_password(keychain_service, keychain_account)
         # Offline checks that do not need a build.
         print("Running unit tests, release lint, neutrality …")
         for cmd in (
@@ -216,13 +259,25 @@ def cmd_prepare(args: argparse.Namespace) -> int:
                 return fail(f"{' '.join(cmd)} failed")
         print("Building signed universal release APK …")
         env = dict(os.environ)
-        p = subprocess.run(["./gradlew", ":app:assembleRelease", "--stacktrace"], cwd=ROOT, env=env)
+        env.update({
+            "LAMPHAUS_RELEASE_STORE_FILE": str(Path(store_file).expanduser()),
+            "LAMPHAUS_RELEASE_KEY_ALIAS": key_alias,
+            "LAMPHAUS_RELEASE_STORE_PASSWORD": password,
+            "LAMPHAUS_RELEASE_KEY_PASSWORD": password,
+        })
+        release_output = ROOT / "app" / "build" / "outputs" / "apk" / "release"
+        for stale_apk in release_output.glob("*.apk"):
+            stale_apk.unlink()
+        p = subprocess.run(
+            ["./gradlew", ":app:assembleRelease", "--stacktrace", "--max-workers=2"],
+            cwd=ROOT,
+            env=env,
+        )
         if p.returncode != 0:
             return fail("assembleRelease failed")
-        apks = list((ROOT / "app" / "build" / "outputs" / "apk" / "release").glob("*.apk"))
-        if not apks:
+        apk = release_output / "app-release.apk"
+        if not apk.exists():
             return fail("no release APK produced")
-        apk = max(apks, key=lambda f: f.stat().st_size)
         fp = apk_signer_fingerprint(apk)
         if fp != expected_fp.upper():
             return fail(f"signer fingerprint mismatch (got {fp}); never substituting debug keys")
