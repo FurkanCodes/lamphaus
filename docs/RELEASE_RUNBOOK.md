@@ -22,14 +22,24 @@ a debug key and never prints secrets.
 
 1. Bump `gradle/version.properties` (globally increasing versionCode across
    channels, including withdrawals). Write `release/notes/<version>.md`.
-2. `python3 scripts/release/lamphaus_release.py profiles` — generate on the
-   mobile device, then the TV device; commit profiles + provenance.
-3. `... prepare --commit <sha>` — clean tree, tests, lint, neutrality,
+2. Develop on a focused branch, run the applicable platform checks, merge the
+   verified change to `main`, and push it.
+3. When startup-sensitive paths changed, generate profiles on the mobile
+   device and TV emulator, then commit the merged profile and provenance.
+4. `python3 scripts/release/lamphaus_release.py prepare --commit <sha>` — clean tree, tests, lint, neutrality,
    signed universal APK for all four ABIs, profile + MPV gates.
-4. `... draft` — create/resume the draft, upload `dist/release/` artifacts.
-5. `... publish` — verify uploads, publish with the correct prerelease flag,
-   anonymous download check, CAS-advance `release-metadata`, propagation check.
-6. `... verify` — release, feed, download, and website health report.
+5. Create the GitHub draft locally, upload the APK, checksum, and build report,
+   verify the downloaded bytes, then publish with the correct prerelease flag.
+6. Advance and sign `release-metadata`, preserving its increasing revision,
+   and push it only after the GitHub asset is verified.
+7. Verify the release page, signed feed, anonymous download, website card, and
+   in-app update selection before declaring the release complete.
+
+The script's `prepare` command is the validated build entry point. Until its
+`draft`, `publish`, and `verify` commands implement every step above, perform
+publication and feed promotion as explicit local steps and do not treat those
+placeholder commands as evidence of completion. See
+`docs/DEVELOPMENT_AND_RELEASE.md` for the agent checklist (`REL-01–09`).
 
 ## Interrupted publication
 
@@ -74,7 +84,7 @@ traces archive with each release.
   for instrumented release-smoke evidence on optimized auth, playback, and
   JNI (plan §7). R8 full-mode, resource shrinking, and
   `proguard-android-optimize.txt` stay on.
-- `prepare` checks `libmpv.so` presence per ABI; full MPV behavior (HTTPS,
+- `prepare` checks `liblamphaus_mpv.so` presence per ABI; full MPV behavior (HTTPS,
   ASS, fallback, lazy init) is verified on hardware per
   `docs/PLAYER_V2_RELEASE_CHECKLIST.md` before promotion.
 - Device verification (QA-02–08: matrices, API 26–37 installer boundaries,

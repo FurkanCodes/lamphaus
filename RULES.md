@@ -282,7 +282,21 @@ These rules preserve the approved TV experience while making the overlap explici
 - Mobile adapts navigation bar to rail/drawer from window size; TV uses the approved top navigation and spatial focus model.
 - Shared business/data components may be reused. Platform UI components may share small visual primitives only when semantics, input, and geometry remain correct for both.
 
-## 17. Quality gates
+## 17. Development and release integrity
+
+- **REL-01 — Isolated development.** Begin feature work from current `main` on a focused branch. Keep commits reviewable, run tests for the affected platform, and merge only verified work into `main`.
+- **REL-02 — Version identity.** `gradle/version.properties` is the single version source. Every published build uses a globally increasing `versionCode` and a unique `versionName`, tag, and artifact filename. Never reuse a published identity or replace published bytes.
+- **REL-03 — Required changelog.** Every release has a committed `release/notes/<versionName>.md` with a version heading, a one-sentence user-facing summary, concise feature bullets, and honest known limits when applicable. Use that exact file as both the GitHub Release body and signed-feed changelog so they cannot drift. Preserve the canonical `1.0.0-beta.1` changelog in `docs/DEVELOPMENT_AND_RELEASE.md` and its versioned notes file.
+- **REL-04 — Profile provenance.** Regenerate and commit mobile and TV startup profiles when startup, initial navigation, dependency initialization, home loading, or playback startup materially changes. Record device provenance and verify the packaged profile under `QA-08`.
+- **REL-05 — Local production build.** Production APK building and signing run only on the owner’s machine with bounded Gradle workers. GitHub Actions may verify code and deploy the website, but must never hold production signing secrets or build, sign, upload, or promote the production APK.
+- **REL-06 — Permanent signing identity.** Every update uses the same protected production APK key. Keep private keys outside the repository, keep passwords in macOS Keychain, maintain verified encrypted offline backups, and fail closed on a missing or mismatched signer.
+- **REL-07 — Immutable publication.** Publish the APK together with its SHA-256 checksum and build report. Verify the uploaded asset by downloading it again. Published assets, tags, version codes, and checksums are immutable; corrections require a higher version code.
+- **REL-08 — Atomic promotion.** A GitHub Release alone is not a completed Lamphaus release. Advance the signed `release-metadata` feed only after asset verification, then confirm the feed signature, revision, release identity, checksum, public download, website card, and in-app update path all agree.
+- **REL-09 — Release completion report.** Record the source commit, version, channel, artifact size, SHA-256, signer fingerprint, ABIs, profile presence, checks performed, GitHub URL, feed revision, and any remaining device-test limitation. Do not report success while publication and promotion are out of sync.
+
+The executable contributor workflow and canonical changelog are in `docs/DEVELOPMENT_AND_RELEASE.md`. The operational recovery details are in `docs/RELEASE_RUNBOOK.md`.
+
+## 18. Quality gates
 
 - **QA-01 — Rule mapping.** Every interface requirement changed by a feature maps to a Compose test, screenshot test, lint/static check, or named manual test.
 - **QA-02 — Mobile matrix.** Test at `360dp` and `412dp` compact widths, representative medium and expanded widths, portrait and landscape, split screen, at least one fold/hinge posture where relevant, gesture and three-button navigation, light/dark/dynamic schemes, and at least three dynamic-color wallpapers.
@@ -293,7 +307,7 @@ These rules preserve the approved TV experience while making the overlap explici
 - **QA-07 — TV matrix.** Test 720p, 1080p, and 4K, physical/emulator D-pad reachability for every control, Back paths with `adb shell input keyevent`, focus restoration, overscan safety, reduced motion, and text-field browse/edit behavior. `TV-NAV-03` remains covered by `TvNavigationBehaviorTest` plus the named emulator check **TV text-field browse/edit flow**.
 - **QA-08 — Performance.** Check lazy collection behavior, recomposition, image loading/cropping, blur/gradient fallbacks, animation smoothness, startup, and resource use on a representative low-end device.
 
-## 18. Review checklist
+## 19. Review checklist
 
 Before approving mobile UI work, answer yes to all applicable questions:
 
@@ -310,7 +324,7 @@ Before approving mobile UI work, answer yes to all applicable questions:
 - Does failure stay local, privacy remain visible, and no provider-sensitive data leak into UI outside its intended surface?
 - Have platform-specific mobile and TV rules remained separate?
 
-## 19. Source baseline
+## 20. Source baseline
 
 This consolidation is based on the Android guidance supplied with the request and these repository sources: `PRODUCT.md`, `DESIGN.md`, `docs/ANDROID_DESIGN_REQUIREMENTS.md`, and `docs/TV_DESIGN_TOKENS.md`.
 
