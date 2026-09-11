@@ -262,8 +262,8 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         # Offline checks that do not need a build.
         print("Running unit tests, release lint, neutrality …")
         for cmd in (
-            ["./gradlew", "testReleaseUnitTest", "--stacktrace"],
-            ["./gradlew", "lintRelease", "--stacktrace"],
+            ["./gradlew", ":app:testDebugUnitTest", "--stacktrace", "--max-workers=2"],
+            ["./gradlew", ":app:lintRelease", "--stacktrace", "--max-workers=2"],
             ["./scripts/check-neutrality.sh"],
         ):
             p = subprocess.run(cmd, cwd=ROOT)
