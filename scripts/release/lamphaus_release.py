@@ -217,7 +217,10 @@ def apk_signer_fingerprint(apk: Path) -> str:
     m = re.search(r"SHA-256 digest:\s*([0-9a-fA-F:]+)", p.stdout)
     if not m:
         raise RuntimeError("could not parse signer fingerprint")
-    return m.group(1).upper()
+    raw = m.group(1).replace(":", "").upper()
+    if len(raw) != 64:
+        raise RuntimeError("invalid signer SHA-256 fingerprint length")
+    return ":".join(raw[i : i + 2] for i in range(0, len(raw), 2))
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:
