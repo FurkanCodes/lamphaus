@@ -173,6 +173,18 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def android_sdk_root() -> Path | None:
+    configured = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if configured:
+        return Path(configured).expanduser()
+    local_properties = ROOT / "local.properties"
+    if local_properties.exists():
+        sdk_dir = read_properties(local_properties).get("sdk.dir", "")
+        if sdk_dir:
+            return Path(sdk_dir).expanduser()
+    return None
+
+
 
 def check_toolchain() -> list[str]:
     errors = []
@@ -182,9 +194,9 @@ def check_toolchain() -> list[str]:
     for tool in ("git", "openssl"):
         if shutil.which(tool) is None:
             errors.append(f"{tool} not on PATH")
-    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
-    if not sdk:
-        errors.append("ANDROID_HOME/ANDROID_SDK_ROOT unset")
+    sdk = android_sdk_root()
+    if sdk is None or not sdk.is_dir():
+        errors.append("Android SDK not found in the environment or local.properties")
     gradle_props = ROOT / "gradle" / "wrapper" / "gradle-wrapper.properties"
     if gradle_props.exists() and "9.4" not in gradle_props.read_text():
         errors.append("Gradle wrapper pin drifted (expected 9.4.x)")
@@ -194,9 +206,9 @@ def check_toolchain() -> list[str]:
 def apk_signer_fingerprint(apk: Path) -> str:
     apksigner = shutil.which("apksigner")
     if apksigner is None:
-        bt = os.environ.get("ANDROID_HOME", "")
-        cand = Path(bt) / "build-tools" / "36.0.0" / "apksigner"
-        apksigner = str(cand) if cand.exists() else None
+        sdk = android_sdk_root()
+        candidates = sorted((sdk / "build-tools").glob("*/apksigner"), reverse=True) if sdk else []
+        apksigner = str(candidates[0]) if candidates else None
     if apksigner is None:
         raise RuntimeError("apksigner not found")
     p = run([apksigner, "verify", "--print-certs", str(apk)])
