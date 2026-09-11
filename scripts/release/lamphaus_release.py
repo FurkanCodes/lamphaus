@@ -306,8 +306,11 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         abis = sorted({n.split("/")[1] for n in libs})
         if abis != sorted(REQUIRED_ABIS):
             return fail(f"APK ABIs {abis} != required {list(REQUIRED_ABIS)}")
-        if not any("libmpv.so" in n for n in libs):
-            return fail("libmpv.so missing for at least one ABI (MPV gate)")
+        missing_mpv = [
+            abi for abi in REQUIRED_ABIS if f"lib/{abi}/liblamphaus_mpv.so" not in libs
+        ]
+        if missing_mpv:
+            return fail(f"liblamphaus_mpv.so missing for ABIs {missing_mpv} (MPV gate)")
         # Packaged profile presence.
         with zipfile.ZipFile(apk) as z:
             if "assets/dexopt/baseline.prof" not in z.namelist():
