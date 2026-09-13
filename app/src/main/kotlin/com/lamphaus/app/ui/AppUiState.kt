@@ -180,6 +180,28 @@ internal fun WatchProgress.isResumable(): Boolean =
         positionMillis >= CONTINUE_WATCHING_MIN_POSITION_MILLIS &&
         fraction <= 0.98f
 
+/**
+ * Produces at most one Continue Watching card per title. A series can have one
+ * progress row per episode, and duplicate title keys crash Compose lazy lists.
+ * Sorting first preserves the most recently watched episode for each title.
+ */
+internal fun continueWatchingItems(
+    progress: List<WatchProgress>,
+    catalogMedia: List<MediaPreview>,
+): List<Pair<MediaPreview, WatchProgress>> {
+    val mediaByKey = catalogMedia.associateBy(MediaPreview::stableKey)
+    return progress
+        .asSequence()
+        .filter(WatchProgress::isResumable)
+        .sortedByDescending(WatchProgress::updatedAtEpochMillis)
+        .mapNotNull { row ->
+            val media = mediaByKey[row.mediaKey] ?: row.preview ?: return@mapNotNull null
+            media to row
+        }
+        .distinctBy { (media) -> media.stableKey }
+        .toList()
+}
+
 data class AppUiState(
     val account: AccountState = AccountState.Loading,
     val profiles: List<Profile> = emptyList(),

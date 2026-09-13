@@ -159,7 +159,7 @@ import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
-import com.lamphaus.app.ui.isResumable
+import com.lamphaus.app.ui.continueWatchingItems
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.app.ui.isRenderableHomeCatalogSection
 import com.lamphaus.app.ui.menuActions
@@ -947,19 +947,7 @@ private fun TvHome(
     val featured = featuredSelection ?: allMedia.firstOrNull()
     val heroItems = remember(allMedia) { allMedia.distinctBy(MediaPreview::stableKey).take(5) }
     val continueWatching = remember(state.progress, allMedia) {
-        val mediaByKey = allMedia.associateBy(MediaPreview::stableKey)
-        state.progress
-            .asSequence()
-            .filter { it.isResumable() }
-            .sortedByDescending { it.updatedAtEpochMillis }
-            .mapNotNull { progress ->
-                // Catalog rows only cover titles a loaded section lists; the
-                // persisted preview snapshot hydrates everything else.
-                val media = mediaByKey[progress.mediaKey] ?: progress.preview
-                    ?: return@mapNotNull null
-                media to progress
-            }
-            .toList()
+        continueWatchingItems(state.progress, allMedia)
     }
     LaunchedEffect(focusedCandidate) {
         focusedCandidate?.let {

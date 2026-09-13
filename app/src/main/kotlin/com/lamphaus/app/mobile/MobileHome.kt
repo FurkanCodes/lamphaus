@@ -99,7 +99,7 @@ import kotlin.math.absoluteValue
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
-import com.lamphaus.app.ui.isResumable
+import com.lamphaus.app.ui.continueWatchingItems
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
@@ -160,19 +160,7 @@ internal fun MobileHomeScreen(
     // (player writes -> Room + cloud; cloud -> Room on sign-in), so this row
     // follows whatever was last watched on any device.
     val continueWatching = remember(state.progress, allMedia) {
-        val mediaByKey = allMedia.associateBy(MediaPreview::stableKey)
-        state.progress
-            .asSequence()
-            .filter { it.isResumable() }
-            .sortedByDescending { it.updatedAtEpochMillis }
-            .mapNotNull { progress ->
-                // Catalog rows only cover titles a loaded section lists; the
-                // persisted preview snapshot hydrates everything else.
-                val media = mediaByKey[progress.mediaKey] ?: progress.preview
-                    ?: return@mapNotNull null
-                media to progress
-            }
-            .toList()
+        continueWatchingItems(state.progress, allMedia)
     }
     val progressByVideo = remember(state.progress) { state.progress.associateBy { it.videoId } }
     val completedVideoIds = remember(state.progress) {
