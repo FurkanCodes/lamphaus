@@ -234,10 +234,10 @@ fun refreshRateMatches(candidateHz: Float, videoFrameRate: Float): Boolean {
 }
 
 /**
- * Mode-selection order (plan §2): exact resolution + refresh → exact refresh
- * → closest refresh among same-aspect modes → keep the current mode (null
- * means "no switch"). Resolution matching is the caller's gate; this only
- * picks the mode.
+ * Selects a physical output mode independently for resolution and cadence (QA-06/QA-07).
+ * Cropped movies use the smallest output containing the source. Integer refresh
+ * multiples avoid pulldown; fractional and integer frame rates remain distinct.
+ * Null means the current mode is preferable or no permitted mode is available.
  */
 fun selectDisplayMode(
     current: DisplayModeCandidate,
@@ -245,27 +245,48 @@ fun selectDisplayMode(
     videoHeight: Int,
     videoFrameRate: Float,
     availableModes: List<DisplayModeCandidate>,
+    matchFrameRate: Boolean = true,
+    matchResolution: Boolean = true,
 ): DisplayModeCandidate? {
-    if (availableModes.isEmpty() || videoWidth <= 0 || videoHeight <= 0) return null
-    val exactResolutionAndRate = availableModes.firstOrNull { mode ->
-        mode.width == videoWidth && mode.height == videoHeight && refreshRateMatches(mode.refreshRateHz, videoFrameRate)
+    if (videoWidth <= 0 || videoHeight <= 0 || (!matchFrameRate && !matchResolution)) return null
+    val hasFrameRate = matchFrameRate && videoFrameRate.isFinite() && videoFrameRate > 0f
+    var candidates = availableModes.filter { mode ->
+        mode.width > 0 && mode.height > 0 && mode.refreshRateHz.isFinite() && mode.refreshRateHz > 0f &&
+            (matchResolution || (mode.width == current.width && mode.height == current.height)) &&
+            (hasFrameRate || refreshRateMatches(mode.refreshRateHz, current.refreshRateHz))
     }
-    if (exactResolutionAndRate != null) return exactResolutionAndRate.takeIf { it != current }
-
-    val exactRate = availableModes.filter { refreshRateMatches(it.refreshRateHz, videoFrameRate) }
-    if (exactRate.isNotEmpty()) {
-        // Same-aspect first so 16:9 content does not jump to an odd panel mode.
-        val videoAspect = videoWidth.toDouble() / videoHeight.toDouble()
-        val currentAspect = current.width.toDouble() / current.height.toDouble()
-        val chosen = exactRate.minByOrNull { mode ->
-            val modeAspect = mode.width.toDouble() / mode.height.toDouble()
-            kotlin.math.abs(modeAspect - videoAspect) * 10 + kotlin.math.abs(modeAspect - currentAspect)
-        } ?: exactRate.first()
-        return chosen.takeIf { it != current }
+    if (candidates.isEmpty()) return null
+    if (matchResolution) {
+        val containing = candidates.filter { it.width >= videoWidth && it.height >= videoHeight }
+        val size = if (containing.isNotEmpty()) {
+            containing.minBy { it.width.toLong() * it.height }
+        } else {
+            candidates.maxBy { it.width.toLong() * it.height }
+        }
+        candidates = candidates.filter { it.width == size.width && it.height == size.height }
     }
-
-    val closest = availableModes.filter { it.height == current.height || it.width == current.width }
-        .minByOrNull { kotlin.math.abs(it.refreshRateHz - videoFrameRate) }
-    return closest
-        ?.takeIf { !refreshRateMatches(current.refreshRateHz, videoFrameRate) && it != current }
+    val chosen = candidates.minWithOrNull(
+        compareBy<DisplayModeCandidate> {
+            if (hasFrameRate) cadenceError(it.refreshRateHz, videoFrameRate) else 0.0
+        }.thenBy { if (it == current) 0 else 1 }
+            .thenBy { it.refreshRateHz },
+    )
+    return chosen?.takeIf { it != current }
 }
+
+private fun cadenceError(refreshRate: Float, frameRate: Float): Double {
+    val ratio = refreshRate.toDouble() / frameRate
+    val multiple = kotlin.math.round(ratio).coerceAtLeast(1.0)
+    // Compare per-frame rates so rounding at 119.88 Hz does not exclude 23.976 fps.
+    if (refreshRateMatches((refreshRate / multiple).toFloat(), frameRate)) return 0.0
+    return kotlin.math.abs(ratio - multiple)
+}
+
+/** Alternative refresh rates describe seamless changes at the SAME physical resolution. */
+fun isSeamlessDisplayMode(
+    current: DisplayModeCandidate,
+    target: DisplayModeCandidate,
+    alternativeRefreshRates: List<Float>,
+): Boolean = current.width == target.width && current.height == target.height &&
+    (refreshRateMatches(current.refreshRateHz, target.refreshRateHz) ||
+        alternativeRefreshRates.any { refreshRateMatches(it, target.refreshRateHz) })

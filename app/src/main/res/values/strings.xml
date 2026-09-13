@@ -367,4 +367,12 @@
     <string name="player_color_green">Green</string>
     <string name="player_color_black">Black</string>
     <string name="player_color_charcoal">Charcoal</string>
+    <string name="playback_display_matched">matched</string>
+    <string name="playback_display_not_applied">display did not apply the requested mode</string>
+    <string name="playback_display_off">display matching is off</string>
+    <string name="playback_display_unknown_rate">frame rate unknown; resolution matching evaluated independently</string>
+    <string name="playback_display_no_seamless_mode">current mode retained; no better seamless mode</string>
+    <string name="playback_display_no_better_mode">current mode retained; no better supported mode</string>
+    <string name="playback_display_requested">display mode switch requested</string>
+    <string name="playback_display_current">current display mode</string>
 </resources>

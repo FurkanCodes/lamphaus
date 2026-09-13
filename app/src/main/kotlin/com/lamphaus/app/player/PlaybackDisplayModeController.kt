@@ -3,150 +3,181 @@ package com.lamphaus.app.player
 import android.app.Activity
 import android.os.Build
 import android.view.Display
+import com.lamphaus.app.R
 import com.lamphaus.core.model.DevicePlaybackConfig
 import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.core.model.ResolutionMatching
+import com.lamphaus.core.model.isSeamlessDisplayMode
 import com.lamphaus.core.model.selectDisplayMode
+import com.lamphaus.core.model.refreshRateMatches
 
-/**
- * TV frame-rate and resolution matching (plan §2). Applies the matched
- * display mode only after the video format has remained stable for two
- * seconds, ignores adaptive-bitrate representation changes, and restores the
- * original mode when playback ends, fails, or the Activity closes.
- *
- * Decision math lives in [selectDisplayMode] (unit-tested); this controller
- * owns the Android mechanics: mode switching through
- * `WindowManager.LayoutParams.preferredDisplayModeId` and the seamless-only
- * gate via `Display.Mode.alternativeRefreshRates`.
- */
-class PlaybackDisplayModeController(
-    private val activity: Activity,
+/** TV output matching after a stable video format; preserves window policy on exit (PLY-IMM-04). */
+class PlaybackDisplayModeController internal constructor(
+    private val output: PlaybackDisplayHost,
     private val configProvider: () -> DevicePlaybackConfig,
-    /** Reports the applied mode or why a requested mode was not applied (plan §2 stream info). */
     private val onModeDecision: (DisplayModeDecision) -> Unit = {},
 ) {
-    data class DisplayModeDecision(val appliedMode: DisplayModeCandidate?, val reason: String)
+    data class DisplayModeDecision(val appliedMode: DisplayModeCandidate?, val reason: DisplayModeReason)
 
-    @Suppress("DEPRECATION")
-    private val display: Display? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        activity.display
-    } else {
-        activity.windowManager.defaultDisplay
+    enum class DisplayModeReason(val stringRes: Int) {
+        MATCHED(R.string.playback_display_matched),
+        NOT_APPLIED(R.string.playback_display_not_applied),
+        OFF(R.string.playback_display_off),
+        UNKNOWN_FRAME_RATE(R.string.playback_display_unknown_rate),
+        NO_SEAMLESS_MODE(R.string.playback_display_no_seamless_mode),
+        NO_BETTER_MODE(R.string.playback_display_no_better_mode),
+        REQUESTED(R.string.playback_display_requested),
     }
-    private val originalModeId = display?.mode?.modeId
 
+    constructor(
+        activity: Activity,
+        configProvider: () -> DevicePlaybackConfig,
+        onModeDecision: (DisplayModeDecision) -> Unit = {},
+    ) : this(AndroidPlaybackDisplayHost(activity), configProvider, onModeDecision)
+
+    // Zero means system-managed; restoring the observed physical ID would pin the window.
+    private val originalPreferredModeId = output.preferredModeId
     private var pendingFormat: Triple<Int, Int, Float>? = null
-    private var stableSinceElapsedMillis = 0L
-    private var appliedModeId: Int? = null
+    private var stableMillis = 0L
+    private var evaluated = false
+    private var matchingConfig: Pair<FrameRateMatching, ResolutionMatching>? = null
+    private var requestedMode: PlaybackOutputMode? = null
+    private var requestMillis = 0L
 
-    /**
-     * Feeds a newly observed video format. Adaptive-bitrate changes that keep
-     * the same (width, height, fps) bucket never restart the stability timer.
-     */
     fun onVideoFormat(width: Int, height: Int, frameRateHz: Float) {
-        val format = Triple(width, height, frameRateHz)
-        val previous = pendingFormat
-        val previousBucket = previous?.let { (w, h, f) -> "${w}x${h}@${f.toInt()}" }
-        val newBucket = "${width}x${height}@${frameRateHz.toInt()}"
-        if (previous == null || previousBucket != newBucket) {
+        if (width <= 0 || height <= 0) return
+        val rate = frameRateHz.takeIf { it.isFinite() && it > 0f } ?: 0f
+        val format = Triple(width, height, rate)
+        if (pendingFormat != format) {
             pendingFormat = format
-            stableSinceElapsedMillis = 0L
+            stableMillis = 0L
+            evaluated = false
         }
     }
 
-    /** Drives the two-second stability gate; call from the progress pulse. */
+    /** Called on the main thread while playback is active. */
     fun tick(deltaMillis: Long) {
-        if (appliedModeId != null || pendingFormat == null || display == null) return
-        stableSinceElapsedMillis += deltaMillis
-        if (stableSinceElapsedMillis < STABILITY_MILLIS) return
-        val (width, height, frameRateHz) = pendingFormat ?: return
+        val currentMode = output.currentMode ?: return
         val config = configProvider()
-        if (config.frameRateMatching == FrameRateMatching.OFF && config.resolutionMatching == ResolutionMatching.OFF) {
+        val settings = config.frameRateMatching to config.resolutionMatching
+        if (matchingConfig != settings) {
+            if (matchingConfig != null) restoreWindowPreference()
+            matchingConfig = settings
+            evaluated = false
+            stableMillis = 0L
+        }
+        requestedMode?.let { requested ->
+            requestMillis += deltaMillis
+            if (currentMode.id == requested.id) {
+                onModeDecision(DisplayModeDecision(requested.candidate, DisplayModeReason.MATCHED))
+                requestedMode = null
+            } else if (requestMillis >= SWITCH_TIMEOUT_MILLIS) {
+                onModeDecision(DisplayModeDecision(null, DisplayModeReason.NOT_APPLIED))
+                requestedMode = null
+            } else {
+                return
+            }
+        }
+        if (evaluated) return
+        val (width, height, frameRate) = pendingFormat ?: return
+        stableMillis += deltaMillis
+        if (stableMillis < STABILITY_MILLIS) return
+        evaluated = true
+        if (settings.first == FrameRateMatching.OFF && settings.second == ResolutionMatching.OFF) {
+            onModeDecision(DisplayModeDecision(null, DisplayModeReason.OFF))
             return
         }
-        val modes = display.supportedModes.map { DisplayModeCandidate(it.physicalWidth, it.physicalHeight, it.refreshRate) }
-        val current = display.mode.let { DisplayModeCandidate(it.physicalWidth, it.physicalHeight, it.refreshRate) }
-        val wantsResolution = config.resolutionMatching == ResolutionMatching.MATCH_SOURCE
-        val wanted = selectDisplayMode(current, width, height, frameRateHz, modes)
+        val current = currentMode.candidate
+        val alternatives = currentMode.alternativeRefreshRates
+        // Filter before ranking so an unavailable seamless choice cannot hide a valid one.
+        // Resolution opt-in permits resizing at the same refresh rate; it does not
+        // grant permission for an unadvertised non-seamless refresh-rate change.
+        val modes = output.supportedModes.filter {
+            settings.first != FrameRateMatching.SEAMLESS_ONLY ||
+                isSeamlessDisplayMode(current, it.candidate, alternatives) ||
+                (settings.second == ResolutionMatching.MATCH_SOURCE &&
+                    refreshRateMatches(current.refreshRateHz, it.candidate.refreshRateHz))
+        }
+        val wanted = selectDisplayMode(
+            current, width, height, frameRate, modes.map { it.candidate },
+            matchFrameRate = settings.first != FrameRateMatching.OFF,
+            matchResolution = settings.second == ResolutionMatching.MATCH_SOURCE,
+        )
         if (wanted == null) {
-            onModeDecision(DisplayModeDecision(null, "current mode already matches the source"))
+            val reason = when {
+                frameRate <= 0f && settings.first != FrameRateMatching.OFF ->
+                    DisplayModeReason.UNKNOWN_FRAME_RATE
+                settings.first == FrameRateMatching.SEAMLESS_ONLY ->
+                    DisplayModeReason.NO_SEAMLESS_MODE
+                else -> DisplayModeReason.NO_BETTER_MODE
+            }
+            onModeDecision(DisplayModeDecision(null, reason))
             return
         }
-        if (!wantsResolution && (wanted.width != current.width || wanted.height != current.height)) {
-            // Frame-rate-only matching may not change physical resolution.
-            val sameResolution = modes.filter { it.width == current.width && it.height == current.height }
-            val rateOnly = selectDisplayMode(current, width, height, frameRateHz, sameResolution)
-            applyOrReport(rateOnly, current, "resolution matching is off")
-            return
-        }
-        applyOrReport(wanted, current, if (wantsResolution) "" else "resolution matching is off")
+        val candidate = modes.first { it.candidate == wanted }
+        output.preferredModeId = candidate.id
+        requestedMode = candidate
+        requestMillis = 0L
+        onModeDecision(DisplayModeDecision(null, DisplayModeReason.REQUESTED))
     }
 
-    private fun applyOrReport(
-        mode: DisplayModeCandidate?,
-        current: DisplayModeCandidate,
-        skipReason: String,
-    ) {
-        if (mode == null) {
-            onModeDecision(DisplayModeDecision(null, skipReason.ifEmpty { "no matching mode" }))
-            return
+    private fun restoreWindowPreference() {
+        if (output.preferredModeId != originalPreferredModeId) {
+            output.preferredModeId = originalPreferredModeId
         }
-        val layout = activity.window.attributes
-        val candidate = display?.supportedModes?.firstOrNull {
-            it.physicalWidth == mode.width && it.physicalHeight == mode.height &&
-                kotlin.math.abs(it.refreshRate - mode.refreshRateHz) < 0.01f
-        }
-        if (candidate == null) {
-            onModeDecision(DisplayModeDecision(null, "requested mode not offered by the display"))
-            return
-        }
-        if (configProvider().frameRateMatching == FrameRateMatching.SEAMLESS_ONLY &&
-            candidate.modeId != current.let { display?.mode?.modeId } &&
-            !isSeamless(display!!, current, mode)
-        ) {
-            onModeDecision(DisplayModeDecision(null, "non-seamless switch skipped (seamless only)"))
-            return
-        }
-        layout.preferredDisplayModeId = candidate.modeId
-        activity.window.attributes = layout
-        appliedModeId = candidate.modeId
-        onModeDecision(DisplayModeDecision(mode, "matched"))
+        requestedMode = null
+        requestMillis = 0L
     }
 
-    private fun isSeamless(display: Display, current: DisplayModeCandidate, target: DisplayModeCandidate): Boolean {
-        // Same resolution is always seamless; different resolutions are only
-        // seamless when the display advertises the rate as an alternative.
-        if (current.width == target.width && current.height == target.height) return true
-        val currentMode = display.supportedModes.firstOrNull {
-            it.physicalWidth == current.width && it.physicalHeight == current.height &&
-                kotlin.math.abs(it.refreshRate - current.refreshRateHz) < 0.01f
-        } ?: return false
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
-        return currentMode.alternativeRefreshRates.any {
-            kotlin.math.abs(it - target.refreshRateHz) < 0.01f
-        }
-    }
-
-    /** Reports why matching was skipped without changing the display mode. */
-    fun reportSkipped(reason: String) {
-        onModeDecision(DisplayModeDecision(null, reason))
-    }
-
-    /** Restores the original display mode; call on end, failure, and destroy. */
+    /** Restores system policy and clears the previous source on end, failure, or replacement. */
     fun restore() {
-        val originalId = originalModeId ?: return
-        val layout = activity.window.attributes
-        if (layout.preferredDisplayModeId != originalId) {
-            layout.preferredDisplayModeId = originalId
-            activity.window.attributes = layout
-        }
-        appliedModeId = null
+        restoreWindowPreference()
         pendingFormat = null
-        stableSinceElapsedMillis = 0L
+        evaluated = false
+        stableMillis = 0L
+        matchingConfig = null
     }
 
     private companion object {
         const val STABILITY_MILLIS = 2_000L
+        const val SWITCH_TIMEOUT_MILLIS = 5_000L
     }
+}
+
+internal data class PlaybackOutputMode(
+    val id: Int,
+    val candidate: DisplayModeCandidate,
+    val alternativeRefreshRates: List<Float> = emptyList(),
+)
+
+/** Small platform boundary so switching, restoration, and confirmation can be regression tested. */
+internal interface PlaybackDisplayHost {
+    val currentMode: PlaybackOutputMode?
+    val supportedModes: List<PlaybackOutputMode>
+    var preferredModeId: Int
+}
+
+private class AndroidPlaybackDisplayHost(private val activity: Activity) : PlaybackDisplayHost {
+    @Suppress("DEPRECATION")
+    private val display: Display? get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        activity.display
+    } else {
+        activity.windowManager.defaultDisplay
+    }
+    override val currentMode get() = display?.mode?.toOutputMode()
+    override val supportedModes get() = display?.supportedModes?.map { it.toOutputMode() }.orEmpty()
+    override var preferredModeId: Int
+        get() = activity.window.attributes.preferredDisplayModeId
+        set(value) {
+            val layout = activity.window.attributes
+            layout.preferredDisplayModeId = value
+            activity.window.attributes = layout
+        }
+
+    private fun Display.Mode.toOutputMode() = PlaybackOutputMode(
+        modeId,
+        DisplayModeCandidate(physicalWidth, physicalHeight, refreshRate),
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) alternativeRefreshRates.toList() else emptyList(),
+    )
 }

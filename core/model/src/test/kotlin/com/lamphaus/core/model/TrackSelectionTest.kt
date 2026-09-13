@@ -253,4 +253,60 @@ class TrackSelectionTest {
         assertNull(selectDisplayMode(modes.first(), 1920, 1080, 24f, emptyList()))
         assertNull(selectDisplayMode(modes.first(), 0, 1080, 24f, modes))
     }
+    @Test
+    fun `QA-06 resolution matching works with unknown or disabled frame rate`() {
+        val current = modes.first()
+        val expected = DisplayModeCandidate(1920, 1080, 60f)
+        assertEquals(expected, selectDisplayMode(current, 1920, 1080, -1f, modes))
+        assertEquals(expected, selectDisplayMode(current, 1920, 1080, Float.NaN, modes))
+        assertEquals(expected, selectDisplayMode(current, 1920, 1080, 24f, modes, matchFrameRate = false))
+        assertNull(selectDisplayMode(current, 1920, 1080, 24f, modes, false, false))
+    }
+
+    @Test
+    fun `QA-07 frame rate only preserves physical resolution`() {
+        assertEquals(
+            DisplayModeCandidate(3840, 2160, 23.976f),
+            selectDisplayMode(modes.first(), 1920, 1080, 23.976f, modes, matchResolution = false),
+        )
+    }
+
+    @Test
+    fun `QA-07 cropped films match their enclosing output resolution`() {
+        assertEquals(DisplayModeCandidate(1920, 1080, 23.976f),
+            selectDisplayMode(modes.first(), 1920, 800, 23.976f, modes))
+        assertEquals(DisplayModeCandidate(3840, 2160, 23.976f),
+            selectDisplayMode(modes.first(), 3840, 1600, 23.976f, modes))
+    }
+
+    @Test
+    fun `QA-06 selects integer cadence multiples instead of nearest refresh`() {
+        val current = DisplayModeCandidate(1920, 1080, 60f)
+        val fifty = current.copy(refreshRateHz = 50f)
+        val fortyEight = current.copy(refreshRateHz = 48f)
+        assertEquals(fifty, selectDisplayMode(current, 1920, 1080, 25f, listOf(current, fifty)))
+        assertEquals(fortyEight, selectDisplayMode(current, 1920, 1080, 24f, listOf(current, fortyEight)))
+        assertNull(selectDisplayMode(current, 1920, 1080, 30f, listOf(current, fifty)))
+        val fractional = current.copy(refreshRateHz = 59.94f)
+        assertEquals(fractional, selectDisplayMode(current, 1920, 1080, 29.97f, listOf(current, fractional)))
+    }
+
+    @Test
+    fun `QA-07 resolution choice is independent of supported frame rates`() {
+        val current = modes.first()
+        val supported = listOf(current, current.copy(refreshRateHz = 24f), DisplayModeCandidate(1920, 1080, 60f))
+        assertEquals(DisplayModeCandidate(1920, 1080, 60f),
+            selectDisplayMode(current, 1920, 1080, 24f, supported))
+    }
+
+    @Test
+    fun `QA-07 seamless requires equal resolution and advertised refresh rate`() {
+        val current = modes.first()
+        val target = current.copy(refreshRateHz = 24f)
+        assertEquals(false, isSeamlessDisplayMode(current, target, emptyList()))
+        assertEquals(true, isSeamlessDisplayMode(current, target, listOf(24f)))
+        assertEquals(false, isSeamlessDisplayMode(current, target.copy(width = 1920, height = 1080), listOf(24f)))
+        assertEquals(false, isSeamlessDisplayMode(current, target.copy(refreshRateHz = 23.976f), listOf(24f)))
+    }
+
 }

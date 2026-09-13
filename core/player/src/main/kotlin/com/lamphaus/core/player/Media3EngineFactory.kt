@@ -2,6 +2,10 @@ package com.lamphaus.core.player
 
 import android.content.Context
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.Format
+import androidx.media3.common.Player
+import androidx.media3.common.MediaItem
+import com.lamphaus.core.model.VideoCadenceEstimator
 import androidx.media3.common.C
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.common.util.UnstableApi
@@ -111,6 +115,15 @@ object Media3EngineFactory {
             )
             .build()
             .apply {
+                videoCadenceEstimator.reset()
+                setVideoFrameMetadataListener { presentationTimeUs, _, _, _ ->
+                    videoCadenceEstimator.onFrame(presentationTimeUs)
+                }
+                addListener(object : Player.Listener {
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        videoCadenceEstimator.reset()
+                    }
+                })
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)
@@ -128,6 +141,13 @@ object Media3EngineFactory {
      */
     @Volatile
     var sessionPlayer: ExoPlayer? = null
+
+    private val videoCadenceEstimator = VideoCadenceEstimator()
+
+    /** Main-thread snapshot of the decoder's active rendition, including absent manifest FPS. */
+    fun currentVideoFormat(): Format? = sessionPlayer?.videoFormat
+
+    fun estimatedVideoFrameRate(): Float = videoCadenceEstimator.frameRate
 
     /**
      * Live-applies what ExoPlayer supports without recreation: the frame-rate

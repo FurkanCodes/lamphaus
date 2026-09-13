@@ -140,8 +140,8 @@ class PlayerActivity : ComponentActivity() {
                 configProvider = { Media3EngineFactory.deviceConfig },
                 onModeDecision = { decision ->
                     streamInfoState.value = buildString {
-                        append(decision.appliedMode?.let { "${it.width}x${it.height} @ ${it.refreshRateHz} Hz" } ?: "current display mode")
-                        if (decision.reason.isNotEmpty()) append(" \u00b7 ").append(decision.reason)
+                        append(decision.appliedMode?.let { "${it.width}x${it.height} @ ${it.refreshRateHz} Hz" } ?: getString(R.string.playback_display_current))
+                        append(" \u00b7 ").append(getString(decision.reason.stringRes))
                     }
                 },
             )
@@ -242,18 +242,16 @@ class PlayerActivity : ComponentActivity() {
                             }
                         }
 
-                        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                            val frameRate = mediaController.currentTracks.groups
-                                .asSequence()
-                                .filter { it.type == C.TRACK_TYPE_VIDEO }
-                                .flatMap { group -> (0 until group.length).asSequence().map(group::getTrackFormat) }
-                                .firstOrNull { it.frameRate > 0f }
-                                ?.frameRate
-                            if (frameRate == null) {
-                                displayModeController?.reportSkipped("frame rate unknown, matching skipped")
-                                return
+                        override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                            displayModeController?.restore()
+                        }
+
+                        override fun onEvents(player: Player, events: Player.Events) {
+                            if (events.contains(Player.EVENT_VIDEO_SIZE_CHANGED) ||
+                                events.contains(Player.EVENT_TRACKS_CHANGED)
+                            ) {
+                                updateDisplayVideoFormat()
                             }
-                            displayModeController?.onVideoFormat(videoSize.width, videoSize.height, frameRate)
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
@@ -509,7 +507,10 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         saveProgress(final = true)
-        if ((isTelevision || isFinishing) && !isChangingConfigurations) controller?.pause()
+        if ((isTelevision || isFinishing) && !isChangingConfigurations) {
+            controller?.pause()
+            displayModeController?.restore()
+        }
         super.onStop()
     }
 
@@ -561,9 +562,36 @@ class PlayerActivity : ComponentActivity() {
         displayTickJob = lifecycleScope.launch(Dispatchers.Main.immediate) {
             while (true) {
                 delay(DISPLAY_TICK_INTERVAL_MILLIS)
-                displayModeController?.tick(DISPLAY_TICK_INTERVAL_MILLIS)
+                val player = controller
+                if (player != null && (player.playbackState == Player.STATE_READY ||
+                        player.playbackState == Player.STATE_BUFFERING) &&
+                    lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+                ) {
+                    updateDisplayVideoFormat()
+                    displayModeController?.tick(DISPLAY_TICK_INTERVAL_MILLIS)
+                }
             }
         }
+    }
+
+    /** Uses the active decoder format, never the first advertised video rendition (QA-06). */
+    private fun updateDisplayVideoFormat() {
+        val matcher = displayModeController ?: return
+        val player = controller ?: return
+        val format = Media3EngineFactory.currentVideoFormat()
+            ?: player.currentTracks.groups.asSequence()
+                .filter { it.type == C.TRACK_TYPE_VIDEO }
+                .flatMap { group ->
+                    (0 until group.length).asSequence()
+                        .filter(group::isTrackSelected)
+                        .map(group::getTrackFormat)
+                }.firstOrNull()
+        val size = player.videoSize
+        val width = format?.width?.takeIf { it > 0 } ?: size.width
+        val height = format?.height?.takeIf { it > 0 } ?: size.height
+        val frameRate = format?.frameRate?.takeIf { it.isFinite() && it > 0f }
+            ?: Media3EngineFactory.estimatedVideoFrameRate()
+        matcher.onVideoFormat(width, height, frameRate)
     }
 
     /**
