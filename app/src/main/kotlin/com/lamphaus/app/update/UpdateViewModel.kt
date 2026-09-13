@@ -31,6 +31,9 @@ class UpdateViewModel(private val coordinator: UpdateCoordinator) : ViewModel() 
     fun download(allowMetered: Boolean = false) = coordinator.startDownload(allowMetered)
     fun cancel() = coordinator.cancelDownload()
     fun retry() = coordinator.retryAfterError()
+    fun onHostResumed() = coordinator.onHostResumed()
+    fun onConfirmationLaunched() = coordinator.onConfirmationLaunched()
+    fun onInstallerFailure() = coordinator.onInstallerFailure()
     fun install(hostResumed: Boolean, playbackActive: Boolean): UpdateCoordinator.InstallGate =
         coordinator.beginInstall(hostResumed, playbackActive)
 

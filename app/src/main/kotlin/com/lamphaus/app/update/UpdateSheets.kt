@@ -290,6 +290,8 @@ fun MobileUpdateHost(
     modalOpen: Boolean,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    UpdateInstallerHost(updateViewModel, updateState)
+    val openUpdateSettings = rememberUpdatePermissionLauncher(updateViewModel)
     androidx.compose.runtime.LaunchedEffect(modalOpen) {
         updateViewModel.setPresentationBlocked(modalOpen)
     }
@@ -317,16 +319,7 @@ fun MobileUpdateHost(
             }
         },
         onCancel = { updateViewModel.cancel() },
-        onOpenSettings = {
-            runCatching {
-                context.startActivity(
-                    android.content.Intent(
-                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                        "package:${context.packageName}".toUri(),
-                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
-            }
-        },
+        onOpenSettings = openUpdateSettings,
         onRetry = { updateViewModel.retry() },
         onWebsite = {
             val url = updateState.release?.releasePageUrl ?: "https://furkancodes.github.io/lamphaus/download/"

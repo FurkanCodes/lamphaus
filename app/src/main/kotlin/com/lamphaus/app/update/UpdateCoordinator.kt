@@ -1,12 +1,16 @@
 package com.lamphaus.app.update
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.os.SystemClock
 import com.lamphaus.app.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +40,8 @@ class UpdateCoordinator(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var checkJob: Job? = null
+    private var downloadJob: Job? = null
+    private var installJob: Job? = null
     private var lastForegroundCheckUptime: Long = 0
     private var autoPresentedSession: Int = -1
 
@@ -59,6 +65,7 @@ class UpdateCoordinator(
     }
 
     fun onForegroundReturn() {
+        onHostResumed()
         val now = SystemClock.uptimeMillis()
         if (now - lastForegroundCheckUptime < FOREGROUND_GAP_MILLIS) return
         lastForegroundCheckUptime = now
@@ -94,6 +101,8 @@ class UpdateCoordinator(
     }
 
     private fun applyResult(result: UpdateRepository.CheckResult, manual: Boolean) {
+        // A discovery response must never dismiss an active download or permission flow.
+        if (_state.value.phase in ACTIVE_UPDATE_PHASES) return
         when (result.status) {
             UpdateRepository.Status.AVAILABLE -> {
                 val rel = requireNotNull(result.candidate)
@@ -147,12 +156,19 @@ class UpdateCoordinator(
 
     fun startDownload(allowMetered: Boolean = false) {
         val rel = _state.value.release ?: return
-        scope.launch {
-            _state.value = _state.value.copy(phase = UpdatePhase.Downloading, progress = 0f)
-            val id = downloader.enqueue(rel.apk.url, rel.versionCode)
-            prefs.selectedSha256 = rel.apk.sha256
-            if (allowMetered) downloader.setMeteredAllowed(id, true)
-            pollDownload(rel)
+        if (downloadJob?.isActive == true && !allowMetered) return
+        downloadJob?.cancel()
+        downloadJob = scope.launch {
+            try {
+                _state.value = _state.value.copy(phase = UpdatePhase.Downloading, progress = 0f)
+                downloader.enqueue(rel.apk.url, rel.versionCode, allowMetered)
+                prefs.selectedSha256 = rel.apk.sha256
+                pollDownload(rel)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.DOWNLOAD_FAILED)
+            }
         }
     }
 
@@ -200,6 +216,10 @@ class UpdateCoordinator(
     }
 
     fun cancelDownload() {
+        downloadJob?.cancel()
+        installJob?.cancel()
+        installer.abandon(prefs.installerSessionId)
+        prefs.installerSessionId = -1
         downloader.cancel()
         _state.value = UpdateUiState(phase = UpdatePhase.Idle)
     }
@@ -214,24 +234,36 @@ class UpdateCoordinator(
         if (playbackActive) return InstallGate.DEFERRED_PLAYBACK
         if (!hostResumed) return InstallGate.DEFERRED_NO_HOST
         val rel = _state.value.release ?: return InstallGate.NO_RELEASE
+        if (_state.value.phase != UpdatePhase.Ready || installJob?.isActive == true) return InstallGate.NOT_READY
         if (!installer.canRequestInstalls()) {
             _state.value = _state.value.copy(phase = UpdatePhase.PermissionRequired)
             return InstallGate.NEEDS_PERMISSION
         }
-        scope.launch {
-            _state.value = _state.value.copy(phase = UpdatePhase.Installing)
-            val file = downloader.privateFile(rel.versionCode)
-            if (!file.exists()) {
-                _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.MISSING_FILE)
-                return@launch
+        installJob = scope.launch {
+            try {
+                _state.value = _state.value.copy(phase = UpdatePhase.Installing)
+                if (!repository.revalidate(rel)) {
+                    _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.WITHDRAWN_OR_STALE)
+                    return@launch
+                }
+                val file = downloader.privateFile(rel.versionCode)
+                if (!file.exists()) {
+                    _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.MISSING_FILE)
+                    return@launch
+                }
+                val session = installer.createSession(file.length())
+                prefs.installerSessionId = session.sessionId
+                if (!withContext(Dispatchers.IO) { installer.writeSession(session.sessionId, file, rel.apk.sha256) }) {
+                    prefs.installerSessionId = -1
+                    _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.VERIFY_FAILED)
+                    return@launch
+                }
+                installer.commit(session.sessionId, rel.versionCode)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                onInstallerFailure()
             }
-            val session = installer.createSession(file.length())
-            prefs.installerSessionId = session.sessionId
-            if (!installer.writeSession(session.sessionId, file, rel.apk.sha256)) {
-                _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.VERIFY_FAILED)
-                return@launch
-            }
-            installer.commit(session.sessionId, rel.versionCode)
         }
         return InstallGate.STARTED
     }
@@ -260,12 +292,53 @@ class UpdateCoordinator(
         }
         confirmInstalledVersion()
         // Retain retryable downloads up to 7 days; drop superseded ones.
-        downloader.cleanupStale(listOfNotNull(_state.value.release?.versionCode?.takeIf { it > 0 }))
+        downloader.cleanupStale(listOfNotNull(
+            _state.value.release?.versionCode?.takeIf { it > 0 },
+            prefs.selectedVersionCode.takeIf { it > 0 },
+        ))
     }
 
-    enum class InstallGate { STARTED, NEEDS_PERMISSION, DEFERRED_PLAYBACK, DEFERRED_NO_HOST, NO_RELEASE }
+    /** Permission return is reconciled immediately, independently of the discovery cooldown. */
+    fun onHostResumed() {
+        if (_state.value.phase == UpdatePhase.PermissionRequired && installer.canRequestInstalls()) {
+            _state.value = _state.value.copy(phase = UpdatePhase.Ready)
+        }
+    }
+
+    fun onInstallerStatus(sessionId: Int, status: Int, confirmation: Intent?) {
+        if (sessionId < 0 || sessionId != prefs.installerSessionId) return
+        when (status) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                if (confirmation == null) onInstallerFailure()
+                else _state.value = _state.value.copy(phase = UpdatePhase.Installing, installConfirmation = confirmation)
+            }
+            PackageInstaller.STATUS_SUCCESS -> {
+                prefs.installerSessionId = -1
+                confirmInstalledVersion()
+            }
+            else -> onInstallerFailure()
+        }
+    }
+
+    fun onConfirmationLaunched() {
+        _state.value = _state.value.copy(installConfirmation = null)
+    }
+
+    fun onInstallerFailure() {
+        installer.abandon(prefs.installerSessionId)
+        prefs.installerSessionId = -1
+        _state.value = _state.value.copy(
+            phase = UpdatePhase.Error, errorKind = UpdateError.INSTALL_FAILED, installConfirmation = null,
+        )
+    }
+
+    enum class InstallGate { STARTED, NEEDS_PERMISSION, DEFERRED_PLAYBACK, DEFERRED_NO_HOST, NO_RELEASE, NOT_READY }
 
     companion object {
+        private val ACTIVE_UPDATE_PHASES = setOf(
+            UpdatePhase.Downloading, UpdatePhase.Waiting, UpdatePhase.Verifying, UpdatePhase.Ready,
+            UpdatePhase.PermissionRequired, UpdatePhase.Installing,
+        )
         const val AUTO_COOLDOWN_MILLIS = 15 * 60_000L
         const val FOREGROUND_GAP_MILLIS = 30 * 60_000L
         const val REMINDER_MILLIS = 24 * 60 * 60_000L
@@ -293,4 +366,5 @@ data class UpdateUiState(
     val manual: Boolean = false,
     val silent: Boolean = false,
     val autoDeferredByContext: Boolean = false,
+    val installConfirmation: Intent? = null,
 )

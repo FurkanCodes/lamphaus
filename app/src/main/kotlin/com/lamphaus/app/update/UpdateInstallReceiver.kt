@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import androidx.core.content.IntentCompat
+import com.lamphaus.app.LamphausApplication
 
 /**
  * Terminal installer status receiver. Never reports false success: completion
@@ -14,22 +16,10 @@ class UpdateInstallReceiver : BroadcastReceiver() {
         if (intent.action != UpdateInstaller.ACTION_SESSION_CALLBACK) return
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val sessionId = intent.getIntExtra(UpdateInstaller.EXTRA_SESSION_ID, -1)
-        val prefs = UpdatePreferences(context.applicationContext)
-        when (status) {
-            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                // System shows confirmation UI; the host re-checks on return.
-            }
-            PackageInstaller.STATUS_SUCCESS -> {
-                prefs.installerSessionId = -1
-            }
-            else -> {
-                if (sessionId >= 0) {
-                    runCatching {
-                        context.packageManager.packageInstaller.abandonSession(sessionId)
-                    }
-                }
-                prefs.installerSessionId = -1
-            }
-        }
+        val confirmation = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
+        // Android supplies a confirmation intent; it does not launch that UI for us.
+        // Keep it in state until a resumed host can launch it (SHR-ARC-09/10).
+        (context.applicationContext as LamphausApplication).container.updateCoordinator
+            .onInstallerStatus(sessionId, status, confirmation)
     }
 }

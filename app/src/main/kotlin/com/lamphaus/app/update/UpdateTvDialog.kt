@@ -43,6 +43,8 @@ fun TvUpdateDialog(
     onInstall: () -> Unit,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onAllowMetered: () -> Unit,
     onDismissError: () -> Unit,
     onFocusRestored: () -> Unit,
 ) {
@@ -82,40 +84,61 @@ fun TvUpdateDialog(
                 }
             }
         }
-        UpdatePhase.Downloading, UpdatePhase.Verifying -> {
-            TvFocusDialog(onDismiss = { onCancel(); onFocusRestored() }) {
+        UpdatePhase.Downloading, UpdatePhase.Waiting, UpdatePhase.Verifying, UpdatePhase.Installing -> {
+            TvFocusDialog(onDismiss = { onCancel(); onFocusRestored() }) { requester ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 58.dp, vertical = 24.dp)) {
-                    val label = if (state.phase == UpdatePhase.Verifying) {
-                        stringResource(R.string.update_verifying)
-                    } else {
-                        stringResource(R.string.update_downloading)
+                    val label = when (state.phase) {
+                        UpdatePhase.Verifying -> stringResource(R.string.update_verifying)
+                        UpdatePhase.Waiting -> stringResource(R.string.update_waiting_network)
+                        UpdatePhase.Installing -> stringResource(R.string.update_installing)
+                        else -> stringResource(R.string.update_downloading)
                     }
                     Text(label, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(12.dp))
-                    LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
+                    if (state.phase == UpdatePhase.Downloading) {
+                        LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    if (state.phase == UpdatePhase.Waiting) {
+                        Text(stringResource(R.string.update_waiting_network_body))
+                    }
                     Spacer(Modifier.height(16.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { onCancel(); onFocusRestored() }) {
+                        TextButton(onClick = { onCancel(); onFocusRestored() }, modifier = Modifier.focusRequester(requester)) {
                             Text(stringResource(R.string.update_cancel))
+                        }
+                        if (state.phase == UpdatePhase.Waiting) {
+                            TextButton(onClick = onAllowMetered) {
+                                Text(stringResource(R.string.update_allow_metered))
+                            }
                         }
                     }
                 }
             }
         }
-        UpdatePhase.Ready -> {
+        UpdatePhase.Ready, UpdatePhase.PermissionRequired -> {
             TvFocusDialog(onDismiss = { onCancel(); onFocusRestored() }) { requester ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 58.dp, vertical = 24.dp)) {
-                    Text(stringResource(R.string.update_ready), style = MaterialTheme.typography.headlineSmall)
+                    val needsPermission = state.phase == UpdatePhase.PermissionRequired
+                    Text(
+                        stringResource(if (needsPermission) R.string.update_allow_source_title else R.string.update_ready),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    if (needsPermission) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.update_allow_source_body), style = MaterialTheme.typography.bodyMedium)
+                    }
                     Spacer(Modifier.height(16.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = { onCancel(); onFocusRestored() }) {
                             Text(stringResource(R.string.update_later))
                         }
                         TextButton(
-                            onClick = onInstall,
+                            onClick = if (needsPermission) onOpenSettings else onInstall,
                             modifier = Modifier.focusRequester(requester),
                         ) {
-                            Text(stringResource(R.string.update_install))
+                            Text(stringResource(if (needsPermission) R.string.update_open_settings else R.string.update_install))
                         }
                     }
                 }
@@ -124,9 +147,15 @@ fun TvUpdateDialog(
         UpdatePhase.Error -> {
             TvFocusDialog(onDismiss = { onDismissError(); onFocusRestored() }) { requester ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 58.dp, vertical = 24.dp)) {
-                    Text(stringResource(R.string.update_check_failed), style = MaterialTheme.typography.headlineSmall)
+                    Text(stringResource(R.string.update_failed_title), style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(8.dp))
-                    Text(stringResource(R.string.update_download_failed), style = MaterialTheme.typography.bodyMedium)
+                    val errorMessage = when (state.errorKind) {
+                        UpdateError.INSTALL_FAILED, UpdateError.MISSING_FILE -> R.string.update_installer_blocked
+                        UpdateError.VERIFY_FAILED -> R.string.update_verify_failed
+                        UpdateError.WITHDRAWN_OR_STALE -> R.string.update_withdrawn
+                        else -> R.string.update_download_failed
+                    }
+                    Text(stringResource(errorMessage), style = MaterialTheme.typography.bodyMedium)
                     // Verified website fallback: TV shows the URL and QR code
                     // (plan §4). Never suggests uninstalling as recovery.
                     val fallbackUrl = state.release?.releasePageUrl

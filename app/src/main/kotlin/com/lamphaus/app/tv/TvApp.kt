@@ -331,6 +331,8 @@ fun TvApp(
                 // focus returns to the previously focused item on dismiss.
                 if (updateViewModel != null && com.lamphaus.app.update.UpdateCoordinator.enabled()) {
                     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
+                    com.lamphaus.app.update.UpdateInstallerHost(updateViewModel, updateState)
+                    val openUpdateSettings = com.lamphaus.app.update.rememberUpdatePermissionLauncher(updateViewModel)
                     val modalOpen = state.contentMenu.target != null || state.sourcePicker != null
                     LaunchedEffect(modalOpen) { updateViewModel.setPresentationBlocked(modalOpen) }
                     if (!modalOpen) {
@@ -344,6 +346,8 @@ fun TvApp(
                             },
                             onCancel = { updateViewModel.cancel() },
                             onRetry = { updateViewModel.retry() },
+                            onOpenSettings = openUpdateSettings,
+                            onAllowMetered = { updateViewModel.download(allowMetered = true) },
                             onDismissError = { updateViewModel.cancel() },
                             onFocusRestored = { restoreMenuFocus = true },
                         )

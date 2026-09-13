@@ -56,8 +56,10 @@ class UpdateInstaller(private val context: Context) {
                     }
                 }
             }
-            digest.digest().joinToString("") { "%02x".format(it) }
+            val valid = digest.digest().joinToString("") { "%02x".format(it) }
                 .equals(expectedSha256, ignoreCase = true)
+            if (!valid) abandon(sessionId)
+            valid
         } catch (_: Exception) {
             abandon(sessionId)
             false

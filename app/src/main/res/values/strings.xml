@@ -185,6 +185,10 @@
     <string name="update_waiting_stable_body">You’re on a newer beta. Stay here until a stable release passes it — Lamphaus never downgrades.</string>
     <string name="update_downloading">Downloading update…</string>
     <string name="update_waiting_network">Waiting for connection…</string>
+    <string name="update_waiting_network_body">The download is paused. Check your connection, or allow this download to use a metered network.</string>
+    <string name="update_allow_metered">Allow metered download</string>
+    <string name="update_installing">Preparing Android installation…</string>
+    <string name="update_failed_title">Couldn’t complete the update</string>
     <string name="update_verifying">Verifying update…</string>
     <string name="update_ready">Ready to install</string>
     <string name="update_install">Install</string>

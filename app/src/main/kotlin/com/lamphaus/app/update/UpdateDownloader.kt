@@ -21,8 +21,11 @@ class UpdateDownloader(private val context: Context, private val prefs: UpdatePr
     data class Progress(val downloadedBytes: Long, val totalBytes: Long, val status: Int)
 
     /** Enqueue exactly one operation; repeated taps reuse the active download. */
-    fun enqueue(url: String, versionCode: Int): Long {
-        existingActive()?.let { return it }
+    fun enqueue(url: String, versionCode: Int, allowMetered: Boolean = false): Long {
+        existingActive()?.let { active ->
+            if (prefs.selectedVersionCode == versionCode && !allowMetered) return active
+            context.getSystemService(DownloadManager::class.java).remove(active)
+        }
         val dm = context.getSystemService(DownloadManager::class.java)
         val staging = stagingFile(versionCode)
         if (staging.exists()) staging.delete()
@@ -33,19 +36,13 @@ class UpdateDownloader(private val context: Context, private val prefs: UpdatePr
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
             // Truthful metered-data policy: no roaming, metered only with consent.
             setAllowedOverRoaming(false)
-            setAllowedOverMetered(false)
+            setAllowedOverMetered(allowMetered)
             setVisibleInDownloadsUi(false)
         }
         val id = dm.enqueue(request)
         prefs.downloadId = id
         prefs.selectedVersionCode = versionCode
         return id
-    }
-
-    fun setMeteredAllowed(downloadId: Long, allowed: Boolean) {
-        // DownloadManager has no per-download metered toggle post-enqueue on all
-        // API levels; callers re-enqueue with consent instead. Kept explicit so
-        // metered use is always explained first (plan §4).
     }
 
     fun query(downloadId: Long): Progress? {
