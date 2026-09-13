@@ -61,7 +61,7 @@ class UpdateCoordinator(
 
     fun onColdLaunch() {
         scope.launch { checkAutomatic() }
-        scope.launch { reconcile() }
+        scope.launch { reconcileSafely() }
     }
 
     fun onForegroundReturn() {
@@ -69,35 +69,61 @@ class UpdateCoordinator(
         val now = SystemClock.uptimeMillis()
         if (now - lastForegroundCheckUptime < FOREGROUND_GAP_MILLIS) return
         lastForegroundCheckUptime = now
-        val lastCheck = prefs.lastAutoCheckMillis
+        val lastCheck = try {
+            prefs.lastAutoCheckMillis
+        } catch (_: RuntimeException) {
+            markCheckFailed(manual = false)
+            return
+        }
         if (System.currentTimeMillis() - lastCheck < AUTO_COOLDOWN_MILLIS) return
         scope.launch { checkAutomatic() }
-        scope.launch { reconcile() }
+        scope.launch { reconcileSafely() }
     }
 
     fun checkManual() {
         checkJob?.cancel()
         checkJob = scope.launch {
-            _state.value = _state.value.copy(phase = UpdatePhase.Checking, manual = true)
-            val result = repository.check(manual = true)
-            prefs.lastAutoCheckMillis = System.currentTimeMillis()
-            applyResult(result, manual = true)
+            performCheck(manual = true, checkedAt = System.currentTimeMillis())
         }
     }
 
     private suspend fun checkAutomatic() {
-        if (checkJob?.isActive == true) return
-        val now = System.currentTimeMillis()
-        if (now - prefs.lastAutoCheckMillis < AUTO_COOLDOWN_MILLIS) return
-        val backoff = BACKOFF_BASE_MILLIS * (1 shl prefs.consecutiveFailures.coerceAtMost(4))
-        if (now - prefs.lastAutoCheckMillis < backoff && prefs.consecutiveFailures > 0) return
-        checkJob = scope.launch {
-            _state.value = _state.value.copy(phase = UpdatePhase.Checking)
-            val result = repository.check()
-            prefs.lastAutoCheckMillis = now
-            applyResult(result, manual = false)
+        try {
+            if (checkJob?.isActive == true) return
+            val now = System.currentTimeMillis()
+            if (now - prefs.lastAutoCheckMillis < AUTO_COOLDOWN_MILLIS) return
+            val failures = prefs.consecutiveFailures
+            val backoff = BACKOFF_BASE_MILLIS * (1 shl failures.coerceAtMost(4))
+            if (now - prefs.lastAutoCheckMillis < backoff && failures > 0) return
+            checkJob = scope.launch {
+                performCheck(manual = false, checkedAt = now)
+            }
+            checkJob?.join()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            markCheckFailed(manual = false)
         }
-        checkJob?.join()
+    }
+
+    /** Optional discovery can fail for any device or persisted-state reason without killing the host. */
+    private suspend fun performCheck(manual: Boolean, checkedAt: Long) {
+        try {
+            _state.value = _state.value.copy(phase = UpdatePhase.Checking, manual = manual)
+            val result = repository.check(manual = manual)
+            prefs.lastAutoCheckMillis = checkedAt
+            applyResult(result, manual = manual)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            markCheckFailed(manual)
+        }
+    }
+
+    private fun markCheckFailed(manual: Boolean) {
+        if (_state.value.phase in ACTIVE_UPDATE_PHASES) return
+        runCatching { prefs.consecutiveFailures += 1 }
+        _state.value = UpdateUiState(phase = UpdatePhase.CheckFailed, manual = manual)
     }
 
     private fun applyResult(result: UpdateRepository.CheckResult, manual: Boolean) {
@@ -296,6 +322,16 @@ class UpdateCoordinator(
             _state.value.release?.versionCode?.takeIf { it > 0 },
             prefs.selectedVersionCode.takeIf { it > 0 },
         ))
+    }
+
+    private suspend fun reconcileSafely() {
+        try {
+            reconcile()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            // Best-effort startup maintenance; active actions report their own failures.
+        }
     }
 
     /** Permission return is reconciled immediately, independently of the discovery cooldown. */

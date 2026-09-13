@@ -17,21 +17,25 @@ class UpdatePreferences(context: Context) {
         context.getSharedPreferences("lamphaus_updates", Context.MODE_PRIVATE)
 
     var channel: UpdateChannel
-        get() = if (prefs.getString(KEY_CHANNEL, "beta") == "stable") UpdateChannel.STABLE else UpdateChannel.BETA
+        get() = if (read(KEY_CHANNEL, "beta") { getString(KEY_CHANNEL, "beta") } == "stable") {
+            UpdateChannel.STABLE
+        } else {
+            UpdateChannel.BETA
+        }
         set(value) = prefs.edit { putString(KEY_CHANNEL, if (value == UpdateChannel.STABLE) "stable" else "beta") }
 
     /** Highest accepted feed revision; older revisions are rejected. */
     var acceptedRevision: Int
-        get() = prefs.getInt(KEY_REVISION, 0)
+        get() = read(KEY_REVISION, 0) { getInt(KEY_REVISION, 0) }
         set(value) = prefs.edit { putInt(KEY_REVISION, value) }
 
     var acceptedPayloadHash: String
-        get() = prefs.getString(KEY_PAYLOAD_HASH, "") ?: ""
+        get() = read(KEY_PAYLOAD_HASH, "") { getString(KEY_PAYLOAD_HASH, "") ?: "" }
         set(value) = prefs.edit { putString(KEY_PAYLOAD_HASH, value) }
 
     /** Deferred versionCode → wall-clock deadline millis. */
     fun reminderDeadline(versionCode: Int): Long =
-        prefs.getLong("$KEY_REMINDER$versionCode", 0)
+        read("$KEY_REMINDER$versionCode", 0L) { getLong("$KEY_REMINDER$versionCode", 0L) }
 
     fun defer(versionCode: Int, deadlineMillis: Long) {
         prefs.edit { putLong("$KEY_REMINDER$versionCode", deadlineMillis) }
@@ -42,36 +46,45 @@ class UpdatePreferences(context: Context) {
     }
 
     var downloadId: Long
-        get() = prefs.getLong(KEY_DOWNLOAD_ID, -1)
+        get() = read(KEY_DOWNLOAD_ID, -1L) { getLong(KEY_DOWNLOAD_ID, -1L) }
         set(value) = prefs.edit { putLong(KEY_DOWNLOAD_ID, value) }
 
     var installerSessionId: Int
-        get() = prefs.getInt(KEY_SESSION_ID, -1)
+        get() = read(KEY_SESSION_ID, -1) { getInt(KEY_SESSION_ID, -1) }
         set(value) = prefs.edit { putInt(KEY_SESSION_ID, value) }
 
     var selectedVersionCode: Int
-        get() = prefs.getInt(KEY_SELECTED_CODE, -1)
+        get() = read(KEY_SELECTED_CODE, -1) { getInt(KEY_SELECTED_CODE, -1) }
         set(value) = prefs.edit { putInt(KEY_SELECTED_CODE, value) }
 
     var selectedSha256: String
-        get() = prefs.getString(KEY_SELECTED_SHA, "") ?: ""
+        get() = read(KEY_SELECTED_SHA, "") { getString(KEY_SELECTED_SHA, "") ?: "" }
         set(value) = prefs.edit { putString(KEY_SELECTED_SHA, value) }
 
     var lastAutoCheckMillis: Long
-        get() = prefs.getLong(KEY_LAST_CHECK, 0)
+        get() = read(KEY_LAST_CHECK, 0L) { getLong(KEY_LAST_CHECK, 0L) }
         set(value) = prefs.edit { putLong(KEY_LAST_CHECK, value) }
 
     var consecutiveFailures: Int
-        get() = prefs.getInt(KEY_FAILURES, 0)
+        get() = read(KEY_FAILURES, 0) { getInt(KEY_FAILURES, 0) }
         set(value) = prefs.edit { putInt(KEY_FAILURES, value) }
 
     var etag: String
-        get() = prefs.getString(KEY_ETAG, "") ?: ""
+        get() = read(KEY_ETAG, "") { getString(KEY_ETAG, "") ?: "" }
         set(value) = prefs.edit { putString(KEY_ETAG, value) }
 
     var lastModified: String
-        get() = prefs.getString(KEY_LAST_MOD, "") ?: ""
+        get() = read(KEY_LAST_MOD, "") { getString(KEY_LAST_MOD, "") ?: "" }
         set(value) = prefs.edit { putString(KEY_LAST_MOD, value) }
+
+    /** Package replacement preserves this file, including stale or damaged value types. */
+    private inline fun <T> read(key: String, default: T, value: SharedPreferences.() -> T): T =
+        try {
+            prefs.value()
+        } catch (_: ClassCastException) {
+            prefs.edit { remove(key) }
+            default
+        }
 
     private companion object {
         const val KEY_CHANNEL = "channel"
