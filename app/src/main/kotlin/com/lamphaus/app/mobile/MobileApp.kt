@@ -78,6 +78,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -489,9 +490,10 @@ private fun MobileSignedInApp(
 ) {
     var destination by rememberSaveable { mutableStateOf(MobileDestination.HOME) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    var pendingMediaKey by remember { mutableStateOf<String?>(null) }
-    val openMedia: (MediaPreview) -> Unit = { media ->
-        pendingMediaKey = media.stableKey
+    var pendingMediaFocusKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val destinationStates = rememberSaveableStateHolder()
+    val openMedia: (MediaPreview, String) -> Unit = { media, focusKey ->
+        pendingMediaFocusKey = focusKey
         viewModel.loadDetail(media)
     }
     val watchedEpisodeIds = remember(state.progress) {
@@ -569,7 +571,8 @@ private fun MobileSignedInApp(
                         },
                         label = "destination",
                     ) { tab ->
-                        when (tab) {
+                        destinationStates.SaveableStateProvider(tab.name) {
+                            when (tab) {
                             MobileDestination.HOME -> MobileHomeScreen(
                                 state = state,
                                 onMedia = openMedia,
@@ -579,8 +582,8 @@ private fun MobileSignedInApp(
                                 onPlay = { media -> viewModel.openSources(media, null) },
                                 onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
                                 onRetryHome = viewModel::retryHomeCatalogSections,
-                                restoreMediaKey = pendingMediaKey,
-                                onFocusRestored = { pendingMediaKey = null },
+                                restoreMediaKey = pendingMediaFocusKey,
+                                onFocusRestored = { pendingMediaFocusKey = null },
                                 inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
                                 onToggleLibrary = viewModel::addToLibrary,
                                 onMenuAction = viewModel::onContentMenuAction,
@@ -590,16 +593,16 @@ private fun MobileSignedInApp(
                             MobileDestination.DISCOVER -> DiscoverScreen(
                                 state = state,
                                 onMedia = openMedia,
-                                restoreMediaKey = pendingMediaKey,
-                                onFocusRestored = { pendingMediaKey = null },
+                                restoreMediaKey = pendingMediaFocusKey,
+                                onFocusRestored = { pendingMediaFocusKey = null },
                                 onOpenMenu = viewModel::openContentMenu,
                                 onMenuAction = viewModel::onContentMenuAction,
                             )
                             MobileDestination.LIBRARY -> LibraryScreen(
                                 state = state,
                                 onMedia = openMedia,
-                                restoreMediaKey = pendingMediaKey,
-                                onFocusRestored = { pendingMediaKey = null },
+                                restoreMediaKey = pendingMediaFocusKey,
+                                onFocusRestored = { pendingMediaFocusKey = null },
                                 onOpenMenu = viewModel::openContentMenu,
                                 onMenuAction = viewModel::onContentMenuAction,
                             )
@@ -614,11 +617,12 @@ private fun MobileSignedInApp(
                                 onCatalogLoadMore = viewModel::loadMoreCatalog,
                                 onCatalogRetry = viewModel::retryCatalogPage,
                                 onMedia = openMedia,
-                                restoreMediaKey = pendingMediaKey,
-                                onFocusRestored = { pendingMediaKey = null },
+                                restoreMediaKey = pendingMediaFocusKey,
+                                onFocusRestored = { pendingMediaFocusKey = null },
                                 onOpenMenu = viewModel::openContentMenu,
                                 onMenuAction = viewModel::onContentMenuAction,
                             )
+                        }
                         }
                         }
                         if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter).statusBarsPadding())
@@ -768,7 +772,7 @@ internal fun MobileFilterChip(
 @Composable
 private fun DiscoverScreen(
     state: AppUiState,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onOpenMenu: (ContentMenuTarget) -> Unit,
@@ -780,6 +784,7 @@ private fun DiscoverScreen(
             MediaGrid(
                 media = state.allMedia,
                 onMedia = onMedia,
+                focusContainerKey = "discover:grid",
                 restoreMediaKey = restoreMediaKey,
                 onFocusRestored = onFocusRestored,
                 progressByVideo = state.progress.associateBy { it.videoId },
@@ -795,7 +800,7 @@ private fun DiscoverScreen(
 @Composable
 private fun LibraryScreen(
     state: AppUiState,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onOpenMenu: (ContentMenuTarget) -> Unit,
@@ -820,6 +825,7 @@ private fun LibraryScreen(
                 MediaGrid(
                     media,
                     onMedia,
+                    "library:grid",
                     restoreMediaKey,
                     onFocusRestored,
                     progressByVideo = state.progress.associateBy { it.videoId },
@@ -844,7 +850,7 @@ private fun SearchScreen(
     onRetry: () -> Unit,
     onCatalogLoadMore: (String) -> Unit,
     onCatalogRetry: (String) -> Unit,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onOpenMenu: (ContentMenuTarget) -> Unit,
@@ -920,6 +926,7 @@ private fun SearchScreen(
                     result != null -> MediaGrid(
                         result.items,
                         onMedia,
+                        "search:browse:${result.id}",
                         restoreMediaKey,
                         onFocusRestored,
                         section = result,
@@ -944,6 +951,7 @@ private fun SearchScreen(
                     CatalogRow(
                         section,
                         onMedia,
+                        "search:${section.id}",
                         onCatalogLoadMore,
                         onCatalogRetry,
                         restoreMediaKey,

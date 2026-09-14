@@ -139,7 +139,7 @@ private const val HERO_CONTENT_FADE_MILLIS = 220
 @Composable
 internal fun MobileHomeScreen(
     state: AppUiState,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
     onAddSource: () -> Unit,
     onLoadMore: (String) -> Unit,
     onRetry: (String) -> Unit,
@@ -226,6 +226,8 @@ internal fun MobileHomeScreen(
                     MobileContinueWatchingRow(
                         continueWatching,
                         onMedia,
+                        restoreMediaKey,
+                        onFocusRestored,
                         inLibrary,
                         onOpenMenu,
                         onMenuAction,
@@ -246,6 +248,7 @@ internal fun MobileHomeScreen(
                 CatalogRow(
                     section,
                     onMedia,
+                    "home:${section.id}",
                     onLoadMore,
                     onRetry,
                     restoreMediaKey,
@@ -354,7 +357,7 @@ private fun MobileCatalogItemsLoadingSkeleton(
 @Composable
 private fun MobileHeroCarousel(
     items: List<MediaPreview>,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
     onPlay: (MediaPreview) -> Unit,
     inLibrary: (MediaPreview) -> Boolean,
     onToggleLibrary: (MediaPreview) -> Unit,
@@ -439,14 +442,15 @@ private fun MobileHeroCarousel(
         // semantics; all visuals live in the detached layers around it.
         androidx.compose.foundation.pager.HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
             val media = items[page]
+            val focusKey = mobileMediaFocusKey("home:hero", media)
             val pageDescription = stringResource(
                 R.string.hero_carousel_description_touch, media.name, page + 1, items.size,
             )
             Box(
                 Modifier
                     .fillMaxSize()
-                    .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
-                    .clickable(role = Role.Button) { onMedia(media) }
+                    .mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored)
+                    .clickable(role = Role.Button) { onMedia(media, focusKey) }
                     .semantics { contentDescription = pageDescription },
             )
         }
@@ -471,7 +475,9 @@ private fun MobileHeroCarousel(
             HeroOverlayContent(
                 media = media,
                 saved = inLibrary(media),
-                onMedia = onMedia,
+                onMedia = { selected ->
+                    onMedia(selected, mobileMediaFocusKey("home:hero", selected))
+                },
                 onPlay = onPlay,
                 onToggleLibrary = onToggleLibrary,
             )
@@ -674,7 +680,9 @@ private fun HeroIconAction(
 @Composable
 private fun MobileContinueWatchingRow(
     items: List<Pair<MediaPreview, WatchProgress>>,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
     inLibrary: (MediaPreview) -> Boolean,
     onOpenMenu: (ContentMenuTarget) -> Unit,
     onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
@@ -692,13 +700,15 @@ private fun MobileContinueWatchingRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(items, key = { it.first.stableKey }) { (media, progress) ->
+                val focusKey = mobileMediaFocusKey("home:continue-watching", media)
                 MobileContinueWatchingCard(
                     media,
                     progress,
-                    onMedia,
+                    onMedia = { selected -> onMedia(selected, focusKey) },
                     inLibrary(media),
                     onOpenMenu,
                     onMenuAction,
+                    modifier = Modifier.mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored),
                 )
             }
         }
@@ -839,7 +849,8 @@ private fun MobileHeroLoadingSkeleton() {
 @Composable
 internal fun CatalogRow(
     section: CatalogSection,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
+    focusContainerKey: String,
     onLoadMore: (String) -> Unit,
     onRetry: (String) -> Unit,
     restoreMediaKey: String?,
@@ -884,10 +895,11 @@ internal fun CatalogRow(
             ) {
                 items(section.items, key = MediaPreview::stableKey) { media ->
                     val menuTarget = ContentMenuTarget(media, progress = progressByVideo[media.id])
+                    val focusKey = mobileMediaFocusKey(focusContainerKey, media)
                     PosterCard(
                         media = media,
-                        onMedia = onMedia,
-                        modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
+                        onMedia = { selected -> onMedia(selected, focusKey) },
+                        modifier = Modifier.mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored),
                         menuTarget = menuTarget,
                         onOpenMenu = onOpenMenu,
                         onMenuAction = onMenuAction,
@@ -1052,7 +1064,8 @@ internal fun MobileMetadataLine(
 @Composable
 internal fun MediaGrid(
     media: List<MediaPreview>,
-    onMedia: (MediaPreview) -> Unit,
+    onMedia: (MediaPreview, String) -> Unit,
+    focusContainerKey: String,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1082,12 +1095,13 @@ internal fun MediaGrid(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         items(media, key = MediaPreview::stableKey) { item ->
+            val focusKey = mobileMediaFocusKey(focusContainerKey, item)
             PosterCard(
                 media = item,
-                onMedia = onMedia,
+                onMedia = { selected -> onMedia(selected, focusKey) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
+                    .mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored),
                 menuTarget = ContentMenuTarget(item, progress = progressByVideo[item.id]),
                 onOpenMenu = onOpenMenu,
                 onMenuAction = onMenuAction,
@@ -1109,3 +1123,6 @@ internal fun MediaGrid(
         }
     }
 }
+
+internal fun mobileMediaFocusKey(containerKey: String, media: MediaPreview): String =
+    "$containerKey:${media.stableKey}"

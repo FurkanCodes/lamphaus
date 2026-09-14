@@ -10,16 +10,17 @@ import androidx.compose.ui.focus.focusRequester
 
 @Composable
 internal fun Modifier.mediaFocusRestore(
-    mediaKey: String,
+    focusKey: String,
     pendingKey: String?,
     onConsumed: () -> Unit,
 ): Modifier {
-    if (pendingKey == null || mediaKey != pendingKey) return this
+    if (pendingKey == null || focusKey != pendingKey) return this
     val requester = remember { FocusRequester() }
     LaunchedEffect(pendingKey) {
         withFrameNanos { }
-        runCatching { requester.requestFocus() }
-        onConsumed()
+        if (runCatching { requester.requestFocus() }.getOrDefault(false)) {
+            onConsumed()
+        }
     }
     return this.then(Modifier.focusRequester(requester))
 }

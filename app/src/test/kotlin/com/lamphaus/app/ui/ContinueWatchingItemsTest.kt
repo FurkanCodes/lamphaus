@@ -36,6 +36,22 @@ class ContinueWatchingItemsTest {
         assertSame(second, items.single().second)
     }
 
+    @Test
+    fun `removing a series clears every resumable row but preserves completed history`() {
+        val series = media("tt1196946", MediaType.SERIES)
+        val first = progress(series, videoId = "tt1196946:1:1", updatedAt = 100)
+        val second = progress(series, videoId = "tt1196946:1:2", updatedAt = 200)
+        val completed = progress(series, videoId = "tt1196946:1:3", updatedAt = 300).copy(completed = true)
+        val anotherTitle = progress(media("movie", MediaType.MOVIE), videoId = "movie", updatedAt = 400)
+
+        val rows = continueWatchingRemovalRows(
+            progress = listOf(first, second, completed, anotherTitle),
+            mediaKey = series.stableKey,
+        )
+
+        assertEquals(listOf(first, second), rows)
+    }
+
     private fun media(id: String, type: MediaType) = MediaPreview(
         id = id,
         type = type,

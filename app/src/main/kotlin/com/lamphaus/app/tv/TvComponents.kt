@@ -417,7 +417,8 @@ private fun TvTopNavigationItem(
  * once and consumes the release click.
  */
 internal fun Modifier.tvSelectHoldMenu(tracker: SelectHoldTracker?): Modifier =
-    onPreviewKeyEvent { event ->
+    onFocusChanged { if (!it.isFocused) tracker?.cancel() }
+        .onPreviewKeyEvent { event ->
         if (tracker == null) return@onPreviewKeyEvent false
         when (event.key) {
             Key.DirectionCenter, Key.Enter -> when (event.type) {

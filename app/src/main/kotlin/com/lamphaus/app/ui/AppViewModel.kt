@@ -865,12 +865,16 @@ class AppViewModel(
                 }
             }
             ContentMenuAction.RemoveFromContinueWatching -> {
-                val videoId = deleteProgressRow(target, profileId)
+                val rows = continueWatchingRemovalRows(state.value.progress, target.media.stableKey)
+                val videoIds = rows.map(WatchProgress::videoId)
+                container.libraryRepository.removeProgress(profileId, videoIds)
                 dismissContentMenu()
                 showMessage("Removed from Continue Watching.")
-                userId?.let {
-                    container.cloudSyncGateway.deleteProgress(it, profileId, videoId)
-                        .onFailure { showMessage("Could not sync the removal.") }
+                userId?.let { accountId ->
+                    val syncFailed = videoIds.any { videoId ->
+                        container.cloudSyncGateway.deleteProgress(accountId, profileId, videoId).isFailure
+                    }
+                    if (syncFailed) showMessage("Could not sync the removal.")
                 }
             }
             ContentMenuAction.StartFromBeginning -> startFromBeginning(target)

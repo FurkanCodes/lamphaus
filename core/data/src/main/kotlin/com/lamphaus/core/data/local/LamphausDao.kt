@@ -70,6 +70,9 @@ interface LamphausDao : DetailEnrichmentDao, PlaybackPrefsDao {
     @Query("DELETE FROM watch_progress WHERE profileId = :profileId AND videoId = :videoId")
     suspend fun removeProgress(profileId: String, videoId: String)
 
+    @Query("DELETE FROM watch_progress WHERE profileId = :profileId AND videoId IN (:videoIds)")
+    suspend fun removeProgress(profileId: String, videoIds: List<String>)
+
     @Query("SELECT itemKey FROM cloud_sync_keys WHERE profileId = :profileId AND collection = :collection")
     suspend fun cloudSyncKeys(profileId: String, collection: String): List<String>
 

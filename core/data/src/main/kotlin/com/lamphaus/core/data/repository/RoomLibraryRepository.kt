@@ -115,6 +115,10 @@ class RoomLibraryRepository(
     override suspend fun removeProgress(profileId: String, videoId: String) =
         dao.removeProgress(profileId, videoId)
 
+    override suspend fun removeProgress(profileId: String, videoIds: List<String>) {
+        if (videoIds.isNotEmpty()) dao.removeProgress(profileId, videoIds)
+    }
+
     override suspend fun cloudSyncKeys(
         profileId: String,
         collection: CloudSyncCollection,

@@ -202,6 +202,14 @@ internal fun continueWatchingItems(
         .toList()
 }
 
+/** Unfinished rows removed when a title leaves Continue Watching. */
+internal fun continueWatchingRemovalRows(
+    progress: List<WatchProgress>,
+    mediaKey: String,
+): List<WatchProgress> = progress.filter { row ->
+    row.mediaKey == mediaKey && row.isResumable()
+}
+
 data class AppUiState(
     val account: AccountState = AccountState.Loading,
     val profiles: List<Profile> = emptyList(),

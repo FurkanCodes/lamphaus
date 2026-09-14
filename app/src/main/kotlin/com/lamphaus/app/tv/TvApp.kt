@@ -1,7 +1,8 @@
 package com.lamphaus.app.tv
 
-import androidx.activity.compose.BackHandler
+import android.os.SystemClock
 import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -94,8 +95,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -310,7 +311,6 @@ fun TvApp(
                         inLibrary = state.contentMenu.target?.let { target ->
                             state.library.any { it.mediaKey == target.media.stableKey }
                         } == true,
-                        suppressOpeningKey = suppressMenuOpeningKey,
                         onOpeningKeyReleased = { suppressMenuOpeningKey = false },
                         onDismiss = {
                             suppressMenuOpeningKey = false
@@ -359,12 +359,68 @@ fun TvApp(
     }
 }
 
+private class TvMenuPressGuard(
+    private val openedAt: Long,
+) {
+    private var acceptedKeyCode: Int? = null
+    private var acceptedDeviceId: Int? = null
+    private var acceptedDownTime = 0L
+
+    var acceptedFreshDown = false
+        private set
+
+    fun consume(event: android.view.KeyEvent): Boolean {
+        acceptedFreshDown = false
+        if (!isTvMenuActivationKey(event)) return false
+
+        return when (event.action) {
+            android.view.KeyEvent.ACTION_DOWN -> {
+                if (
+                    event.repeatCount != 0 ||
+                    event.isCanceled ||
+                    event.downTime < openedAt ||
+                    acceptedKeyCode != null
+                ) {
+                    true
+                } else {
+                    acceptedKeyCode = event.keyCode
+                    acceptedDeviceId = event.deviceId
+                    acceptedDownTime = event.downTime
+                    acceptedFreshDown = true
+                    false
+                }
+            }
+            android.view.KeyEvent.ACTION_UP -> {
+                val accepted = matches(event)
+                if (accepted) clearAcceptedPress()
+                !(accepted && !event.isCanceled)
+            }
+            else -> true
+        }
+    }
+
+    private fun matches(event: android.view.KeyEvent): Boolean =
+        acceptedKeyCode == event.keyCode &&
+            acceptedDeviceId == event.deviceId &&
+            acceptedDownTime == event.downTime
+
+    private fun clearAcceptedPress() {
+        acceptedKeyCode = null
+        acceptedDeviceId = null
+        acceptedDownTime = 0L
+    }
+}
+
+private fun isTvMenuActivationKey(event: android.view.KeyEvent): Boolean =
+    event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER ||
+        event.keyCode == android.view.KeyEvent.KEYCODE_ENTER ||
+        event.keyCode == android.view.KeyEvent.KEYCODE_MENU
+
 /** Centered, D-pad-first renderer for the shared content-menu model. */
 @Composable
-private fun TvContentMenuDialog(
+internal fun TvContentMenuDialog(
     menu: ContentMenuState,
     inLibrary: Boolean,
-    suppressOpeningKey: Boolean,
     onOpeningKeyReleased: () -> Unit,
     onDismiss: () -> Unit,
     onAction: (ContentMenuAction) -> Unit,
@@ -372,6 +428,9 @@ private fun TvContentMenuDialog(
     val target = menu.target ?: return
     val actions = target.menuActions()
     val firstActionFocus = remember(target.media.stableKey, target.progress?.videoId) { FocusRequester() }
+    val pressGuard = remember(target.media.stableKey, target.progress?.videoId) {
+        TvMenuPressGuard(SystemClock.uptimeMillis())
+    }
     LaunchedEffect(target.media.stableKey, target.progress?.videoId, menu.resolving) {
         if (!menu.resolving) {
             withFrameNanos { }
@@ -379,95 +438,98 @@ private fun TvContentMenuDialog(
         }
     }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .width(520.dp)
-                .onPreviewKeyEvent { event ->
-                    val opensMenu = event.key == Key.DirectionCenter ||
-                        event.key == Key.Enter ||
-                        event.key == Key.Menu
-                    if (suppressOpeningKey && opensMenu) {
-                        if (event.type == KeyEventType.KeyUp) onOpeningKeyReleased()
-                        true
-                    } else {
-                        false
-                    }
-                },
-            shape = TvShapeTokens.hero,
-            colors = SurfaceDefaults.colors(
-                containerColor = TvSurfaceTokens.elevated,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ),
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+        Box(
+            modifier = Modifier.onPreviewKeyEvent { event ->
+                val nativeEvent = event.nativeKeyEvent
+                val consumed = pressGuard.consume(nativeEvent)
+                if (
+                    pressGuard.acceptedFreshDown ||
+                    (isTvMenuActivationKey(nativeEvent) &&
+                        nativeEvent.action == android.view.KeyEvent.ACTION_UP &&
+                        consumed)
                 ) {
-                    Box(
-                        Modifier
-                            .size(width = 80.dp, height = 120.dp)
-                            .clip(TvShapeTokens.card)
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    onOpeningKeyReleased()
+                }
+                consumed
+            },
+        ) {
+            Surface(
+                modifier = Modifier.width(520.dp),
+                shape = TvShapeTokens.hero,
+                colors = SurfaceDefaults.colors(
+                    containerColor = TvSurfaceTokens.elevated,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
-                        MediaArtwork(target.media, Modifier.fillMaxSize())
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = target.media.name,
-                            style = MaterialTheme.typography.headlineSmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        target.progress?.episodeLabel?.let { label ->
+                        Box(
+                            Modifier
+                                .size(width = 80.dp, height = 120.dp)
+                                .clip(TvShapeTokens.card)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                        ) {
+                            MediaArtwork(target.media, Modifier.fillMaxSize())
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
                             Text(
-                                text = label,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
+                                text = target.media.name,
+                                style = MaterialTheme.typography.headlineSmall,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            target.progress?.episodeLabel?.let { label ->
+                                Text(
+                                    text = label,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
-                }
-                if (menu.resolving) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                        Text(stringResource(R.string.content_menu_resolving))
+                    if (menu.resolving) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                            Text(stringResource(R.string.content_menu_resolving))
+                        }
                     }
-                }
-                if (menu.resolutionError) {
-                    Text(
-                        text = stringResource(R.string.content_menu_resolution_failed),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    TvAction(
-                        label = stringResource(R.string.retry),
-                        icon = Icons.Outlined.Refresh,
-                        onClick = { onAction(ContentMenuAction.StartFromBeginning) },
-                    )
-                }
-                actions.forEachIndexed { index, action ->
-                    TvAction(
-                        label = tvContentMenuLabel(action, target, inLibrary),
-                        icon = tvContentMenuIcon(action, inLibrary),
-                        enabled = !menu.resolving,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(if (index == 0) Modifier.focusRequester(firstActionFocus) else Modifier),
-                        onClick = { onAction(action) },
-                    )
+                    if (menu.resolutionError) {
+                        Text(
+                            text = stringResource(R.string.content_menu_resolution_failed),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        TvAction(
+                            label = stringResource(R.string.retry),
+                            icon = Icons.Outlined.Refresh,
+                            onClick = { onAction(ContentMenuAction.StartFromBeginning) },
+                        )
+                    }
+                    actions.forEachIndexed { index, action ->
+                        TvAction(
+                            label = tvContentMenuLabel(action, target, inLibrary),
+                            icon = tvContentMenuIcon(action, inLibrary),
+                            enabled = !menu.resolving,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (index == 0) Modifier.focusRequester(firstActionFocus) else Modifier),
+                            onClick = { onAction(action) },
+                        )
+                    }
                 }
             }
         }

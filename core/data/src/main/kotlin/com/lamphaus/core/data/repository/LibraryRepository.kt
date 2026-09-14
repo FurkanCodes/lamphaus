@@ -35,6 +35,9 @@ interface LibraryRepository {
 
     suspend fun removeProgress(profileId: String, videoId: String)
 
+    /** Removes a group of progress rows atomically for one profile. */
+    suspend fun removeProgress(profileId: String, videoIds: List<String>)
+
     /** Keys present in the last successful cloud snapshot for this profile/collection. */
     suspend fun cloudSyncKeys(profileId: String, collection: CloudSyncCollection): Set<String>
 

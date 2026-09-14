@@ -96,6 +96,10 @@ class SyncReconciliationTest {
         override suspend fun removeProgress(profileId: String, videoId: String) {
             progressRows.removeAll { it.profileId == profileId && it.videoId == videoId }
         }
+
+        override suspend fun removeProgress(profileId: String, videoIds: List<String>) {
+            progressRows.removeAll { it.profileId == profileId && it.videoId in videoIds }
+        }
         override suspend fun cloudSyncKeys(
             profileId: String,
             collection: CloudSyncCollection,
