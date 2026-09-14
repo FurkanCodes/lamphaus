@@ -85,7 +85,14 @@ class MpvPlayer(
         // the user's DV policy asks for it (plan §2).
         MpvLibrary.setOptionString(handle, "vo", "mediacodec_embed,gpu")
         MpvLibrary.setOptionString(handle, "gpu-context", "android")
-        MpvLibrary.setOptionString(handle, "hwdec", "auto-safe")
+        // Goldfish/Ranchu exposes HEVC but cannot decode Dolby Vision profiles.
+        // Software FFmpeg decoding avoids handing the same stream back to the
+        // emulator MediaCodec during the fallback handoff.
+        MpvLibrary.setOptionString(
+            handle,
+            "hwdec",
+            if (com.lamphaus.core.player.DeviceEnvironment.isAndroidEmulator()) "no" else "auto-safe",
+        )
         MpvLibrary.setOptionString(handle, "ao", "audiotrack,opensles")
         // Embedded ASS/SSA styling through libass stays on by default (plan §4).
         MpvLibrary.setOptionString(handle, "sub-ass", "yes")

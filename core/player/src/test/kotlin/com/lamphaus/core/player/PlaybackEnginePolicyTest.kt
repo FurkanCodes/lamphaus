@@ -63,6 +63,36 @@ class PlaybackEnginePolicyTest {
         assertEquals("format unsupported by Media3", PlaybackEnginePolicy.fallbackReason(EngineFailureKind.UNSUPPORTED_FORMAT))
         assertNull(PlaybackEnginePolicy.fallbackReason(EngineFailureKind.NETWORK))
     }
+
+    @Test
+    fun `emulator skips Dolby Vision MediaCodec but real devices keep it`() {
+        assertTrue(
+            PlaybackEnginePolicy.shouldSkipMediaCodecForDolbyVision(
+                isEmulator = true,
+                mimeType = "video/dolby-vision",
+            ),
+        )
+        assertTrue(
+            PlaybackEnginePolicy.shouldSkipMediaCodecForDolbyVision(
+                isEmulator = true,
+                mimeType = "video/hevc",
+                codecs = "dvhe.08.06",
+            ),
+        )
+        assertFalse(
+            PlaybackEnginePolicy.shouldSkipMediaCodecForDolbyVision(
+                isEmulator = false,
+                mimeType = "video/dolby-vision",
+            ),
+        )
+        assertFalse(
+            PlaybackEnginePolicy.shouldSkipMediaCodecForDolbyVision(
+                isEmulator = true,
+                mimeType = "video/hevc",
+                codecs = "hvc1.2.4.L153.B0",
+            ),
+        )
+    }
 }
 
 class EngineHandoffMappingTest {

@@ -43,6 +43,19 @@ data class MediaFormatProfile(
 
 object PlaybackEnginePolicy {
 
+    /** Dolby Vision MIME/codec markers that Android emulator codecs do not support. */
+    fun isDolbyVision(mimeType: String?, codecs: String? = null): Boolean =
+        mimeType.equals("video/dolby-vision", ignoreCase = true) ||
+            codecs?.startsWith("dvhe", ignoreCase = true) == true ||
+            codecs?.startsWith("dvh1", ignoreCase = true) == true
+
+    /** Reject unsupported emulator DV codecs before Media3 creates MediaCodec. */
+    fun shouldSkipMediaCodecForDolbyVision(
+        isEmulator: Boolean,
+        mimeType: String?,
+        codecs: String? = null,
+    ): Boolean = isEmulator && isDolbyVision(mimeType, codecs)
+
     /**
      * Initial engine for a new session. [AUTO] prefers Media3 unless the
      * format profile is known to need the native stack; an explicit override

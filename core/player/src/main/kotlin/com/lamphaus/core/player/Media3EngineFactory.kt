@@ -19,6 +19,7 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.lamphaus.core.model.DecoderPriority
@@ -81,6 +82,21 @@ object Media3EngineFactory {
                     .build()
         }
             .setEnableDecoderFallback(true)
+            .setMediaCodecSelector(MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+                if (PlaybackEnginePolicy.shouldSkipMediaCodecForDolbyVision(
+                        isEmulator = DeviceEnvironment.isAndroidEmulator(),
+                        mimeType = mimeType,
+                    )
+                ) {
+                    emptyList()
+                } else {
+                    MediaCodecSelector.DEFAULT.getDecoderInfos(
+                        mimeType,
+                        requiresSecureDecoder,
+                        requiresTunnelingDecoder,
+                    )
+                }
+            })
             .setExtensionRendererMode(
                 when (config.decoderPriority) {
                     DecoderPriority.SOFTWARE_FIRST -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
