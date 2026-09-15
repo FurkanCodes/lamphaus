@@ -61,9 +61,9 @@ class SidecarSubtitleLoader(
         }.build()
         return try {
             withContext(ioDispatcher) {
-                client.newCall(request).awaitResponse().use { response ->
-                    if (!response.isSuccessful) return@withContext null
-                    val body = response.body ?: return@withContext null
+                client.newCall(request).awaitBody { response ->
+                    if (!response.isSuccessful) return@awaitBody null
+                    val body = response.body ?: return@awaitBody null
                     body.byteStream().use { stream -> readBounded(stream) }
                 }
             }
@@ -100,27 +100,27 @@ class SidecarSubtitleLoader(
     }
 }
 
-/** Suspends for the response and cancels the call when the waiter is cancelled. */
+/** Keep cancellation connected until the response body has been consumed. */
 @OptIn(InternalCoroutinesApi::class)
-private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
+private suspend fun Call.awaitBody(read: (Response) -> ByteArray?): ByteArray? = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
-            if (continuation.isCancelled) return
             val token = continuation.tryResumeWithException(e)
             if (token != null) continuation.completeResume(token)
         }
 
         override fun onResponse(call: Call, response: Response) {
-            if (continuation.isCancelled) {
-                response.close()
-                return
-            }
-            val token = continuation.tryResume(response)
-            if (token != null) {
-                continuation.completeResume(token)
-            } else {
-                response.close()
+            try {
+                val bytes = response.use {
+                    if (continuation.isCancelled) return
+                    read(it)
+                }
+                val token = continuation.tryResume(bytes)
+                if (token != null) continuation.completeResume(token)
+            } catch (error: Exception) {
+                val token = continuation.tryResumeWithException(error)
+                if (token != null) continuation.completeResume(token)
             }
         }
     })

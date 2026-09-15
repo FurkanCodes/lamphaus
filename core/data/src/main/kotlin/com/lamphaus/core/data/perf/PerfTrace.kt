@@ -1,6 +1,7 @@
 package com.lamphaus.core.data.perf
 
 import android.os.Trace
+import android.os.Build
 
 /**
  * Fixed-name, cheap trace spans (PERF-02). Names are constants so tools can
@@ -37,19 +38,31 @@ object PerfTrace {
      */
     const val STARTUP_READINESS = "lamphaus.startup.readiness"
 
-    private val startupSpanOpen = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var startupCookie: Int? = null
+    private val cookies = java.util.concurrent.atomic.AtomicInteger()
 
-    /** Idempotent: only the first host surface in the process opens the span. */
-    fun beginStartupSpan() {
-        if (startupSpanOpen.compareAndSet(false, true)) {
-            Trace.beginSection(STARTUP_READINESS)
-        }
+    // Platform async tracing requires API 29; older devices omit these spans.
+    @PublishedApi
+    internal fun beginAsync(name: String): Int {
+        val cookie = cookies.incrementAndGet()
+        if (Build.VERSION.SDK_INT >= 29) Trace.beginAsyncSection(name, cookie)
+        return cookie
     }
 
+    @PublishedApi
+    internal fun endAsync(name: String, cookie: Int) {
+        if (Build.VERSION.SDK_INT >= 29) Trace.endAsyncSection(name, cookie)
+    }
+
+    @Synchronized
+    fun beginStartupSpan() {
+        if (startupCookie == null) startupCookie = beginAsync(STARTUP_READINESS)
+    }
+
+    @Synchronized
     fun endStartupSpan() {
-        if (startupSpanOpen.compareAndSet(true, false)) {
-            Trace.endSection()
-        }
+        startupCookie?.let { endAsync(STARTUP_READINESS, it) }
+        startupCookie = null
     }
 
     // Playback continuity.
@@ -68,11 +81,11 @@ object PerfTrace {
 
     /** Suspending variant for spans around catalog, repository, and resolution work. */
     suspend inline fun <T> spanSuspend(name: String, block: suspend () -> T): T {
-        Trace.beginSection(name)
+        val cookie = beginAsync(name)
         try {
             return block()
         } finally {
-            Trace.endSection()
+            endAsync(name, cookie)
         }
     }
 

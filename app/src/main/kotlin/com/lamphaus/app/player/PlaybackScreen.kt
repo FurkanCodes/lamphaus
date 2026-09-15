@@ -321,14 +321,9 @@ internal fun PlaybackScreen(
         onDispose { player.removeListener(listener) }
     }
 
-    // Progress sampling only feeds visible chrome: while controls are hidden
-    // (normal playback and PiP) player events already keep the snapshot fresh,
-    // so the 500 ms wakeup stops instead of running for the whole session
-    // (PERF-09). Revealing controls restarts this effect with an immediate
-    // sample.
-    LaunchedEffect(player, controlsVisible, panel, inPictureInPicture) {
-        if (player == null) return@LaunchedEffect
-        if (!controlsVisible && panel == null && !inPictureInPicture) return@LaunchedEffect
+    // Position also drives skip/next-episode prompts while chrome is hidden (QA-06).
+    LaunchedEffect(player, inPictureInPicture) {
+        if (player == null || inPictureInPicture) return@LaunchedEffect
         while (isActive) {
             snapshot = player.snapshot()
             delay(500)

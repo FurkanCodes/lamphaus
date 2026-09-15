@@ -121,6 +121,44 @@ class SidecarSubtitleLoaderTest {
         assertEquals(1, requestCount.get())
     }
 
+    @Test
+    fun `cancellation after headers stops a stalled body without retrying`() = runBlocking {
+        val readingBody = CountDownLatch(1)
+        val releaseServer = CountDownLatch(1)
+        val client = okhttp3.OkHttpClient.Builder()
+            .eventListener(object : okhttp3.EventListener() {
+                override fun responseBodyStart(call: okhttp3.Call) {
+                    readingBody.countDown()
+                }
+            })
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+        server.createContext("/stalled.vtt") { exchange ->
+            requestCount.incrementAndGet()
+            try {
+                exchange.sendResponseHeaders(200, 100_000)
+                exchange.responseBody.write("WEBVTT\n".toByteArray())
+                exchange.responseBody.flush()
+                releaseServer.await(10, TimeUnit.SECONDS)
+            } finally {
+                runCatching { exchange.close() }
+            }
+        }
+        val load = async(kotlinx.coroutines.Dispatchers.IO) {
+            SidecarSubtitleLoader(client = client).load(url("/stalled.vtt"))
+        }
+        try {
+            assertTrue("body read never started", readingBody.await(5, TimeUnit.SECONDS))
+            assertEquals(true, withTimeoutOrNull(2_000) { load.cancelAndJoin(); true })
+            assertEquals(1, requestCount.get())
+        } finally {
+            releaseServer.countDown()
+            load.cancelAndJoin()
+            client.connectionPool.evictAll()
+            client.dispatcher.executorService.shutdown()
+        }
+    }
+
     private companion object {
         val VTT = """
             WEBVTT
