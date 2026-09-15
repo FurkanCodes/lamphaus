@@ -29,6 +29,9 @@ val cloudConfigured = supabaseUrl.isNotBlank() && supabasePublishableKey.isNotBl
 // and catalog stay deterministic either way, and no personal account is used.
 val benchmarkCloud = providers.gradleProperty("lamphaus.benchmarkCloud").orNull?.toBoolean() == true && cloudConfigured
 val benchmarkUpdates = providers.gradleProperty("lamphaus.benchmarkUpdates").orNull?.toBoolean() == true
+// Stress fixture for the scenario matrix: 20 providers, 100 rows per catalog,
+// one delayed provider, and 10k library entries (PERF-02, PERF-11).
+val benchmarkStress = providers.gradleProperty("lamphaus.benchmarkStress").orNull?.toBoolean() == true
 val releaseStorePath = providers.environmentVariable("LAMPHAUS_RELEASE_STORE_FILE").orNull
 val releaseKeyAlias = providers.environmentVariable("LAMPHAUS_RELEASE_KEY_ALIAS").orNull
 val releaseStorePassword = providers.environmentVariable("LAMPHAUS_RELEASE_STORE_PASSWORD").orNull
@@ -62,6 +65,7 @@ android {
         // Production update discovery only; debug/staging builds never poll it.
         buildConfigField("boolean", "UPDATES_ENABLED", "false")
         buildConfigField("boolean", "BENCHMARK_FIXTURES", "false")
+        buildConfigField("boolean", "BENCHMARK_STRESS", "false")
     }
 
     signingConfigs {
@@ -236,6 +240,7 @@ androidComponents {
                     isMinifyEnabled = false
                 }
                 buildConfigField("boolean", "BENCHMARK_FIXTURES", "true")
+                buildConfigField("boolean", "BENCHMARK_STRESS", benchmarkStress.toString())
                 buildConfigField("boolean", "CLOUD_CONFIGURED", benchmarkCloud.toString())
                 buildConfigField("boolean", "UPDATES_ENABLED", benchmarkUpdates.toString())
                 buildConfigField("String", "SUPABASE_URL", "\"${if (benchmarkCloud) supabaseUrl else ""}\"")

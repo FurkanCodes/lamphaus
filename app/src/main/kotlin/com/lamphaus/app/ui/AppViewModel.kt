@@ -2366,20 +2366,43 @@ class AppViewModel(
         val profile = Profile(UUID.randomUUID().toString(), "Home", "moon", ProfileKind.ADULT, updatedAtEpochMillis = now)
         container.libraryRepository.saveProfile(profile, null)
         if (BuildConfig.BENCHMARK_FIXTURES) {
-            PreviewMedia.items.forEach { media ->
-                container.libraryRepository.saveLibrary(LibraryEntry(profile.id, media.stableKey, media, now, now))
+            val providerCount = if (BuildConfig.BENCHMARK_STRESS) {
+                FixtureProviderClient.STRESS_PROVIDER_COUNT
+            } else {
+                1
             }
-            // A fixture provider makes Home/search/playback journeys exercise
-            // the real catalog pipeline without network or account data.
-            container.libraryRepository.saveProvider(
-                ProviderSubscription(
-                    id = FixtureProviderClient.PROVIDER_ID,
-                    manifestUrl = FixtureProviderClient.FIXTURE_MANIFEST_URL,
-                    displayName = "Local fixture",
-                    sortOrder = 0,
-                    updatedAtEpochMillis = now,
-                ),
-            )
+            repeat(providerCount) { index ->
+                container.libraryRepository.saveProvider(
+                    ProviderSubscription(
+                        id = if (index == 0 && providerCount == 1) {
+                            FixtureProviderClient.PROVIDER_ID
+                        } else {
+                            FixtureProviderClient.stressProviderId(index)
+                        },
+                        manifestUrl = if (index == 0 && providerCount == 1) {
+                            FixtureProviderClient.FIXTURE_MANIFEST_URL
+                        } else {
+                            FixtureProviderClient.stressProviderManifestUrl(index)
+                        },
+                        displayName = if (providerCount == 1) "Local fixture" else "Local fixture ${index + 1}",
+                        sortOrder = index,
+                        updatedAtEpochMillis = now,
+                    ),
+                )
+            }
+            if (BuildConfig.BENCHMARK_STRESS) {
+                // Library/progress scale scenario: 10k synthetic entries so the
+                // matrix can measure decode, row rendering, and Continue
+                // Watching at scale. Preview snapshots reuse the fixture rows.
+                repeat(FixtureProviderClient.STRESS_LIBRARY_ROWS) { index ->
+                    val media = FixtureProviderClient.fixtureStressItem(0, index)
+                    container.libraryRepository.saveLibrary(LibraryEntry(profile.id, media.stableKey, media, now, now))
+                }
+            } else {
+                PreviewMedia.items.forEach { media ->
+                    container.libraryRepository.saveLibrary(LibraryEntry(profile.id, media.stableKey, media, now, now))
+                }
+            }
         }
         (state.value.account as? AccountState.SignedIn)?.userId?.let { container.cloudSyncGateway.saveProfile(it, profile) }
         container.preferences.setActiveProfile(profile.id)

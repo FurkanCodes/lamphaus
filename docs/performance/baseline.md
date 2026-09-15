@@ -95,6 +95,20 @@ rtk ./gradlew :app:compileBenchmarkReleaseKotlin -Plamphaus.composeReports=true 
 # reports: app/build/compose-reports/app-composables.txt
 ```
 
+Stress fixture for the Home/Discover, search, and library-scale scenarios
+(20 providers, 100 rows per catalog, one provider failing, one delayed 5 s,
+10k library entries):
+
+```bash
+rtk ./gradlew :app:assembleBenchmarkRelease -Plamphaus.benchmarkStress=true --max-workers=2
+ANDROID_SERIAL=<device> rtk ./gradlew :benchmark:connectedBenchmarkReleaseAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.lamphaus.benchmark.StartupBenchmark \
+  --max-workers=2
+```
+
+Rebuild without `-Plamphaus.benchmarkStress` afterwards; the stress fixture is
+deterministic, offline, and never touches a provider or personal account.
+
 | Scenario | Fixture / procedure | Measurements |
 | --- | --- | --- |
 | Cold and warm startup, both platforms | fixture account (`BENCHMARK_FIXTURES`), signed out / resident / populated library; warm and cold disk caches separately | TTID, TTFD, `lamphaus.startup.usable.content`, `lamphaus.startup.settled`, `lamphaus.startup.degraded`, `lamphaus.home.window.load` |
