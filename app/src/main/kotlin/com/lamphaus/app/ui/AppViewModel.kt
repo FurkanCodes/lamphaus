@@ -1546,70 +1546,71 @@ class AppViewModel(
                 }
                 return@launch
             }
-            val enabledProviders = state.value.providers
-                .filter(ProviderSubscription::enabled)
-                .sortedBy(ProviderSubscription::sortOrder)
-            if (enabledProviders.isEmpty()) {
-                mutableState.update { it.copy(refreshing = false, sourcePicker = null) }
-                showMessage("Install a stream add-on to play this title.")
-                return@launch
-            }
-            val resolvedProviders = supervisorScope {
-                enabledProviders.map { subscription ->
-                    async {
-                        val manifest = container.providerClient.manifest(subscription.manifestUrl)
-                        subscription to (manifest as? ProviderResult.Success)?.value
+            PerfTrace.spanSuspend(PerfTrace.SOURCE_RESOLUTION) {
+                val enabledProviders = state.value.providers
+                    .filter(ProviderSubscription::enabled)
+                    .sortedBy(ProviderSubscription::sortOrder)
+                if (enabledProviders.isEmpty()) {
+                    mutableState.update { it.copy(refreshing = false, sourcePicker = null) }
+                    showMessage("Install a stream add-on to play this title.")
+                    return@launch
+                }
+                val resolvedProviders = supervisorScope {
+                    enabledProviders.map { subscription ->
+                        async {
+                            val manifest = container.providerClient.manifest(subscription.manifestUrl)
+                            subscription to (manifest as? ProviderResult.Success)?.value
+                        }
+                    }.awaitAll()
+                }
+                val manifestFailures = resolvedProviders
+                    .filter { (_, manifest) -> manifest == null }
+                    .associate { (provider, _) -> provider.id to "${provider.displayName} is unavailable." }
+                val streamProviders = resolvedProviders.filter { (_, manifest) ->
+                    manifest?.let { container.providerAggregator.supports(it, "stream", media.rawType, videoId) } == true
+                }
+                if (streamProviders.isEmpty()) {
+                    mutableState.update {
+                        it.copy(
+                            refreshing = false,
+                            sourcePicker = it.sourcePicker?.copy(loading = false, failures = manifestFailures),
+                        )
                     }
-                }.awaitAll()
-            }
-            val manifestFailures = resolvedProviders
-                .filter { (_, manifest) -> manifest == null }
-                .associate { (provider, _) -> provider.id to "${provider.displayName} is unavailable." }
-            val streamProviders = resolvedProviders.filter { (_, manifest) ->
-                manifest?.let { container.providerAggregator.supports(it, "stream", media.rawType, videoId) } == true
-            }
-            if (streamProviders.isEmpty()) {
+                    showMessage("No installed add-on supports sources for this title.")
+                    return@launch
+                }
+                val streamResults = supervisorScope {
+                    streamProviders.map { (subscription, _) ->
+                        async {
+                            subscription to container.providerClient.streams(
+                                subscription.manifestUrl,
+                                subscription.id,
+                                media.rawType,
+                                videoId,
+                            )
+                        }
+                    }.awaitAll()
+                }
+                val streams = streamResults.flatMap { (_, result) -> (result as? ProviderResult.Success)?.value.orEmpty() }
+                val labels = streamProviders.associate { (provider, _) -> provider.id to provider.displayName }
+                val failures = manifestFailures + streamResults.mapNotNull { (provider, result) ->
+                    (result as? ProviderResult.Failure)?.let { provider.id to it.safeMessage }
+                }.toMap()
                 mutableState.update {
                     it.copy(
                         refreshing = false,
-                        sourcePicker = it.sourcePicker?.copy(loading = false, failures = manifestFailures),
+                        sourcePicker = SourcePickerState(
+                            media = media,
+                            episode = episode,
+                            startFromBeginning = startFromBeginning,
+                            sources = streams,
+                            providerLabels = labels,
+                            failures = failures,
+                            loading = false,
+                        ),
                     )
                 }
-                showMessage("No installed add-on supports sources for this title.")
-                return@launch
             }
-            val streamResults = supervisorScope {
-                streamProviders.map { (subscription, _) ->
-                    async {
-                        subscription to container.providerClient.streams(
-                            subscription.manifestUrl,
-                            subscription.id,
-                            media.rawType,
-                            videoId,
-                        )
-                    }
-                }.awaitAll()
-            }
-            val streams = streamResults.flatMap { (_, result) -> (result as? ProviderResult.Success)?.value.orEmpty() }
-            val labels = streamProviders.associate { (provider, _) -> provider.id to provider.displayName }
-            val failures = manifestFailures + streamResults.mapNotNull { (provider, result) ->
-                (result as? ProviderResult.Failure)?.let { provider.id to it.safeMessage }
-            }.toMap()
-            mutableState.update {
-                it.copy(
-                    refreshing = false,
-                    sourcePicker = SourcePickerState(
-                        media = media,
-                        episode = episode,
-                        startFromBeginning = startFromBeginning,
-                        sources = streams,
-                        providerLabels = labels,
-                        failures = failures,
-                        loading = false,
-                    ),
-                )
-            }
-            if (streams.isNotEmpty()) PerfTrace.mark(PerfTrace.SOURCE_RESOLUTION)
         }
     }
 
