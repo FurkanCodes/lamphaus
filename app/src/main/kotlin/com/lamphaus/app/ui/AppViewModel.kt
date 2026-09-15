@@ -9,6 +9,7 @@ import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.AppContainer
 import com.lamphaus.core.data.repository.reconcileLibrary
 import com.lamphaus.core.data.repository.reconcileProgress
+import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
 import com.lamphaus.core.data.cloud.CloudNotConfiguredException
@@ -30,6 +31,7 @@ import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.ProfileKind
 import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderManifest
+import com.lamphaus.core.model.ProviderCatalog
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSettings
@@ -65,6 +67,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -86,6 +89,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 
 private const val CONTENT_RESOLVE_TIMEOUT_MILLIS = 15_000L
+private const val SEARCH_MANIFEST_TIMEOUT_MILLIS = 4_000L
 private const val CLOUD_SYNC_LOG_TAG = "Lamphaus.Sync"
 private val DEVICE_BINDING_BACKOFF_MILLIS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
 private const val ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE =
@@ -131,6 +135,8 @@ class AppViewModel(
     private var homeCatalogBatchJob: Job? = null
     private var homeCatalogGeneration = 0L
     private var homeCatalogLoader: HomeCatalogLoader? = null
+    private var homeFirstUsableRowMarked = false
+    private var searchFirstResultMarked = false
 
     private var cloudSyncJob: Job? = null
     private var cloudSyncUserId: String? = null
@@ -272,6 +278,9 @@ class AppViewModel(
                         // Everything re-arrives from the cloud on next sign-in.
                         container.libraryRepository.clearLocalAccountData()
                         container.preferences.clearSyncedSettings()
+                        // Provider metadata is scoped to the previous account's
+                        // configuration/auth; drop it with the rows (PERF-04).
+                        snapshot.providers.forEach { container.providerClient.invalidateProvider(it.manifestUrl) }
                         // The device binding belongs to the previous account.
                         // Keeping it would re-bind this TV's row to the next
                         // account's session and fail permanently (P1-6).
@@ -463,14 +472,20 @@ class AppViewModel(
         }
         searchJob = viewModelScope.launch {
             delay(300)
+            searchFirstResultMarked = false
             mutableState.update { it.copy(searching = true) }
             val enabledProviders = state.value.providers
                 .filter(ProviderSubscription::enabled)
                 .sortedWith(compareBy<ProviderSubscription> { it.sortOrder }.thenBy { it.id })
+            // Discovery is bounded per provider so one slow manifest cannot hold
+            // back every other provider's search (PERF-06); a canceled search
+            // cancels only its own wait.
             val searchableCatalogs = coroutineScope {
                 enabledProviders.map { subscription ->
                     async {
-                        val manifest = (container.providerClient.manifest(subscription.manifestUrl) as? ProviderResult.Success)?.value
+                        val manifest = withTimeoutOrNull(SEARCH_MANIFEST_TIMEOUT_MILLIS) {
+                            (container.providerClient.manifest(subscription.manifestUrl) as? ProviderResult.Success)?.value
+                        }
                         manifest?.catalogs
                             ?.filter { it.supportsExtra("search") }
                             .orEmpty()
@@ -478,55 +493,69 @@ class AppViewModel(
                     }
                 }.awaitAll().flatten()
             }
-            val sections = coroutineScope {
-                searchableCatalogs.map { (subscription, catalog) ->
-                    async {
-                        val query = catalog.request(search = queryText)
-                        val section = CatalogSection(
-                            id = "search:${canonicalCatalogRequestIdentity(subscription.id, query)}",
-                            providerId = subscription.id,
-                            title = catalog.name,
-                            providerName = subscription.displayName,
-                            items = emptyList(),
-                            baseQuery = query,
-                            supportsSkip = catalog.supportsSkip(),
-                            skipStep = catalog.initialSkipStep(),
-                            hasMore = catalog.supportsSkip(),
-                        )
-                        val missingRequired = catalog.requiredExtras.filterNot { required ->
-                            required.canonicalExtraName() == "search" ||
-                                catalog.extraDefaults.keys.any { key ->
-                                    key.canonicalExtraName() == required.canonicalExtraName()
-                                }
-                        }
-                        if (missingRequired.isNotEmpty()) {
-                            section.copy(
-                                errorMessage = "Unavailable: ${missingRequired.sorted().joinToString(", ")} is required.",
-                                hasMore = false,
-                            )
-                        } else {
-                            when (val result = container.providerClient.catalog(
-                                subscription.manifestUrl,
-                                subscription.id,
-                                query,
-                            )) {
-                                is ProviderResult.Success -> firstCatalogPage(
-                                    section,
-                                    result.value,
-                                    filterForProfile(result.value),
-                                )
-                                is ProviderResult.Failure -> section.copy(errorMessage = result.safeMessage, hasMore = false)
-                            }
+            // Sections publish as each provider answers while the list stays in
+            // deterministic provider/catalog order (SHR-ARC-06, TV-CNT-02).
+            val orderedIds = searchableCatalogs.map { (subscription, catalog) ->
+                searchSectionId(subscription.id, catalog.request(search = queryText))
+            }
+            val resolved = LinkedHashMap<String, CatalogSection>()
+            coroutineScope {
+                searchableCatalogs.forEach { (subscription, catalog) ->
+                    launch {
+                        val section = resolveSearchSection(subscription, catalog, queryText)
+                        resolved[section.id] = section
+                        val ordered = orderedResolvedSections(orderedIds, resolved)
+                        mutableState.update { it.copy(searchSections = ordered) }
+                        if (!searchFirstResultMarked && section.items.isNotEmpty()) {
+                            searchFirstResultMarked = true
+                            PerfTrace.mark(PerfTrace.SEARCH_QUERY_TO_FIRST_RESULT)
                         }
                     }
-                }.awaitAll()
+                }
             }
-            mutableState.update {
-                it.copy(
-                    searchSections = sections,
-                    searching = false,
-                )
-            }
+            mutableState.update { it.copy(searching = false) }
+        }
+    }
+
+    private fun searchSectionId(providerId: String, query: CatalogQuery): String =
+        "search:${canonicalCatalogRequestIdentity(providerId, query)}"
+
+    private suspend fun resolveSearchSection(
+        subscription: ProviderSubscription,
+        catalog: ProviderCatalog,
+        queryText: String,
+    ): CatalogSection {
+        val query = catalog.request(search = queryText)
+        val section = CatalogSection(
+            id = searchSectionId(subscription.id, query),
+            providerId = subscription.id,
+            title = catalog.name,
+            providerName = subscription.displayName,
+            items = emptyList(),
+            baseQuery = query,
+            supportsSkip = catalog.supportsSkip(),
+            skipStep = catalog.initialSkipStep(),
+            hasMore = catalog.supportsSkip(),
+        )
+        val missingRequired = catalog.requiredExtras.filterNot { required ->
+            required.canonicalExtraName() == "search" ||
+                catalog.extraDefaults.keys.any { key ->
+                    key.canonicalExtraName() == required.canonicalExtraName()
+                }
+        }
+        if (missingRequired.isNotEmpty()) {
+            return section.copy(
+                errorMessage = "Unavailable: ${missingRequired.sorted().joinToString(", ")} is required.",
+                hasMore = false,
+            )
+        }
+        return when (val result = container.providerClient.catalog(
+            subscription.manifestUrl,
+            subscription.id,
+            query,
+        )) {
+            is ProviderResult.Success -> firstCatalogPage(section, result.value, filterForProfile(result.value))
+            is ProviderResult.Failure -> section.copy(errorMessage = result.safeMessage, hasMore = false)
         }
     }
 
@@ -751,6 +780,7 @@ class AppViewModel(
             return@launch
         }
         container.libraryRepository.setProviderEnabled(providerId, enabled)
+        container.providerClient.invalidateProvider(current.manifestUrl)
         val updated = current.copy(enabled = enabled, updatedAtEpochMillis = System.currentTimeMillis())
         (state.value.account as? AccountState.SignedIn)?.userId?.let { userId ->
             container.cloudSyncGateway.saveProvider(userId, updated).onFailure {
@@ -774,6 +804,7 @@ class AppViewModel(
             }
         }
         container.libraryRepository.removeProvider(providerId)
+        container.providerClient.invalidateProvider(current.manifestUrl)
         showMessage("Add-on removed.")
     }
 
@@ -1577,6 +1608,7 @@ class AppViewModel(
                     ),
                 )
             }
+            if (streams.isNotEmpty()) PerfTrace.mark(PerfTrace.SOURCE_RESOLUTION)
         }
     }
 
@@ -1978,6 +2010,7 @@ class AppViewModel(
         refreshJob?.cancel()
         homeCatalogBatchJob?.cancel()
         homeCatalogGeneration++
+        homeFirstUsableRowMarked = false
         val generation = homeCatalogGeneration
         homeCatalogLoader = null
         homeLog(
@@ -2150,46 +2183,52 @@ class AppViewModel(
         generation: Long,
         childFilterEnabled: Boolean,
         append: Boolean,
-    ): HomeCatalogWindow = loader.loadNextWindow(
-        childFilterEnabled = childFilterEnabled,
-        onPrepared = prepared@{ window ->
-            if (generation != homeCatalogGeneration) return@prepared
-            mutableState.update { current ->
-                val sections = if (append) {
-                    appendHomeCatalogBatch(current.sections, window.sections)
-                } else {
-                    mergeCatalogRefresh(current.sections, window.sections)
+    ): HomeCatalogWindow = PerfTrace.spanSuspend(PerfTrace.HOME_WINDOW_LOAD) {
+        loader.loadNextWindow(
+            childFilterEnabled = childFilterEnabled,
+            onPrepared = prepared@{ window ->
+                if (generation != homeCatalogGeneration) return@prepared
+                mutableState.update { current ->
+                    val sections = if (append) {
+                        appendHomeCatalogBatch(current.sections, window.sections)
+                    } else {
+                        mergeCatalogRefresh(current.sections, window.sections)
+                    }
+                    current.copy(
+                        sections = sections,
+                        homeCatalogBatch = current.homeCatalogBatch.copy(
+                            consumedTargetCount = window.consumedTargetCount,
+                            hasMore = window.hasMore,
+                            loadingMore = window.sections.any(CatalogSection::initialLoading),
+                            loadMoreFailed = false,
+                        ),
+                        initialContentLoading = false,
+                    )
                 }
-                current.copy(
-                    sections = sections,
-                    homeCatalogBatch = current.homeCatalogBatch.copy(
-                        consumedTargetCount = window.consumedTargetCount,
-                        hasMore = window.hasMore,
-                        loadingMore = window.sections.any(CatalogSection::initialLoading),
-                        loadMoreFailed = false,
-                    ),
-                    initialContentLoading = false,
+                homeLog(
+                    "Home window prepared append=$append sections=${window.sections.size} " +
+                        "consumed=${window.consumedTargetCount} hasMore=${window.hasMore}",
                 )
-            }
-            homeLog(
-                "Home window prepared append=$append sections=${window.sections.size} " +
-                    "consumed=${window.consumedTargetCount} hasMore=${window.hasMore}",
-            )
-        },
-        onResolved = resolved@{ section ->
-            if (generation != homeCatalogGeneration) return@resolved
-            mutableState.update { current ->
-                val index = current.sections.indexOfFirst { it.id == section.id }
-                if (index < 0) return@update current
-                val currentSection = current.sections[index]
-                val merged = mergeCatalogRefresh(listOf(currentSection), listOf(section)).single()
-                val sections = current.sections.toMutableList()
-                sections[index] = merged
-                current.copy(sections = sections)
-            }
-            homeLog("Home section resolved id=${section.id}")
-        },
-    )
+            },
+            onResolved = resolved@{ section ->
+                if (generation != homeCatalogGeneration) return@resolved
+                mutableState.update { current ->
+                    val index = current.sections.indexOfFirst { it.id == section.id }
+                    if (index < 0) return@update current
+                    val currentSection = current.sections[index]
+                    val merged = mergeCatalogRefresh(listOf(currentSection), listOf(section)).single()
+                    val sections = current.sections.toMutableList()
+                    sections[index] = merged
+                    current.copy(sections = sections)
+                }
+                if (section.items.isNotEmpty() && !homeFirstUsableRowMarked) {
+                    homeFirstUsableRowMarked = true
+                    PerfTrace.mark(PerfTrace.HOME_FIRST_USABLE_ROW)
+                }
+                homeLog("Home section resolved id=${section.id}")
+            },
+        )
+    }
 
     private fun finishHomeCatalogWindow(
         generation: Long,

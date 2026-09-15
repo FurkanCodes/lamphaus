@@ -5,6 +5,7 @@ import com.lamphaus.core.data.local.LibraryEntity
 import com.lamphaus.core.data.local.ProfileEntity
 import com.lamphaus.core.data.local.ProviderEntity
 import com.lamphaus.core.data.local.WatchProgressEntity
+import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.data.security.StringCipher
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
@@ -111,15 +112,14 @@ class RoomLibraryRepository(
     override fun library(profileId: String): Flow<List<LibraryEntry>> = dao.observeLibrary(profileId)
         .map { rows ->
             rows.mapNotNull { row ->
-                runCatching {
-                    LibraryEntry(
-                        profileId = row.profileId,
-                        mediaKey = row.mediaKey,
-                        preview = json.decodeFromString<MediaPreview>(row.previewJson),
-                        addedAtEpochMillis = row.addedAtEpochMillis,
-                        updatedAtEpochMillis = row.updatedAtEpochMillis,
-                    )
-                }.getOrNull()
+                val preview = decodePreview(row.previewJson) ?: return@mapNotNull null
+                LibraryEntry(
+                    profileId = row.profileId,
+                    mediaKey = row.mediaKey,
+                    preview = preview,
+                    addedAtEpochMillis = row.addedAtEpochMillis,
+                    updatedAtEpochMillis = row.updatedAtEpochMillis,
+                )
             }
         }
         .flowOn(cpuDispatcher)
@@ -129,7 +129,7 @@ class RoomLibraryRepository(
             LibraryEntity(
                 profileId = entry.profileId,
                 mediaKey = entry.mediaKey,
-                previewJson = json.encodeToString(entry.preview),
+                previewJson = encodePreview(entry.preview),
                 addedAtEpochMillis = entry.addedAtEpochMillis,
                 updatedAtEpochMillis = entry.updatedAtEpochMillis,
             ),
@@ -178,9 +178,9 @@ class RoomLibraryRepository(
         dao.clearProfiles()
     }
 
-    private fun hashPin(pin: CharArray, salt: ByteArray): String {
+    private fun hashPin(pin: CharArray, salt: ByteArray): String = PerfTrace.span(PerfTrace.REPOSITORY_HASH) {
         val spec = PBEKeySpec(pin, salt, 120_000, 256)
-        return try {
+        try {
             Base64.getEncoder().encodeToString(
                 SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded,
             )
@@ -188,6 +188,14 @@ class RoomLibraryRepository(
             spec.clearPassword()
         }
     }
+
+    private fun decodePreview(serialized: String): MediaPreview? =
+        PerfTrace.span(PerfTrace.REPOSITORY_DECODE) {
+            runCatching { json.decodeFromString<MediaPreview>(serialized) }.getOrNull()
+        }
+
+    private fun encodePreview(preview: MediaPreview): String =
+        PerfTrace.span(PerfTrace.REPOSITORY_DECODE) { json.encodeToString(preview) }
 
     private fun ProfileEntity.toModel() = Profile(
         id = id,
@@ -219,13 +227,13 @@ class RoomLibraryRepository(
 
     private fun WatchProgressEntity.toModel() = WatchProgress(
         profileId, mediaKey, videoId, positionMillis, durationMillis, completed, updatedAtEpochMillis,
-        preview = previewJson?.let { serialized -> runCatching { json.decodeFromString<MediaPreview>(serialized) }.getOrNull() },
+        preview = previewJson?.let(::decodePreview),
         episodeLabel = episodeLabel,
     )
 
     private fun WatchProgress.toEntity() = WatchProgressEntity(
         profileId, mediaKey, videoId, positionMillis, durationMillis, completed, updatedAtEpochMillis,
-        previewJson = preview?.let { json.encodeToString(it) },
+        previewJson = preview?.let(::encodePreview),
         episodeLabel = episodeLabel,
     )
 }

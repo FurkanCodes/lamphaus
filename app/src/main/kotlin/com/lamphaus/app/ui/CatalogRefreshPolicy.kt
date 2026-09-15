@@ -26,6 +26,15 @@ internal fun appendHomeCatalogBatch(
     val seenIds = existing.mapTo(mutableSetOf(), CatalogSection::id)
     return existing + incoming.filter { seenIds.add(it.id) }
 }
+
+/**
+ * Publishes incrementally resolved sections in deterministic provider/catalog
+ * order, dropping anything that has not resolved yet (PERF-06).
+ */
+internal fun orderedResolvedSections(
+    orderedIds: List<String>,
+    resolved: Map<String, CatalogSection>,
+): List<CatalogSection> = orderedIds.mapNotNull(resolved::get)
 internal fun CatalogSection.isRenderableHomeCatalogSection(): Boolean =
     initialLoading || items.isNotEmpty() || hasMore || errorMessage != null || loadMoreError != null
 

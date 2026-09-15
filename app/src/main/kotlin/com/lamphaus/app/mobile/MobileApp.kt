@@ -104,6 +104,7 @@ import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.core.data.cloud.AccountState
+import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.app.R
@@ -204,7 +205,19 @@ fun MobileApp(
             }
         }
         // Usable-content signal for startup metrics: satisfied by genuinely
-        // usable Home/sign-in content, never the splash (plan §7).
+        // usable Home/sign-in content, never the splash (plan §7). The
+        // bounded-wait timeout reports a distinct degraded result so a slow
+        // start is never counted as usable content (PERF-02).
+        LaunchedEffect(startupGate.phase) {
+            if (startupGate.phase == MobileStartupPhase.Startup) return@LaunchedEffect
+            PerfTrace.mark(
+                when {
+                    startupGate.degradedReadiness -> PerfTrace.STARTUP_DEGRADED
+                    startupGate.contentReady -> PerfTrace.STARTUP_USABLE_CONTENT
+                    else -> PerfTrace.STARTUP_SETTLED
+                },
+            )
+        }
         androidx.activity.compose.ReportDrawnWhen {
             startupGate.phase != MobileStartupPhase.Startup
         }
@@ -313,6 +326,14 @@ internal class MobileStartupGate(initiallyResident: Boolean) {
         private set
 
     /**
+     * True when the bounded startup wait expired before content was usable.
+     * Startup metrics must treat this as a distinct degraded-readiness result
+     * instead of counting the timeout as usable content (PERF-02).
+     */
+    var degradedReadiness by mutableStateOf(false)
+        private set
+
+    /**
      * True when meaningful content predated startup (warm process): the
      * artwork warm-up is skipped and the handoff is immediate.
      */
@@ -342,6 +363,7 @@ internal class MobileStartupGate(initiallyResident: Boolean) {
     fun onHomeContent(readyRows: Int, settledWithoutContent: Boolean) {
         if (phase != MobileStartupPhase.Startup || !awaitingContent) return
         if (readyRows >= STARTUP_READY_ROWS) contentReady = true
+        // An actionable empty/error Home is a valid readiness outcome.
         if (settledWithoutContent) complete()
     }
 
@@ -354,6 +376,9 @@ internal class MobileStartupGate(initiallyResident: Boolean) {
     /** Content timeout measured from signed-in resolution. */
     fun onContentTimeout() {
         if (phase != MobileStartupPhase.Startup || !awaitingContent) return
+        // Bounded wait expired: distinct degraded result, never counted as
+        // usable content by startup metrics (PERF-02).
+        degradedReadiness = true
         complete()
     }
 

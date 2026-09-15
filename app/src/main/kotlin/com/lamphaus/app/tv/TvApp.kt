@@ -251,9 +251,11 @@ fun TvApp(
                 viewModel.configurationLaunchHandled()
             }
         }
-        // Usable-content signal: Home/pairing content, never a splash (plan §7).
+        // Usable-content signal: Home/pairing content or an actionable
+        // empty/error state, never a loading placeholder (plan §7/PERF-02).
         androidx.activity.compose.ReportDrawnWhen {
-            state.account != AccountState.Loading
+            state.account != AccountState.Loading &&
+                (state.account !is AccountState.SignedIn || !state.initialContentLoading)
         }
         Surface(
             modifier = Modifier.fillMaxSize(),

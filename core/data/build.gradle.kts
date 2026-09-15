@@ -25,6 +25,12 @@ android {
         )
     }
 
+    // PerfTrace wraps android.os.Trace, which has no JVM implementation; unit
+    // tests exercise the repository logic, not the trace sink.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
 }
 
 kotlin {
@@ -44,7 +50,6 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
-    implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
