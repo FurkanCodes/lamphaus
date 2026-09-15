@@ -24,3 +24,7 @@ functions/lib/
 
 # Local OpenCode state (may contain auth tokens)
 .opencode/
+
+# Large raw performance captures (referenced by path/hash from docs/performance)
+artifacts/performance/*
+!artifacts/performance/README.md

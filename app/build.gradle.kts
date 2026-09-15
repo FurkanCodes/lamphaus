@@ -207,12 +207,12 @@ androidComponents {
                 // artifact. `benchmarkRelease` (the timing target) keeps the
                 // release R8/resource shrinking; only the profile-generation
                 // target stays non-minified so its rules retain source class
-                // names and can be rewritten per obfuscated release. The
-                // baseline-profile plugin keeps both synthetic types
+                // names and can be rewritten per obfuscated release (the
+                // baseline-profile plugin also disables resource shrinking
+                // there). The plugin keeps both synthetic types
                 // non-debuggable and profileable for instrumentation.
                 if (target.name == "nonMinifiedRelease") {
                     isMinifyEnabled = false
-                    isShrinkResources = false
                 }
                 buildConfigField("boolean", "BENCHMARK_FIXTURES", "true")
                 buildConfigField("boolean", "CLOUD_CONFIGURED", "false")
