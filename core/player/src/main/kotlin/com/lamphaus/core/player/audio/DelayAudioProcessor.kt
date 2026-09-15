@@ -8,13 +8,25 @@ import java.nio.ByteBuffer
 
 /**
  * Audio vs. video delay for the current output route (plan §2): positive
- * values push audio later. Implemented as leading silence injection —
- * works on any decode path and never restarts playback when the delay
- * changes.
+ * values push audio later, negative values start audio earlier.
  *
- * Delay changes take effect at the next [onFlush] (route switches and seeks
- * both flush), which matches the per-route persistence semantics: the value
- * is remembered per route and re-applied when that route returns.
+ * Positive delay is implemented as leading silence injection; negative delay
+ * drops the corresponding prefix of decoded audio. Both work on any decode
+ * path and never restart playback when the delay changes. Negative delay is
+ * bounded to the same ±3000 ms range; a stream shorter than the requested
+ * advance simply has nothing left to drop.
+ *
+ * The processor always reports the input format so it stays in the audio
+ * chain: a delay that is configured, changed, or cleared while playback is
+ * running applies at the next [onFlush] (route switches and seeks both
+ * flush), which matches the per-route persistence semantics. A zero delay is a
+ * pass-through.
+ *
+ * Input is consumed only when it can be emitted in the right order: while
+ * silence is still pending no input sample is copied, so a fresh processor
+ * cannot overflow and audio never starts early (PERF-13). Media3's audio sink
+ * re-offers a partially consumed input buffer, which is what makes the held
+ * framing correct.
  */
 @UnstableApi
 class DelayAudioProcessor : BaseAudioProcessor() {
@@ -23,60 +35,90 @@ class DelayAudioProcessor : BaseAudioProcessor() {
     @Volatile
     var delayMillis: Long = 0L
         set(value) {
-            field = value.coerceIn(-3_000L, 3_000L)
+            field = value.coerceIn(-MAX_DELAY_MILLIS, MAX_DELAY_MILLIS)
         }
 
+    /** Configured PCM format; [onConfigure] may arrive before the first flush. */
+    private var format: AudioProcessor.AudioFormat = AudioProcessor.AudioFormat.NOT_SET
     private var pendingSilenceFrames = 0L
     private var silenceWrittenFrames = 0L
-    private var active = false
+    private var pendingDropFrames = 0L
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
-        resetSilence()
-        active = delayMillis != 0L
-        return if (active) inputAudioFormat else AudioProcessor.AudioFormat.NOT_SET
+        format = inputAudioFormat
+        resetDelay()
+        return inputAudioFormat
     }
-
-    override fun isActive(): Boolean = active && super.isActive()
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         val remaining = inputBuffer.remaining()
-        if (!active || remaining == 0) {
-            // Inactive processors must still copy through.
+        val bytesPerFrame = 2 * format.channelCount
+        if (remaining <= 0 || bytesPerFrame <= 0 || holdingAudio()) {
+            // Nothing to hold back: pass the input through unchanged.
             val output = replaceOutputBuffer(remaining)
             if (remaining > 0) output.put(inputBuffer)
             output.flip()
             return
         }
-        val output = replaceOutputBuffer(remaining)
-        var frames: Long = (remaining / (2 * channels())).toLong()
-        while (frames > 0 && silenceWrittenFrames < pendingSilenceFrames) {
-            // Emit leading silence first so every subsequent sample lands late.
-            val silenceFrames = minOf(frames, pendingSilenceFrames - silenceWrittenFrames)
-            repeat((silenceFrames * 2 * channels()).toInt()) { output.put(0.toByte()) }
-            silenceWrittenFrames += silenceFrames
-            frames -= silenceFrames
+
+        // Negative delay advances audio by discarding the leading frames.
+        // Input the sink re-offers is consumed without producing output until
+        // the requested advance is used up.
+        if (pendingDropFrames > 0) {
+            val framesAvailable = remaining / bytesPerFrame
+            if (framesAvailable > 0) {
+                val dropFrames = minOf(framesAvailable.toLong(), pendingDropFrames)
+                inputBuffer.position(inputBuffer.position() + (dropFrames * bytesPerFrame).toInt())
+                pendingDropFrames -= dropFrames
+                return
+            }
         }
+
+        // Leading silence is emitted before any of this chunk's audio, and the
+        // input is deliberately left unconsumed: writing silence plus the input
+        // in one output buffer used to overflow a fresh processor, and emitting
+        // the input early would shorten the delay (PERF-13). The audio sink
+        // re-offers the same buffer until it is fully consumed.
+        val framesAvailable = remaining / bytesPerFrame
+        if (framesAvailable > 0 && silenceWrittenFrames < pendingSilenceFrames) {
+            val silenceFrames = minOf(framesAvailable.toLong(), pendingSilenceFrames - silenceWrittenFrames)
+            val silenceBytes = (silenceFrames * bytesPerFrame).toInt()
+            val output = replaceOutputBuffer(silenceBytes)
+            repeat(silenceBytes) { output.put(0.toByte()) }
+            silenceWrittenFrames += silenceFrames
+            output.flip()
+            return
+        }
+
+        val output = replaceOutputBuffer(remaining)
         output.put(inputBuffer)
         output.flip()
     }
 
     override fun onFlush() {
-        resetSilence()
-        active = delayMillis != 0L
+        format = inputAudioFormat
+        resetDelay()
     }
 
     override fun onReset() {
-        resetSilence()
-        active = false
+        format = AudioProcessor.AudioFormat.NOT_SET
+        resetDelay()
     }
 
-    private fun channels(): Int = inputAudioFormat.channelCount
+    private fun holdingAudio(): Boolean =
+        pendingDropFrames <= 0 && silenceWrittenFrames >= pendingSilenceFrames
 
-    private fun resetSilence() {
-        pendingSilenceFrames = delayMillis * inputAudioFormat.sampleRate / 1000L
+    private fun resetDelay() {
+        val frames = kotlin.math.abs(delayMillis) * format.sampleRate / 1000L
+        pendingSilenceFrames = if (delayMillis > 0) frames else 0L
+        pendingDropFrames = if (delayMillis < 0) frames else 0L
         silenceWrittenFrames = 0L
+    }
+
+    private companion object {
+        const val MAX_DELAY_MILLIS = 3_000L
     }
 }
