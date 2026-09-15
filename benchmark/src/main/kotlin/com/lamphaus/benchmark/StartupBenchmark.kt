@@ -37,7 +37,7 @@ class StartupBenchmark {
     @Test
     fun coldMobileStartupCompiled() = rule.measureRepeated(
         packageName = PACKAGE_NAME,
-        metrics = listOf(StartupTimingMetric(), FrameTimingMetric(), homeWindowLoadMetric()),
+        metrics = startupMetrics(),
         compilationMode = CompilationMode.Partial(),
         startupMode = StartupMode.COLD,
         iterations = 20,
@@ -50,7 +50,7 @@ class StartupBenchmark {
     @Test
     fun coldMobileStartupUncompiled() = rule.measureRepeated(
         packageName = PACKAGE_NAME,
-        metrics = listOf(StartupTimingMetric(), FrameTimingMetric(), homeWindowLoadMetric()),
+        metrics = startupMetrics(),
         compilationMode = CompilationMode.None(),
         startupMode = StartupMode.COLD,
         iterations = 20,
@@ -63,7 +63,7 @@ class StartupBenchmark {
     @Test
     fun warmMobileStartup() = rule.measureRepeated(
         packageName = PACKAGE_NAME,
-        metrics = listOf(StartupTimingMetric(), FrameTimingMetric(), homeWindowLoadMetric()),
+        metrics = startupMetrics(),
         compilationMode = CompilationMode.Partial(),
         startupMode = StartupMode.WARM,
         iterations = 20,
@@ -76,7 +76,7 @@ class StartupBenchmark {
     @Test
     fun coldTvStartupCompiled() = rule.measureRepeated(
         packageName = PACKAGE_NAME,
-        metrics = listOf(StartupTimingMetric(), FrameTimingMetric(), homeWindowLoadMetric()),
+        metrics = startupMetrics(),
         compilationMode = CompilationMode.Partial(),
         startupMode = StartupMode.COLD,
         iterations = 20,
@@ -90,7 +90,7 @@ class StartupBenchmark {
     @Test
     fun coldTvStartupUncompiled() = rule.measureRepeated(
         packageName = PACKAGE_NAME,
-        metrics = listOf(StartupTimingMetric(), FrameTimingMetric(), homeWindowLoadMetric()),
+        metrics = startupMetrics(),
         compilationMode = CompilationMode.None(),
         startupMode = StartupMode.COLD,
         iterations = 20,
@@ -188,7 +188,22 @@ class StartupBenchmark {
     }
 
     private fun homeWindowLoadMetric() =
-        TraceSectionMetric("lamphaus.home.window.load", label = "homeWindowLoadMedianMs")
+        TraceSectionMetric("lamphaus.home.window.load", label = "homeWindowLoadSumMs")
+
+    private fun startupMetrics() = listOf(
+        StartupTimingMetric(),
+        FrameTimingMetric(),
+        homeWindowLoadMetric(),
+        usableContentMetric(),
+    )
+
+    /** Time to usable content or an actionable state, next to TTID/TTFD. */
+    private fun usableContentMetric() =
+        TraceSectionMetric(
+            "lamphaus.startup.readiness",
+            TraceSectionMetric.Mode.First,
+            label = "startupReadinessFirstMs",
+        )
 
     private fun androidx.benchmark.macro.MacrobenchmarkScope.startMobile() {
         startActivityAndWait(

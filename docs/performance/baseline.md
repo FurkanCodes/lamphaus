@@ -71,6 +71,30 @@ ANDROID_SERIAL=<phone> rtk ./gradlew :benchmark:connectedBenchmarkReleaseAndroid
   --max-workers=2
 ```
 
+Production-like startup (default fixture APK keeps cloud/updates off):
+
+```bash
+rtk ./gradlew :app:assembleBenchmarkRelease \
+  -Plamphaus.benchmarkCloud=true -Plamphaus.benchmarkUpdates=true \
+  -Plamphaus.supabaseUrl=<project-url> -Plamphaus.supabasePublishableKey=<publishable-key> \
+  --max-workers=2
+rtk ./gradlew :benchmark:connectedBenchmarkReleaseAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=com.lamphaus.benchmark.ProductionStartupBenchmark \
+  -Pandroid.testInstrumentationRunnerArguments.lamphaus.integration=true \
+  --max-workers=2
+```
+
+Never run the labeled integration benchmark against a default fixture APK or
+with a personal account signed in; it is skipped unless its label argument is
+present, and it must be rebuilt without the properties afterwards.
+
+Compose compiler reports (diagnostic only):
+
+```bash
+rtk ./gradlew :app:compileBenchmarkReleaseKotlin -Plamphaus.composeReports=true --max-workers=2
+# reports: app/build/compose-reports/app-composables.txt
+```
+
 | Scenario | Fixture / procedure | Measurements |
 | --- | --- | --- |
 | Cold and warm startup, both platforms | fixture account (`BENCHMARK_FIXTURES`), signed out / resident / populated library; warm and cold disk caches separately | TTID, TTFD, `lamphaus.startup.usable.content`, `lamphaus.startup.settled`, `lamphaus.startup.degraded`, `lamphaus.home.window.load` |

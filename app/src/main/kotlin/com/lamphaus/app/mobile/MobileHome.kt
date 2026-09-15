@@ -591,7 +591,8 @@ private fun HeroOverlayContent(
     onPlay: (MediaPreview) -> Unit,
     onToggleLibrary: (MediaPreview) -> Unit,
 ) {
-    val heroLogo = LocalArtworkResolver.current.resolve(media).media.logoUrl
+    val resolver = LocalArtworkResolver.current
+    val heroLogo = remember(media, resolver) { resolver.resolve(media).media.logoUrl }
     Column(
         Modifier
             .fillMaxWidth()

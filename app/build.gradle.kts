@@ -20,6 +20,15 @@ val updateFeedUrl: String =
 val supabaseUrl = providers.gradleProperty("lamphaus.supabaseUrl").orNull.orEmpty()
 val supabasePublishableKey = providers.gradleProperty("lamphaus.supabasePublishableKey").orNull.orEmpty()
 val cloudConfigured = supabaseUrl.isNotBlank() && supabasePublishableKey.isNotBlank()
+// PERF-02: keep fixture startup and production-like startup as distinct
+// experiments. The default timing APK keeps cloud/updates off for a
+// deterministic fixture baseline; a separately labeled controlled integration
+// run builds the same timing variant with
+// `-Plamphaus.benchmarkCloud=true -Plamphaus.benchmarkUpdates=true`
+// (cloud also requires the Supabase Gradle properties). The fixture session
+// and catalog stay deterministic either way, and no personal account is used.
+val benchmarkCloud = providers.gradleProperty("lamphaus.benchmarkCloud").orNull?.toBoolean() == true && cloudConfigured
+val benchmarkUpdates = providers.gradleProperty("lamphaus.benchmarkUpdates").orNull?.toBoolean() == true
 val releaseStorePath = providers.environmentVariable("LAMPHAUS_RELEASE_STORE_FILE").orNull
 val releaseKeyAlias = providers.environmentVariable("LAMPHAUS_RELEASE_KEY_ALIAS").orNull
 val releaseStorePassword = providers.environmentVariable("LAMPHAUS_RELEASE_STORE_PASSWORD").orNull
@@ -137,6 +146,18 @@ kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         freeCompilerArgs.add("-Xannotation-default-target=param-property")
+        // PERF-07: opt-in Compose compiler reports for the diagnostic build
+        // (`-Plamphaus.composeReports=true`). Reports stay out of normal builds
+        // and are inspected instead of adding obsolete compiler flags.
+        if (providers.gradleProperty("lamphaus.composeReports").isPresent) {
+            val reportDir = layout.buildDirectory.dir("compose-reports").get().asFile.absolutePath
+            freeCompilerArgs.addAll(
+                "-P",
+                "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=$reportDir",
+                "-P",
+                "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=$reportDir",
+            )
+        }
     }
 }
 
@@ -215,10 +236,10 @@ androidComponents {
                     isMinifyEnabled = false
                 }
                 buildConfigField("boolean", "BENCHMARK_FIXTURES", "true")
-                buildConfigField("boolean", "CLOUD_CONFIGURED", "false")
-                buildConfigField("boolean", "UPDATES_ENABLED", "false")
-                buildConfigField("String", "SUPABASE_URL", "\"\"")
-                buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"\"")
+                buildConfigField("boolean", "CLOUD_CONFIGURED", benchmarkCloud.toString())
+                buildConfigField("boolean", "UPDATES_ENABLED", benchmarkUpdates.toString())
+                buildConfigField("String", "SUPABASE_URL", "\"${if (benchmarkCloud) supabaseUrl else ""}\"")
+                buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"${if (benchmarkCloud) supabasePublishableKey else ""}\"")
             }
             extension.sourceSets.getByName(target.name).assets.srcDir("src/benchmark/assets")
         }

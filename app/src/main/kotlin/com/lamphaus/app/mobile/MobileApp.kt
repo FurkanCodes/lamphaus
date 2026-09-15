@@ -208,6 +208,9 @@ fun MobileApp(
         // usable Home/sign-in content, never the splash (plan §7). The
         // bounded-wait timeout reports a distinct degraded result so a slow
         // start is never counted as usable content (PERF-02).
+        LaunchedEffect(Unit) {
+            PerfTrace.beginStartupSpan()
+        }
         LaunchedEffect(startupGate.phase) {
             if (startupGate.phase == MobileStartupPhase.Startup) return@LaunchedEffect
             PerfTrace.mark(
@@ -217,6 +220,7 @@ fun MobileApp(
                     else -> PerfTrace.STARTUP_SETTLED
                 },
             )
+            PerfTrace.endStartupSpan()
         }
         androidx.activity.compose.ReportDrawnWhen {
             startupGate.phase != MobileStartupPhase.Startup

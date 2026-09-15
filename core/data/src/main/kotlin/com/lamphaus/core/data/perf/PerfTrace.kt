@@ -29,6 +29,29 @@ object PerfTrace {
     const val STARTUP_SETTLED = "lamphaus.startup.settled"
     const val STARTUP_DEGRADED = "lamphaus.startup.degraded"
 
+    /**
+     * Duration from the host surface entering composition to usable content or
+     * an actionable empty/error state. Macrobenchmark reads it as a
+     * `TraceSectionMetric`, so time-to-usable-content is measured next to TTID
+     * and TTFD instead of being inferred from them.
+     */
+    const val STARTUP_READINESS = "lamphaus.startup.readiness"
+
+    private val startupSpanOpen = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Idempotent: only the first host surface in the process opens the span. */
+    fun beginStartupSpan() {
+        if (startupSpanOpen.compareAndSet(false, true)) {
+            Trace.beginSection(STARTUP_READINESS)
+        }
+    }
+
+    fun endStartupSpan() {
+        if (startupSpanOpen.compareAndSet(true, false)) {
+            Trace.endSection()
+        }
+    }
+
     // Playback continuity.
     const val CONTROLLER_CONNECT = "lamphaus.playback.controller.connect"
     const val FIRST_VIDEO_FRAME = "lamphaus.playback.first.video.frame"

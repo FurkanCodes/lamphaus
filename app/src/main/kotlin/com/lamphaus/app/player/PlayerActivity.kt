@@ -136,6 +136,8 @@ class PlayerActivity : ComponentActivity() {
 
         // Browsing can leave several 4K backdrops in Coil's memory cache. Playback needs that
         // heap for demuxing high-bitrate sources, while artwork remains available on disk.
+        // PERF-08: keep this protection until a smaller-budget alternative survives
+        // low-memory playback and return-to-browse measurement on a physical target.
         SingletonImageLoader.get(this).memoryCache?.clear()
         if (isTelevision) {
             displayModeController = PlaybackDisplayModeController(
