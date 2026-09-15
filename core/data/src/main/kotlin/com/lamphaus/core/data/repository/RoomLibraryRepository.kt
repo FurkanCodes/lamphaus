@@ -5,6 +5,7 @@ import com.lamphaus.core.data.local.LibraryEntity
 import com.lamphaus.core.data.local.ProfileEntity
 import com.lamphaus.core.data.local.ProviderEntity
 import com.lamphaus.core.data.local.WatchProgressEntity
+import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.data.security.StringCipher
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
@@ -14,46 +15,76 @@ import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.WatchProgress
 import java.security.MessageDigest
 import java.security.SecureRandom
-import android.util.Base64
+import java.util.Base64
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+/**
+ * Room plus keystore persistence (SHR-ARC-04, SHR-ARC-11). Every entry point is
+ * main-safe: PBKDF2 hashing and JSON mapping run on the injected CPU
+ * dispatcher, keystore encryption and decryption on the injected IO
+ * dispatcher, and Room keeps scheduling its own SQL. `flowOn` sits after the
+ * expensive upstream transformation but before state publication (PERF-03).
+ * PIN work-factor strength is unchanged at 120,000 PBKDF2 rounds.
+ */
 class RoomLibraryRepository(
     private val dao: LamphausDao,
     private val stringCipher: StringCipher,
     private val json: Json = Json { ignoreUnknownKeys = true },
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : LibraryRepository {
     override fun profiles(): Flow<List<Profile>> = dao.observeProfiles().map { rows -> rows.map { it.toModel() } }
 
     override suspend fun saveProfile(profile: Profile, pin: CharArray?) {
-        val existing = dao.profile(profile.id)
-        val salt = if (pin != null) ByteArray(16).also(SecureRandom()::nextBytes) else null
-        dao.upsertProfile(
-            ProfileEntity(
-                id = profile.id,
-                name = profile.name,
-                avatarKey = profile.avatarKey,
-                kind = profile.kind.name,
-                pinSalt = salt?.let { Base64.encodeToString(it, Base64.NO_WRAP) } ?: existing?.pinSalt,
-                pinHash = if (pin != null && salt != null) hashPin(pin, salt) else existing?.pinHash,
-                hideUnrated = profile.hideUnrated,
-                updatedAtEpochMillis = profile.updatedAtEpochMillis,
-            ),
-        )
-        pin?.fill('\u0000')
+        try {
+            val existing = dao.profile(profile.id)
+            val salt = if (pin != null) {
+                withContext(cpuDispatcher) { ByteArray(16).also(SecureRandom()::nextBytes) }
+            } else {
+                null
+            }
+            val pinHash = if (pin != null && salt != null) {
+                withContext(cpuDispatcher) { hashPin(pin, salt) }
+            } else {
+                existing?.pinHash
+            }
+            dao.upsertProfile(
+                ProfileEntity(
+                    id = profile.id,
+                    name = profile.name,
+                    avatarKey = profile.avatarKey,
+                    kind = profile.kind.name,
+                    pinSalt = salt?.let { Base64.getEncoder().encodeToString(it) } ?: existing?.pinSalt,
+                    pinHash = pinHash,
+                    hideUnrated = profile.hideUnrated,
+                    updatedAtEpochMillis = profile.updatedAtEpochMillis,
+                ),
+            )
+        } finally {
+            // Clear on success, failure, and early exits alike.
+            pin?.fill('\u0000')
+        }
     }
 
     override suspend fun verifyPin(profileId: String, pin: CharArray): Boolean {
-        val profile = dao.profile(profileId) ?: return false
-        val salt = profile.pinSalt?.let { Base64.decode(it, Base64.NO_WRAP) } ?: return false
-        val expected = profile.pinHash ?: return false
-        val actual = hashPin(pin, salt)
-        pin.fill('\u0000')
-        return MessageDigest.isEqual(expected.toByteArray(), actual.toByteArray())
+        try {
+            val profile = dao.profile(profileId) ?: return false
+            val salt = profile.pinSalt?.let { Base64.getDecoder().decode(it) } ?: return false
+            val expected = profile.pinHash ?: return false
+            val actual = withContext(cpuDispatcher) { hashPin(pin, salt) }
+            return MessageDigest.isEqual(expected.toByteArray(), actual.toByteArray())
+        } finally {
+            pin.fill('\u0000')
+        }
     }
 
     override suspend fun deleteProfile(profileId: String) {
@@ -61,9 +92,14 @@ class RoomLibraryRepository(
     }
 
     override fun providers(): Flow<List<ProviderSubscription>> =
-        dao.observeProviders().map { rows -> rows.map { it.toModel() } }
+        dao.observeProviders()
+            .map { rows -> rows.map { it.toModel() } }
+            // Keystore decryption is blocking IO, not just mapping (PERF-03).
+            .flowOn(ioDispatcher)
 
-    override suspend fun saveProvider(provider: ProviderSubscription) = dao.upsertProvider(provider.toEntity())
+    override suspend fun saveProvider(provider: ProviderSubscription) = withContext(ioDispatcher) {
+        dao.upsertProvider(provider.toEntity())
+    }
 
     override suspend fun setProviderEnabled(providerId: String, enabled: Boolean) {
         dao.setProviderEnabled(providerId, enabled, System.currentTimeMillis())
@@ -73,44 +109,48 @@ class RoomLibraryRepository(
         dao.provider(providerId)?.let { dao.deleteProvider(it) }
     }
 
-    override fun library(profileId: String): Flow<List<LibraryEntry>> = dao.observeLibrary(profileId).map { rows ->
-        rows.mapNotNull { row ->
-            runCatching {
+    override fun library(profileId: String): Flow<List<LibraryEntry>> = dao.observeLibrary(profileId)
+        .map { rows ->
+            rows.mapNotNull { row ->
+                val preview = decodePreview(row.previewJson) ?: return@mapNotNull null
                 LibraryEntry(
                     profileId = row.profileId,
                     mediaKey = row.mediaKey,
-                    preview = json.decodeFromString<MediaPreview>(row.previewJson),
+                    preview = preview,
                     addedAtEpochMillis = row.addedAtEpochMillis,
                     updatedAtEpochMillis = row.updatedAtEpochMillis,
                 )
-            }.getOrNull()
+            }
         }
-    }
+        .flowOn(cpuDispatcher)
 
-    override suspend fun saveLibrary(entry: LibraryEntry) = dao.upsertLibrary(
-        LibraryEntity(
-            profileId = entry.profileId,
-            mediaKey = entry.mediaKey,
-            previewJson = json.encodeToString(entry.preview),
-            addedAtEpochMillis = entry.addedAtEpochMillis,
-            updatedAtEpochMillis = entry.updatedAtEpochMillis,
-        ),
-    )
+    override suspend fun saveLibrary(entry: LibraryEntry) = withContext(cpuDispatcher) {
+        dao.upsertLibrary(
+            LibraryEntity(
+                profileId = entry.profileId,
+                mediaKey = entry.mediaKey,
+                previewJson = encodePreview(entry.preview),
+                addedAtEpochMillis = entry.addedAtEpochMillis,
+                updatedAtEpochMillis = entry.updatedAtEpochMillis,
+            ),
+        )
+    }
 
     override suspend fun removeLibrary(profileId: String, mediaKey: String) = dao.removeLibrary(profileId, mediaKey)
 
-    override fun progress(profileId: String): Flow<List<WatchProgress>> = dao.observeProgress(profileId).map { rows ->
-        rows.map { it.toModel() }
-    }
+    override fun progress(profileId: String): Flow<List<WatchProgress>> = dao.observeProgress(profileId)
+        .map { rows -> rows.map { it.toModel() } }
+        .flowOn(cpuDispatcher)
 
     override suspend fun saveProgress(progress: WatchProgress): WatchProgress {
         // The DAO transaction makes completion sticky even when periodic,
         // natural-end, and onStop saves race each other.
-        return dao.upsertProgressSticky(progress.toEntity()).toModel()
+        val entity = withContext(cpuDispatcher) { progress.toEntity() }
+        return dao.upsertProgressSticky(entity).toModel()
     }
 
     override suspend fun progressEntry(profileId: String, videoId: String): WatchProgress? =
-        dao.progressEntry(profileId, videoId)?.toModel()
+        dao.progressEntry(profileId, videoId)?.let { row -> withContext(cpuDispatcher) { row.toModel() } }
 
     override suspend fun removeProgress(profileId: String, videoId: String) =
         dao.removeProgress(profileId, videoId)
@@ -138,17 +178,24 @@ class RoomLibraryRepository(
         dao.clearProfiles()
     }
 
-    private fun hashPin(pin: CharArray, salt: ByteArray): String {
+    private fun hashPin(pin: CharArray, salt: ByteArray): String = PerfTrace.span(PerfTrace.REPOSITORY_HASH) {
         val spec = PBEKeySpec(pin, salt, 120_000, 256)
-        return try {
-            Base64.encodeToString(
+        try {
+            Base64.getEncoder().encodeToString(
                 SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded,
-                Base64.NO_WRAP,
             )
         } finally {
             spec.clearPassword()
         }
     }
+
+    private fun decodePreview(serialized: String): MediaPreview? =
+        PerfTrace.span(PerfTrace.REPOSITORY_DECODE) {
+            runCatching { json.decodeFromString<MediaPreview>(serialized) }.getOrNull()
+        }
+
+    private fun encodePreview(preview: MediaPreview): String =
+        PerfTrace.span(PerfTrace.REPOSITORY_DECODE) { json.encodeToString(preview) }
 
     private fun ProfileEntity.toModel() = Profile(
         id = id,
@@ -180,13 +227,13 @@ class RoomLibraryRepository(
 
     private fun WatchProgressEntity.toModel() = WatchProgress(
         profileId, mediaKey, videoId, positionMillis, durationMillis, completed, updatedAtEpochMillis,
-        preview = previewJson?.let { serialized -> runCatching { json.decodeFromString<MediaPreview>(serialized) }.getOrNull() },
+        preview = previewJson?.let(::decodePreview),
         episodeLabel = episodeLabel,
     )
 
     private fun WatchProgress.toEntity() = WatchProgressEntity(
         profileId, mediaKey, videoId, positionMillis, durationMillis, completed, updatedAtEpochMillis,
-        previewJson = preview?.let { json.encodeToString(it) },
+        previewJson = preview?.let(::encodePreview),
         episodeLabel = episodeLabel,
     )
 }

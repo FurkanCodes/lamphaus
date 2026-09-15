@@ -66,7 +66,7 @@ internal fun KenBurnsArtwork(
     modifier: Modifier = Modifier,
 ) {
     val resolver = LocalArtworkResolver.current
-    val resolvedMedia = resolver.resolve(media).media
+    val resolvedMedia = remember(media, resolver) { resolver.resolve(media).media }
     val path = remember(media.stableKey) { kenBurnsPathFor(media.stableKey) }
     val progress = remember(media.stableKey) { Animatable(0f) }
     val hasArtwork = fixtureArtworkResource(media) != null ||

@@ -34,6 +34,7 @@ import android.util.Log
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.R
+import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.CompletionPolicy
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.Episode
@@ -66,7 +67,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.serialization.encodeToString
@@ -133,6 +136,8 @@ class PlayerActivity : ComponentActivity() {
 
         // Browsing can leave several 4K backdrops in Coil's memory cache. Playback needs that
         // heap for demuxing high-bitrate sources, while artwork remains available on disk.
+        // PERF-08: keep this protection until a smaller-budget alternative survives
+        // low-memory playback and return-to-browse measurement on a physical target.
         SingletonImageLoader.get(this).memoryCache?.clear()
         if (isTelevision) {
             displayModeController = PlaybackDisplayModeController(
@@ -157,18 +162,26 @@ class PlayerActivity : ComponentActivity() {
         registerAudioRouteListener()
         connect(playback)
         lifecycleScope.launch {
-            container.preferences.settings.collectLatest { settings ->
-                playbackSettingsState.value = settings.playback
-                spoilerProtectionState.value = settings.spoilerProtection
-                loadSegments(requestState.value, settings.playback)
-            }
+            // Project settings to the fields playback actually reads: an
+            // unrelated preference change must not reload segments (PERF-09).
+            container.preferences.settings
+                .map { it.playback to it.spoilerProtection }
+                .distinctUntilChanged()
+                .collectLatest { (playback, spoilerProtection) ->
+                    playbackSettingsState.value = playback
+                    spoilerProtectionState.value = spoilerProtection
+                    loadSegments(requestState.value, playback)
+                }
         }
         // Frame-rate hint applies live without recreating the player; audio/
         // decoder/HDR knobs stay construction-time and apply on next playback.
         deviceConfigJob = lifecycleScope.launch {
-            container.preferences.settings.collectLatest { settings ->
-                Media3EngineFactory.applyDeviceConfigToSession(settings.devicePlayback)
-            }
+            container.preferences.settings
+                .map { it.devicePlayback }
+                .distinctUntilChanged()
+                .collectLatest { devicePlayback ->
+                    Media3EngineFactory.applyDeviceConfigToSession(devicePlayback)
+                }
         }
         setContent {
             requestState.value?.let { currentRequest ->
@@ -229,12 +242,17 @@ class PlayerActivity : ComponentActivity() {
         future.addListener(
             {
                 runCatching { future.get() }.onSuccess { mediaController ->
+                    PerfTrace.mark(PerfTrace.CONTROLLER_CONNECT)
                     val delayed = com.lamphaus.core.player.DelayedCuePlayer(mediaController)
                     uiPlayer = delayed
                     controllerState.value = mediaController
                     applyTrackDefaults(mediaController, profilePlaybackPreferencesState.value)
                     mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
                     mediaController.addListener(object : Player.Listener {
+                        override fun onRenderedFirstFrame() {
+                            PerfTrace.mark(PerfTrace.FIRST_VIDEO_FRAME)
+                        }
+
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             if (playbackState == Player.STATE_ENDED) {
                                 displayModeController?.restore()
@@ -511,6 +529,7 @@ class PlayerActivity : ComponentActivity() {
             controller?.pause()
             displayModeController?.restore()
         }
+        if (isFinishing) PerfTrace.mark(PerfTrace.RETURN_TO_BROWSE)
         super.onStop()
     }
 

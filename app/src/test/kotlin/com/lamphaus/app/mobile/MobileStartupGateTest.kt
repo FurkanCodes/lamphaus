@@ -122,6 +122,28 @@ class MobileStartupGateTest {
         gate.onAccountChanged(signedIn())
         gate.onContentTimeout()
         assertEquals(MobileStartupPhase.SignedIn, gate.phase)
+        assertTrue("timeout must report degraded readiness", gate.degradedReadiness)
+    }
+
+    @Test
+    fun `warm-up completion is not degraded`() {
+        val gate = MobileStartupGate(initiallyResident = false)
+        gate.onAccountChanged(signedIn())
+        gate.onHomeContent(readyRows = 4, settledWithoutContent = false)
+
+        gate.onWarmUpElapsed()
+
+        assertEquals(MobileStartupPhase.SignedIn, gate.phase)
+        assertFalse(gate.degradedReadiness)
+    }
+
+    @Test
+    fun `terminal empty home is settled but not degraded`() {
+        val gate = MobileStartupGate(initiallyResident = false)
+        gate.onAccountChanged(signedIn())
+        gate.onHomeContent(readyRows = 0, settledWithoutContent = true)
+
+        assertFalse(gate.degradedReadiness)
     }
 
     @Test

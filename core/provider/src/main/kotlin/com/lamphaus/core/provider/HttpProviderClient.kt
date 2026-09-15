@@ -20,10 +20,20 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.InternalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -54,43 +64,87 @@ class HttpProviderClient(
         .followRedirects(false)
         .retryOnConnectionFailure(true)
         .build(),
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    cacheBudgetBytes: Long = DEFAULT_CACHE_BUDGET_BYTES,
+    private val maxCacheEntryBytes: Long = DEFAULT_MAX_CACHE_ENTRY_BYTES,
+    private val maxResponseBytes: Long = DEFAULT_MAX_RESPONSE_BYTES,
+    maxConcurrentRequests: Int = DEFAULT_MAX_CONCURRENT_REQUESTS,
+    maxConcurrentRequestsPerScope: Int = DEFAULT_MAX_CONCURRENT_PER_SCOPE,
 ) : ProviderClient {
     private data class CacheEntry(
         val body: String,
         val etag: String?,
         val lastModified: String?,
         val fetchedAtMillis: Long,
+        /** Approximate retained heap for budget accounting. */
+        val sizeBytes: Long,
     )
 
     private data class Payload(val element: JsonElement, val stale: Boolean)
 
-    private val cache = ConcurrentHashMap<String, CacheEntry>()
+    private data class Fetched(
+        val body: String,
+        val etag: String?,
+        val lastModified: String?,
+        val stale: Boolean,
+    )
+
+    private class InFlight {
+        val deferred = kotlinx.coroutines.CompletableDeferred<Payload>()
+        lateinit var job: Job
+        val waiters = AtomicInteger(0)
+    }
+
+    // Byte-budgeted LRU (PERF-04). Access order makes the eldest entry the
+    // least recently used; the budget accounts for an approximation of String
+    // overhead rather than raw payload length alone.
+    private val cacheBudgetBytes = cacheBudgetBytes.coerceAtLeast(0)
+    private val cacheLock = Any()
+    private val cache = java.util.LinkedHashMap<String, CacheEntry>(16, 0.75f, true)
+    private var cacheBytes = 0L
+
+    // Identical simultaneous requests share one network call; cancellation of
+    // one subscriber must not cancel another subscriber's shared request, and
+    // the shared call only stops when nobody waits for it (PERF-04).
+    private val inFlight = ConcurrentHashMap<String, InFlight>()
+    private val requestScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+
+    // Global and per-provider admission keeps outstanding suspended HTTP
+    // requests bounded even when callers fan out (PERF-06).
+    private val globalSlot = Semaphore(maxConcurrentRequests.coerceAtLeast(1))
+    private val scopeSlots = ConcurrentHashMap<String, Semaphore>()
+    private val perScopeLimit = maxConcurrentRequestsPerScope.coerceAtLeast(1)
 
     override suspend fun manifest(manifestUrl: String): ProviderResult<ProviderManifest> = guardedProviderCall {
         val normalized = urlPolicy.normalizeManifestUrl(manifestUrl)
             ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Use a valid HTTPS provider address.")
-        val payload = fetch(normalized)
-        ProviderResult.Success(parseManifest(payload.element.jsonObject), payload.stale)
+        val payload = fetch(normalized, scope = normalized)
+        withContext(cpuDispatcher) {
+            ProviderResult.Success(parseManifest(payload.element.jsonObject), payload.stale)
+        }
     }
 
     override suspend fun discoverProviderUrls(catalogUrl: String): ProviderResult<List<String>> = guardedProviderCall {
         val normalized = urlPolicy.normalizeCatalogUrl(catalogUrl)
             ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Use a valid HTTPS provider catalog address.")
-        val payload = fetch(normalized)
-        val root = payload.element
-        val candidates = when (root) {
-            is JsonArray -> root
-            is JsonObject -> root.array("providers") ?: root.array("addons") ?: root.array("items") ?: JsonArray(emptyList())
-            else -> JsonArray(emptyList())
-        }
-        val urls = candidates.mapNotNull { item ->
-            when (item) {
-                is JsonPrimitive -> item.contentOrNull
-                is JsonObject -> item.string("manifestUrl") ?: item.string("transportUrl") ?: item.string("url")
-                else -> null
+        val payload = fetch(normalized, scope = normalized)
+        withContext(cpuDispatcher) {
+            val root = payload.element
+            val candidates = when (root) {
+                is JsonArray -> root
+                is JsonObject -> root.array("providers") ?: root.array("addons") ?: root.array("items") ?: JsonArray(emptyList())
+                else -> JsonArray(emptyList())
             }
-        }.mapNotNull(urlPolicy::normalizeManifestUrl).distinct()
-        ProviderResult.Success(urls, payload.stale)
+            val urls = candidates.mapNotNull { item ->
+                when (item) {
+                    is JsonPrimitive -> item.contentOrNull
+                    is JsonObject -> item.string("manifestUrl") ?: item.string("transportUrl") ?: item.string("url")
+                    else -> null
+                }
+            }.mapNotNull(urlPolicy::normalizeManifestUrl).distinct()
+            ProviderResult.Success(urls, payload.stale)
+        }
     }
 
     override suspend fun catalog(
@@ -100,12 +154,14 @@ class HttpProviderClient(
     ): ProviderResult<List<MediaPreview>> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "catalog", query.type, query.catalogId, query.extras())
             ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
-        val payload = fetch(url.toString())
-        val items = payload.element.jsonObject.array("metas") ?: JsonArray(emptyList())
-        ProviderResult.Success(
-            items.mapNotNull { (it as? JsonObject)?.toPreview(providerId, query.type, query.posterShape) },
-            payload.stale,
-        )
+        val payload = fetch(url.toString(), scope = manifestUrl)
+        withContext(cpuDispatcher) {
+            val items = payload.element.jsonObject.array("metas") ?: JsonArray(emptyList())
+            ProviderResult.Success(
+                items.mapNotNull { (it as? JsonObject)?.toPreview(providerId, query.type, query.posterShape) },
+                payload.stale,
+            )
+        }
     }
 
     override suspend fun meta(
@@ -116,9 +172,11 @@ class HttpProviderClient(
     ): ProviderResult<MediaDetail> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "meta", type, id)
             ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
-        val payload = fetch(url.toString())
-        val meta = payload.element.jsonObject.obj("meta") ?: payload.element.jsonObject
-        ProviderResult.Success(meta.toDetail(providerId, type), payload.stale)
+        val payload = fetch(url.toString(), scope = manifestUrl)
+        withContext(cpuDispatcher) {
+            val meta = payload.element.jsonObject.obj("meta") ?: payload.element.jsonObject
+            ProviderResult.Success(meta.toDetail(providerId, type), payload.stale)
+        }
     }
 
     override suspend fun streams(
@@ -129,9 +187,12 @@ class HttpProviderClient(
     ): ProviderResult<List<StreamCandidate>> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "stream", type, id)
             ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
-        val payload = fetch(url.toString())
-        val streams = payload.element.jsonObject.array("streams") ?: JsonArray(emptyList())
-        ProviderResult.Success(streams.mapNotNull { (it as? JsonObject)?.toStream(providerId) }, payload.stale)
+        // Playable URLs can expire: never revalidate or serve them stale.
+        val payload = fetch(url.toString(), scope = manifestUrl, cacheable = false, allowStaleOnError = false)
+        withContext(cpuDispatcher) {
+            val streams = payload.element.jsonObject.array("streams") ?: JsonArray(emptyList())
+            ProviderResult.Success(streams.mapNotNull { (it as? JsonObject)?.toStream(providerId) }, payload.stale)
+        }
     }
 
     override suspend fun subtitles(
@@ -142,19 +203,80 @@ class HttpProviderClient(
     ): ProviderResult<List<SubtitleTrack>> = guardedProviderCall {
         val url = resourceUrl(manifestUrl, "subtitles", type, id, extras)
             ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Provider address is invalid.")
-        val payload = fetch(url.toString())
-        val subtitles = payload.element.jsonObject.array("subtitles") ?: JsonArray(emptyList())
-        ProviderResult.Success(subtitles.mapNotNull { (it as? JsonObject)?.toSubtitle() }, payload.stale)
+        val payload = fetch(url.toString(), scope = manifestUrl, allowStaleOnError = false)
+        withContext(cpuDispatcher) {
+            val subtitles = payload.element.jsonObject.array("subtitles") ?: JsonArray(emptyList())
+            ProviderResult.Success(subtitles.mapNotNull { (it as? JsonObject)?.toSubtitle() }, payload.stale)
+        }
     }
 
-    private suspend fun fetch(url: String): Payload = withContext(Dispatchers.IO) {
-        val cached = cache[url]
-        try {
+    /** Drops cached bodies and admission state for one provider after a config change. */
+    override fun invalidateProvider(manifestUrl: String) {
+        val prefix = scopeKey(manifestUrl)
+        synchronized(cacheLock) {
+            val iterator = cache.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (entry.key.startsWith(prefix)) {
+                    cacheBytes -= entry.value.sizeBytes
+                    iterator.remove()
+                }
+            }
+        }
+        scopeSlots.remove(manifestUrl)
+    }
+
+    private suspend fun fetch(
+        url: String,
+        scope: String,
+        cacheable: Boolean = true,
+        allowStaleOnError: Boolean = true,
+    ): Payload {
+        val key = cacheKey(scope, url)
+        return coalesced(key) {
+            performFetch(key, url, cacheable, allowStaleOnError)
+        }
+    }
+
+    private suspend fun performFetch(
+        key: String,
+        url: String,
+        cacheable: Boolean,
+        allowStaleOnError: Boolean,
+    ): Payload {
+        val cached = if (cacheable) cached(key) else null
+        return try {
+            val fetched = withAdmission(key) { loadBody(url, key, cached, cacheable) }
+            Payload(parseJson(fetched.body), fetched.stale)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            val freshEnough = cached != null &&
+                allowStaleOnError &&
+                System.currentTimeMillis() - cached.fetchedAtMillis < STALE_LIMIT_MILLIS
+            if (freshEnough) {
+                Payload(parseJson(cached.body), true)
+            } else {
+                throw error
+            }
+        }
+    }
+
+    /**
+     * Loads a body on the IO dispatcher. Redirects are followed manually so
+     * every hop is re-validated by [ProviderUrlPolicy]; the response stream is
+     * read through a bounded buffer even when Content-Length is absent or
+     * wrong (PERF-04).
+     */
+    private suspend fun loadBody(url: String, key: String, cached: CacheEntry?, cacheable: Boolean): Fetched =
+        withContext(ioDispatcher) {
             var currentUrl = url
             repeat(MAX_REDIRECTS + 1) { redirectCount ->
                 val request = Request.Builder().url(currentUrl).header("Accept", "application/json").apply {
-                    cached?.etag?.let { header("If-None-Match", it) }
-                    cached?.lastModified?.let { header("If-Modified-Since", it) }
+                    if (cacheable) {
+                        cached?.etag?.let { header("If-None-Match", it) }
+                        cached?.lastModified?.let { header("If-Modified-Since", it) }
+                    }
                 }.build()
                 client.newCall(request).awaitResponse().use { response ->
                     if (response.isRedirect) {
@@ -166,26 +288,130 @@ class HttpProviderClient(
                         return@use
                     }
                     if (response.code == 304 && cached != null) {
-                        return@withContext Payload(json.parseToJsonElement(cached.body), false)
+                        // A successful revalidation refreshes the freshness
+                        // window and any updated validators.
+                        if (cacheable) {
+                            store(
+                                key,
+                                cached.copy(
+                                    etag = response.header("ETag") ?: cached.etag,
+                                    lastModified = response.header("Last-Modified") ?: cached.lastModified,
+                                    fetchedAtMillis = System.currentTimeMillis(),
+                                ),
+                            )
+                        }
+                        return@withContext Fetched(cached.body, cached.etag, cached.lastModified, stale = false)
                     }
                     if (!response.isSuccessful) throw ProviderHttpException(response.code)
-                    val body = response.body?.string().orEmpty()
+                    val body = readBoundedBody(response)
                     if (body.isBlank()) throw ProviderProtocolException("Empty response")
-                    cache[url] = CacheEntry(
-                        body,
-                        response.header("ETag"),
-                        response.header("Last-Modified"),
-                        System.currentTimeMillis(),
-                    )
-                    return@withContext Payload(json.parseToJsonElement(body), false)
+                    if (cacheable) {
+                        store(
+                            key,
+                            CacheEntry(
+                                body = body,
+                                etag = response.header("ETag"),
+                                lastModified = response.header("Last-Modified"),
+                                fetchedAtMillis = System.currentTimeMillis(),
+                                sizeBytes = estimatedCacheSize(body),
+                            ),
+                        )
+                    }
+                    return@withContext Fetched(body, null, null, stale = false)
                 }
             }
             throw ProviderProtocolException("Too many redirects")
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            val freshEnough = cached != null && System.currentTimeMillis() - cached.fetchedAtMillis < STALE_LIMIT_MILLIS
-            if (freshEnough) Payload(json.parseToJsonElement(cached.body), true) else throw error
+        }
+
+    private fun readBoundedBody(response: Response): String {
+        val body = response.body ?: throw ProviderProtocolException("Empty response")
+        val declared = body.contentLength()
+        if (declared > maxResponseBytes) throw ProviderProtocolException("Response too large")
+        val buffer = okio.Buffer()
+        var remaining = maxResponseBytes + 1
+        val charset = runCatching { body.contentType()?.charset() }.getOrNull() ?: Charsets.UTF_8
+        body.source().use { source ->
+            while (remaining > 0) {
+                val read = source.read(buffer, remaining)
+                if (read == -1L) break
+                remaining -= read
+            }
+        }
+        if (buffer.size > maxResponseBytes) throw ProviderProtocolException("Response too large")
+        return buffer.readString(charset)
+    }
+
+    private suspend fun parseJson(body: String): JsonElement = withContext(cpuDispatcher) {
+        json.parseToJsonElement(body)
+    }
+
+    private suspend fun <T> withAdmission(key: String, block: suspend () -> T): T {
+        val scopeKey = key.substringBefore('\u0000')
+        val perScope = scopeSlots.computeIfAbsent(scopeKey) { Semaphore(perScopeLimit) }
+        return perScope.withPermit { globalSlot.withPermit { block() } }
+    }
+
+    private fun cacheKey(scope: String, url: String): String = scopeKey(scope) + url
+
+    private fun scopeKey(scope: String): String = scope + '\u0000'
+
+    private fun estimatedCacheSize(body: String): Long = body.length.toLong() * 2 + 96
+
+    private fun cached(key: String): CacheEntry? = synchronized(cacheLock) { cache[key] }
+
+    private fun store(key: String, entry: CacheEntry) {
+        if (entry.sizeBytes > maxCacheEntryBytes) return
+        synchronized(cacheLock) {
+            cache.put(key, entry)?.let { cacheBytes -= it.sizeBytes }
+            cacheBytes += entry.sizeBytes
+            val iterator = cache.entries.iterator()
+            while (iterator.hasNext() && (cacheBytes > cacheBudgetBytes || cache.size > MAX_CACHE_ENTRIES)) {
+                val eldest = iterator.next()
+                cacheBytes -= eldest.value.sizeBytes
+                iterator.remove()
+            }
+        }
+    }
+
+    /**
+     * Coalesces identical simultaneous requests. The shared call runs in the
+     * client's application scope: a canceled subscriber only detaches, and the
+     * call is canceled (and removed) once the last waiter is gone.
+     */
+    private suspend fun coalesced(key: String, block: suspend () -> Payload): Payload {
+        while (true) {
+            inFlight[key]?.let { return awaitShared(key, it) }
+            val entry = InFlight()
+            entry.job = requestScope.launch(start = CoroutineStart.LAZY) {
+                try {
+                    entry.deferred.complete(block())
+                } catch (error: CancellationException) {
+                    entry.deferred.cancel(error)
+                    throw error
+                } catch (error: Throwable) {
+                    entry.deferred.completeExceptionally(error)
+                } finally {
+                    inFlight.remove(key, entry)
+                }
+            }
+            if (inFlight.putIfAbsent(key, entry) != null) {
+                entry.job.cancel()
+                continue
+            }
+            entry.job.start()
+            return awaitShared(key, entry)
+        }
+    }
+
+    private suspend fun awaitShared(key: String, entry: InFlight): Payload {
+        entry.waiters.incrementAndGet()
+        try {
+            return entry.deferred.await()
+        } finally {
+            if (entry.waiters.decrementAndGet() <= 0) {
+                inFlight.remove(key, entry)
+                if (!entry.deferred.isCompleted) entry.job.cancel()
+            }
         }
     }
 
@@ -563,6 +789,18 @@ class HttpProviderClient(
     private companion object {
         const val STALE_LIMIT_MILLIS = 7L * 24 * 60 * 60 * 1000
         const val MAX_REDIRECTS = 3
+
+        /** Retained provider bodies across all providers; representation overhead included. */
+        const val DEFAULT_CACHE_BUDGET_BYTES = 8L * 1024 * 1024
+        const val DEFAULT_MAX_CACHE_ENTRY_BYTES = 2L * 1024 * 1024
+        const val MAX_CACHE_ENTRIES = 256
+
+        /** Hard ceiling for one response body, even without a usable Content-Length. */
+        const val DEFAULT_MAX_RESPONSE_BYTES = 8L * 1024 * 1024
+
+        const val DEFAULT_MAX_CONCURRENT_REQUESTS = 8
+        const val DEFAULT_MAX_CONCURRENT_PER_SCOPE = 3
+
         val QUALITY = Regex("(?:2160p|4k|1080p|720p|480p)", RegexOption.IGNORE_CASE)
     }
 }

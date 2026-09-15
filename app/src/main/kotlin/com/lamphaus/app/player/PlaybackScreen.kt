@@ -321,8 +321,10 @@ internal fun PlaybackScreen(
         onDispose { player.removeListener(listener) }
     }
 
-    LaunchedEffect(player) {
-        while (isActive && player != null) {
+    // Position also drives skip/next-episode prompts while chrome is hidden (QA-06).
+    LaunchedEffect(player, inPictureInPicture) {
+        if (player == null || inPictureInPicture) return@LaunchedEffect
+        while (isActive) {
             snapshot = player.snapshot()
             delay(500)
         }

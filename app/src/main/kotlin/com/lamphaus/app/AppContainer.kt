@@ -115,9 +115,15 @@ class AppContainer(context: Context) {
         database.dao(),
         AndroidKeystoreStringCipher(),
     )
-    val providerClient: ProviderClient = HttpProviderClient(
-        ProviderUrlPolicy(allowDebugLocalhost = BuildConfig.DEBUG),
-    )
+    val providerClient: ProviderClient = if (BuildConfig.BENCHMARK_FIXTURES) {
+        // Benchmark fixtures never touch the network; the deterministic local
+        // catalog keeps Home/search/playback timings reproducible (PERF-02).
+        FixtureProviderClient()
+    } else {
+        HttpProviderClient(
+            ProviderUrlPolicy(allowDebugLocalhost = BuildConfig.DEBUG),
+        )
+    }
     val providerAggregator = ProviderAggregator(providerClient)
 
     /**

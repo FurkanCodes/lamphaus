@@ -58,4 +58,5 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
 }

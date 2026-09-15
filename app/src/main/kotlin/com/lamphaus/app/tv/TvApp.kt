@@ -133,6 +133,7 @@ import androidx.tv.material3.Text
 import androidx.tv.material3.Switch
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.R
+import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.LocalArtworkResolver
@@ -251,9 +252,28 @@ fun TvApp(
                 viewModel.configurationLaunchHandled()
             }
         }
-        // Usable-content signal: Home/pairing content, never a splash (plan §7).
+        // Usable-content signal: Home/pairing content or an actionable
+        // empty/error state, never a loading placeholder (plan §7/PERF-02).
+        LaunchedEffect(Unit) {
+            PerfTrace.beginStartupSpan()
+        }
+        LaunchedEffect(state.account, state.initialContentLoading) {
+            val ready = state.account != AccountState.Loading &&
+                (state.account !is AccountState.SignedIn || !state.initialContentLoading)
+            if (ready) {
+                PerfTrace.mark(
+                    if (state.account is AccountState.SignedIn) {
+                        PerfTrace.STARTUP_USABLE_CONTENT
+                    } else {
+                        PerfTrace.STARTUP_SETTLED
+                    },
+                )
+                PerfTrace.endStartupSpan()
+            }
+        }
         androidx.activity.compose.ReportDrawnWhen {
-            state.account != AccountState.Loading
+            state.account != AccountState.Loading &&
+                (state.account !is AccountState.SignedIn || !state.initialContentLoading)
         }
         Surface(
             modifier = Modifier.fillMaxSize(),

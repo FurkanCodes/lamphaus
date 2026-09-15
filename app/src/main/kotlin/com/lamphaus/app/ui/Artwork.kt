@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,9 +93,16 @@ fun MediaArtwork(
     preferBackdrop: Boolean = false,
 ) {
     val resolver = LocalArtworkResolver.current
-    val resolution = resolver.resolve(media)
+    // PERF-07: artwork resolution allocates a copied model and parses
+    // provider references. Remember it per (media, resolver) so scrolling rows
+    // and hero crossfades do not redo that work on every recomposition; the
+    // resolver instance changes only when overrides change.
+    val resolution = remember(media, resolver) { resolver.resolve(media) }
     val resolvedMedia = resolution.media
-    val local = if (resolver.hasOverrideFor(media, preferBackdrop)) {
+    val hasOverride = remember(media, resolver, preferBackdrop) {
+        resolver.hasOverrideFor(media, preferBackdrop)
+    }
+    val local = if (hasOverride) {
         null
     } else {
         fixtureArtworkResource(media)
