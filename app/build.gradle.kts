@@ -203,10 +203,17 @@ androidComponents {
             target.apply {
                 applicationIdSuffix = ".benchmark"
                 versionNameSuffix = "-benchmark"
-                // Baseline Profile output must retain source class names so it
-                // can be rewritten for each independently obfuscated release.
-                isMinifyEnabled = false
-                isShrinkResources = isMinifyEnabled
+                // PERF-01: measurement must mirror the optimized production
+                // artifact. `benchmarkRelease` (the timing target) keeps the
+                // release R8/resource shrinking; only the profile-generation
+                // target stays non-minified so its rules retain source class
+                // names and can be rewritten per obfuscated release. The
+                // baseline-profile plugin keeps both synthetic types
+                // non-debuggable and profileable for instrumentation.
+                if (target.name == "nonMinifiedRelease") {
+                    isMinifyEnabled = false
+                    isShrinkResources = false
+                }
                 buildConfigField("boolean", "BENCHMARK_FIXTURES", "true")
                 buildConfigField("boolean", "CLOUD_CONFIGURED", "false")
                 buildConfigField("boolean", "UPDATES_ENABLED", "false")

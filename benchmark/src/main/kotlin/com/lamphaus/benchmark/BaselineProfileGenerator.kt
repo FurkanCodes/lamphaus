@@ -137,10 +137,22 @@ class BaselineProfileGenerator {
         device.pressDPadDown()
         device.waitForIdle()
         device.pressDPadCenter()
+        check(device.wait(Until.hasObject(By.text("Play")), 10_000)) { "TV details did not open" }
         device.waitForIdle()
-        // Return restores the originating item and row (TV-NAV-07).
+        // Details opens with the primary action focused (TV-CNT-01); pressing
+        // Select must actually start the fixture clip, not just open a pane.
+        device.pressDPadCenter()
+        check(device.wait(Until.hasObject(By.desc("Pause")), 15_000)) { "Local clip did not start playing" }
+        device.waitForIdle()
+        // Return restores the originating item and row (TV-NAV-07); playback
+        // Back can first dismiss its controls.
         device.pressBack()
         device.waitForIdle()
+        if (!device.hasObject(By.text("Play"))) {
+            device.pressBack()
+            device.waitForIdle()
+        }
+        check(device.wait(Until.hasObject(By.text("Play")), 10_000)) { "Playback did not return to details" }
     }
 
     private fun requireFormFactor(leanback: Boolean) {

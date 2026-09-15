@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.AppContainer
+import com.lamphaus.app.FixtureProviderClient
 import com.lamphaus.core.data.repository.reconcileLibrary
 import com.lamphaus.core.data.repository.reconcileProgress
 import com.lamphaus.core.data.perf.PerfTrace
@@ -2368,6 +2369,17 @@ class AppViewModel(
             PreviewMedia.items.forEach { media ->
                 container.libraryRepository.saveLibrary(LibraryEntry(profile.id, media.stableKey, media, now, now))
             }
+            // A fixture provider makes Home/search/playback journeys exercise
+            // the real catalog pipeline without network or account data.
+            container.libraryRepository.saveProvider(
+                ProviderSubscription(
+                    id = FixtureProviderClient.PROVIDER_ID,
+                    manifestUrl = FixtureProviderClient.FIXTURE_MANIFEST_URL,
+                    displayName = "Local fixture",
+                    sortOrder = 0,
+                    updatedAtEpochMillis = now,
+                ),
+            )
         }
         (state.value.account as? AccountState.SignedIn)?.userId?.let { container.cloudSyncGateway.saveProfile(it, profile) }
         container.preferences.setActiveProfile(profile.id)
