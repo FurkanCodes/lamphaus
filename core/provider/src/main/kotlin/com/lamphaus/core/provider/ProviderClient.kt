@@ -39,4 +39,10 @@ interface ProviderClient {
         id: String,
         extras: Map<String, String> = emptyMap(),
     ): ProviderResult<List<SubtitleTrack>>
+
+    /**
+     * Drops provider-scoped cached bodies after a configuration or account
+     * change (PERF-04). Implementations without a cache may ignore this.
+     */
+    fun invalidateProvider(manifestUrl: String) = Unit
 }
