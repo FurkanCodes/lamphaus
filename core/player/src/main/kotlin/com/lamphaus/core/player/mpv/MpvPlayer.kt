@@ -183,8 +183,15 @@ class MpvPlayer(
      * [SubtitleStyle.preserveEmbeddedStyles] the libass authoring wins and
      * only timing/delay apply; otherwise mpv's style properties override.
      */
-    fun applySubtitleStyle(style: com.lamphaus.core.model.SubtitleStyle) {
+    fun applySubtitleStyle(style: com.lamphaus.core.model.SubtitleStyle, liftFraction: Float = 0f) {
         val overrideEmbedded = !style.preserveEmbeddedStyles
+        // The chrome lift must hold even while embedded ASS authoring wins, so it
+        // is applied before the override early-return (PLY-IMM-03).
+        MpvLibrary.setPropertyString(
+            handle,
+            "sub-margin-y",
+            "${(liftFraction.coerceIn(0f, 1f) * 100).toInt()}%",
+        )
         MpvLibrary.setPropertyString(handle, "sub-ass-override", if (overrideEmbedded) "yes" else "no")
         if (!overrideEmbedded) return
         fun color(argb: Long, opacity: Float): String {

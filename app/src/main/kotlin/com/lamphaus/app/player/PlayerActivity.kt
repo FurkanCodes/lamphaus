@@ -220,6 +220,7 @@ class PlayerActivity : ComponentActivity() {
                     onSubtitleDelay = ::applySubtitleDelay,
                     onAudioDelay = ::updateAudioRouteDelay,
                     onSubtitleStyle = ::applySubtitleStyle,
+                    onSubtitleLiftChanged = ::applySubtitleLift,
                     onLoadSidecarCues = ::loadSidecarCues,
                     onApplySyncByLine = ::applySyncByLine,
                     onControlsVisibilityChanged = { visible ->
@@ -788,6 +789,29 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Lifts MPV subtitles above the chrome (and restores them) without touching
+     * the persisted style. Media3 lifts through the PlayerView in [PlaybackScreen].
+     */
+    private fun applySubtitleLift(liftFraction: Float) {
+        controller?.sendCustomCommand(
+            androidx.media3.session.SessionCommand(
+                ACTION_APPLY_SUBTITLE_STYLE,
+                android.os.Bundle().apply {
+                    putString(
+                        EXTRA_STYLE_JSON,
+                        JSON.encodeToString(
+                            com.lamphaus.core.model.SubtitleStyle.serializer(),
+                            subtitleStyleState.value,
+                        ),
+                    )
+                    putFloat(EXTRA_LIFT_FRACTION, liftFraction)
+                },
+            ),
+            android.os.Bundle.EMPTY,
+        )
+    }
+
     /** Applies and remembers the delay for the current route (audio panel entry point). */
     fun updateAudioRouteDelay(millis: Long) {
         audioDelayState.value = millis
@@ -888,6 +912,7 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_DELAY_MILLIS = "delay_millis"
         private const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"
         private const val EXTRA_STYLE_JSON = "style_json"
+        private const val EXTRA_LIFT_FRACTION = "lift_fraction"
         private val JSON = Json { ignoreUnknownKeys = true }
 
         fun intent(context: Context, request: PlaybackRequest): Intent =

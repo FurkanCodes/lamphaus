@@ -18,6 +18,7 @@ release gate: run this list on the target hardware before shipping.
 - [x] Subtitle sidecar parsing (SRT/VTT/TTML/ASS) and charset detection — `SubtitleCuesTest`
 - [x] Supabase playback preference tables with owner RLS — migration `20260903220000` applied
 - [x] Emulator smoke: catalog → detail → source picker → player service → decoder-failure error surface, zero crashes
+- [x] Icon-only chrome tokens, lock layer, gesture math, and shared subtitle lift — `PlayerGesturePolicyTest` (`PLY-CHR-01`…`PLY-CHR-06`)
 
 ## Manual device matrix (release gate)
 
@@ -50,6 +51,11 @@ release gate: run this list on the target hardware before shipping.
 - [ ] No repeated Media3↔MPV bouncing on a persistently failing item
 
 ### System
+- [ ] Lock mode: unlock chip reachable by touch and TalkBack, Back unwinds the lock layer, video taps ignored
+- [ ] Brightness/volume rails on landscape and wide windows only, inset past gesture edges, range semantics read by TalkBack
+- [ ] Gestures: double-tap ±10s, drag-to-scrub, vertical brightness/volume; all disabled while locked and in PiP
+- [ ] Subtitle lift on both engines (Media3 and MPV) while the chrome is visible, and restored when it hides
+- [ ] TV icon-only row: focused label appears for every control, D-pad traversal unchanged
 - [ ] Media session: lock-screen controls, notification actions, PiP transport (mobile)
 - [ ] Back unwinding: editor → submenu → controls → exit with focus restored (TV)
 - [ ] Process recreation during playback restores position and state
