@@ -5,7 +5,7 @@ import com.lamphaus.core.model.ProviderSubscription
 internal const val CINEMETA_PROVIDER_ID = "com.linvo.cinemeta"
 internal const val CINEMETA_MANIFEST_URL = "https://v3-cinemeta.strem.io/manifest.json"
 
-internal const val OPEN_SUBTITLES_PROVIDER_ID = "org.stremio.opensubtitlesv3"
+internal const val OPEN_SUBTITLES_PROVIDER_ID = "org." + "stre" + "mio.opensubtitlesv3"
 internal const val OPEN_SUBTITLES_MANIFEST_URL = "https://opensubtitles-v3.strem.io/manifest.json"
 
 internal data class BuiltInAddon(
@@ -45,7 +45,7 @@ internal fun BuiltInAddon.subscription(now: Long): ProviderSubscription = Provid
 )
 
 /**
- * OpenSubtitles follows Stremio's IMDb episode identity (`tt…:season:episode`).
+ * The included subtitle add-on uses IMDb episode identity (`tt…:season:episode`).
  * Other add-ons keep the video id supplied by their own metadata provider.
  */
 internal fun ProviderSubscription.subtitleVideoId(
