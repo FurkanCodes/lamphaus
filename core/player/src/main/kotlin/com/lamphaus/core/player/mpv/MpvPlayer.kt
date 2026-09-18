@@ -4,12 +4,14 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Surface
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
+import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
@@ -59,6 +61,8 @@ class MpvPlayer(
     @Volatile private var endFileErrorCode = 0
     @Volatile private var videoWidth = 0
     @Volatile private var videoHeight = 0
+    @Volatile private var containerFrameRate = 0f
+    @Volatile private var estimatedFrameRate = 0f
     @Volatile private var tracksSnapshot: Tracks = Tracks.EMPTY
     @Volatile private var selectedAudioId: String? = null
     @Volatile private var selectedSubtitleId: String? = null
@@ -70,7 +74,7 @@ class MpvPlayer(
         listOf(
             "time-pos", "duration", "pause", "speed", "eof-reached", "seeking",
             "paused-for-cache", "track-list", "video-params/w", "video-params/h",
-            "aid", "sid",
+            "container-fps", "estimated-vf-fps", "aid", "sid",
         ),
     )
     private var eventThread: Thread? = null
@@ -123,6 +127,11 @@ class MpvPlayer(
         }
         fileLoaded = false
         eofReached = false
+        videoWidth = 0
+        videoHeight = 0
+        containerFrameRate = 0f
+        estimatedFrameRate = 0f
+        tracksSnapshot = Tracks.EMPTY
         mediaItem = item
         MpvLibrary.command(handle, args)
         invalidateState()
@@ -444,46 +453,60 @@ class MpvPlayer(
         MpvLibrary.getPropertyString(handle, "paused-for-cache")?.let { pausedForCache = it == "yes" }
         MpvLibrary.getPropertyString(handle, "video-params/w")?.toIntOrNull()?.let { videoWidth = it }
         MpvLibrary.getPropertyString(handle, "video-params/h")?.toIntOrNull()?.let { videoHeight = it }
+        containerFrameRate = MpvLibrary.getPropertyString(handle, "container-fps")
+            .validFrameRateOrZero()
+        estimatedFrameRate = MpvLibrary.getPropertyString(handle, "estimated-vf-fps")
+            .validFrameRateOrZero()
         MpvLibrary.getPropertyString(handle, "aid")?.let { if (it != "no") selectedAudioId = it }
         MpvLibrary.getPropertyString(handle, "sid")?.let { selectedSubtitleId = if (it == "no") null else it }
         refreshTracks()
     }
 
     private fun refreshTracks() {
-        val raw = MpvLibrary.getPropertyString(handle, "track-list") ?: return
-        try {
-            val array = JSONArray(raw)
-            val groups = mutableListOf<androidx.media3.common.Tracks.Group>()
-            for (i in 0 until array.length()) {
-                val entry = array.optJSONObject(i) ?: continue
-                val type = entry.optString("type")
-                if (type != "audio" && type != "sub") continue
-                val id = entry.optInt("id").toString()
-                val selected = entry.optBoolean("selected")
-                val language = entry.optString("lang").takeIf(String::isNotEmpty)
-                val label = entry.optString("title").takeIf(String::isNotEmpty)
-                val format = androidx.media3.common.Format.Builder()
-                    .setId("${type}_$id")
-                    .setLabel(label)
-                    .setLanguage(language)
-                    .setSampleMimeType(if (type == "audio") "audio/mp4a-latm" else "text/x-ssa")
-                    .setChannelCount(entry.optInt("demux-channel-count", if (type == "audio") 2 else 0))
-                    .build()
-                val group = androidx.media3.common.TrackGroup(format).copyWithId("$type-$id")
-                groups += androidx.media3.common.Tracks.Group(
-                    group,
-                    /* isAdaptive = */ false,
-                    intArrayOf(C.FORMAT_HANDLED),
-                    booleanArrayOf(selected),
-                )
+        val groups = mutableListOf<Tracks.Group>()
+        MpvLibrary.getPropertyString(handle, "track-list")?.let { raw ->
+            runCatching {
+                val array = JSONArray(raw)
+                for (i in 0 until array.length()) {
+                    val entry = array.optJSONObject(i) ?: continue
+                    val type = entry.optString("type")
+                    if (type != "audio" && type != "sub") continue
+                    val id = entry.optInt("id").toString()
+                    val selected = entry.optBoolean("selected")
+                    val language = entry.optString("lang").takeIf(String::isNotEmpty)
+                    val label = entry.optString("title").takeIf(String::isNotEmpty)
+                    val format = Format.Builder()
+                        .setId("${type}_$id")
+                        .setLabel(label)
+                        .setLanguage(language)
+                        .setSampleMimeType(if (type == "audio") "audio/mp4a-latm" else "text/x-ssa")
+                        .setChannelCount(entry.optInt("demux-channel-count", if (type == "audio") 2 else 0))
+                        .build()
+                    val group = TrackGroup(format).copyWithId("$type-$id")
+                    groups += Tracks.Group(
+                        group,
+                        /* isAdaptive = */ false,
+                        intArrayOf(C.FORMAT_HANDLED),
+                        booleanArrayOf(selected),
+                    )
+                }
             }
-            if (groups.isNotEmpty()) tracksSnapshot = androidx.media3.common.Tracks(groups)
-        } catch (_: Exception) {
-            // Track list stays at its last good snapshot; never crashes the session.
         }
+        mpvVideoFormat(videoWidth, videoHeight, containerFrameRate, estimatedFrameRate)?.let { format ->
+            groups += Tracks.Group(
+                TrackGroup(format).copyWithId("video-current"),
+                /* isAdaptive = */ false,
+                intArrayOf(C.FORMAT_HANDLED),
+                booleanArrayOf(true),
+            )
+        }
+        tracksSnapshot = Tracks(groups)
     }
 
     private fun Double.secondsToMillis(): Long = (this * 1000).toLong()
+
+    private fun String?.validFrameRateOrZero(): Float =
+        this?.toFloatOrNull()?.takeIf { it.isFinite() && it > 0f } ?: 0f
 
     private companion object {
         const val EVENT_NONE = 0
@@ -493,4 +516,24 @@ class MpvPlayer(
         const val END_FILE_EOF = 4
 
     }
+}
+
+/** Selected MPV output format exposed through Media3's track contract (QA-06). */
+internal fun mpvVideoFormat(
+    width: Int,
+    height: Int,
+    containerFrameRate: Float,
+    estimatedFrameRate: Float,
+): Format? {
+    if (width <= 0 || height <= 0) return null
+    val frameRate = estimatedFrameRate.takeIf { it.isFinite() && it > 0f }
+        ?: containerFrameRate.takeIf { it.isFinite() && it > 0f }
+        ?: Format.NO_VALUE.toFloat()
+    return Format.Builder()
+        .setId("mpv-video-current")
+        .setSampleMimeType("video/x-unknown")
+        .setWidth(width)
+        .setHeight(height)
+        .setFrameRate(frameRate)
+        .build()
 }

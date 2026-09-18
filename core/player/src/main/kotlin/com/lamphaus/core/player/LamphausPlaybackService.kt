@@ -28,6 +28,10 @@ class LamphausPlaybackService : MediaSessionService() {
             .setCallback(sessionCallback)
             .build()
         PlaybackEngineFallback.install(mediaSession!!) { state ->
+            // The session now exposes MPV's Media3-compatible state. Drop the
+            // failed ExoPlayer snapshot so callers use MPV's selected video
+            // format (including its observed frame rate) instead.
+            Media3EngineFactory.sessionPlayer = null
             // Diagnostics record only the engine switch, never the source (SHR-PROD-06).
             android.util.Log.i("LamphausPlayback", "engine fallback: ${state.fallbackReason}")
         }

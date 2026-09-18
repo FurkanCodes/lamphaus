@@ -17,6 +17,7 @@ class PlaybackDisplayModeController internal constructor(
     private val output: PlaybackDisplayHost,
     private val configProvider: () -> DevicePlaybackConfig,
     private val onModeDecision: (DisplayModeDecision) -> Unit = {},
+    private val surfaceFrameRateHost: PlaybackSurfaceFrameRateHost = NoOpPlaybackSurfaceFrameRateHost,
 ) {
     data class DisplayModeDecision(val appliedMode: DisplayModeCandidate?, val reason: DisplayModeReason)
 
@@ -30,11 +31,12 @@ class PlaybackDisplayModeController internal constructor(
         REQUESTED(R.string.playback_display_requested),
     }
 
-    constructor(
+    internal constructor(
         activity: Activity,
         configProvider: () -> DevicePlaybackConfig,
         onModeDecision: (DisplayModeDecision) -> Unit = {},
-    ) : this(AndroidPlaybackDisplayHost(activity), configProvider, onModeDecision)
+        surfaceFrameRateHost: PlaybackSurfaceFrameRateHost = NoOpPlaybackSurfaceFrameRateHost,
+    ) : this(AndroidPlaybackDisplayHost(activity), configProvider, onModeDecision, surfaceFrameRateHost)
 
     // Zero means system-managed; restoring the observed physical ID would pin the window.
     private val originalPreferredModeId = output.preferredModeId
@@ -58,18 +60,18 @@ class PlaybackDisplayModeController internal constructor(
 
     /** Called on the main thread while playback is active. */
     fun tick(deltaMillis: Long) {
-        val currentMode = output.currentMode ?: return
         val config = configProvider()
         val settings = config.frameRateMatching to config.resolutionMatching
         if (matchingConfig != settings) {
-            if (matchingConfig != null) restoreWindowPreference()
+            if (matchingConfig != null) restoreOutputPreferences()
             matchingConfig = settings
             evaluated = false
             stableMillis = 0L
         }
+        val currentMode = output.currentMode
         requestedMode?.let { requested ->
             requestMillis += deltaMillis
-            if (currentMode.id == requested.id) {
+            if (currentMode?.id == requested.id) {
                 onModeDecision(DisplayModeDecision(requested.candidate, DisplayModeReason.MATCHED))
                 requestedMode = null
             } else if (requestMillis >= SWITCH_TIMEOUT_MILLIS) {
@@ -84,10 +86,16 @@ class PlaybackDisplayModeController internal constructor(
         stableMillis += deltaMillis
         if (stableMillis < STABILITY_MILLIS) return
         evaluated = true
+        if (settings.first == FrameRateMatching.ALWAYS && frameRate > 0f) {
+            surfaceFrameRateHost.requestFrameRate(frameRate)
+        } else {
+            surfaceFrameRateHost.clearFrameRate()
+        }
         if (settings.first == FrameRateMatching.OFF && settings.second == ResolutionMatching.OFF) {
             onModeDecision(DisplayModeDecision(null, DisplayModeReason.OFF))
             return
         }
+        if (currentMode == null) return
         val current = currentMode.candidate
         val alternatives = currentMode.alternativeRefreshRates
         // Filter before ranking so an unavailable seamless choice cannot hide a valid one.
@@ -130,9 +138,14 @@ class PlaybackDisplayModeController internal constructor(
         requestMillis = 0L
     }
 
+    private fun restoreOutputPreferences() {
+        restoreWindowPreference()
+        surfaceFrameRateHost.clearFrameRate()
+    }
+
     /** Restores system policy and clears the previous source on end, failure, or replacement. */
     fun restore() {
-        restoreWindowPreference()
+        restoreOutputPreferences()
         pendingFormat = null
         evaluated = false
         stableMillis = 0L
@@ -156,6 +169,16 @@ internal interface PlaybackDisplayHost {
     val currentMode: PlaybackOutputMode?
     val supportedModes: List<PlaybackOutputMode>
     var preferredModeId: Int
+}
+
+internal interface PlaybackSurfaceFrameRateHost {
+    fun requestFrameRate(frameRateHz: Float)
+    fun clearFrameRate()
+}
+
+private object NoOpPlaybackSurfaceFrameRateHost : PlaybackSurfaceFrameRateHost {
+    override fun requestFrameRate(frameRateHz: Float) = Unit
+    override fun clearFrameRate() = Unit
 }
 
 private class AndroidPlaybackDisplayHost(private val activity: Activity) : PlaybackDisplayHost {
