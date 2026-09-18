@@ -26,11 +26,14 @@ internal class AndroidPlaybackSurfaceFrameRateHost : PlaybackSurfaceFrameRateHos
     }
 
     override fun requestFrameRate(frameRateHz: Float) {
-        requestedFrameRateHz = frameRateHz.takeIf { it.isFinite() && it > 0f } ?: 0f
+        val nextRate = frameRateHz.takeIf { it.isFinite() && it > 0f } ?: 0f
+        if (sameFrameRate(requestedFrameRateHz, nextRate)) return
+        requestedFrameRateHz = nextRate
         holder?.surface?.let { applyFrameRate(it, requestedFrameRateHz) }
     }
 
     override fun clearFrameRate() {
+        if (requestedFrameRateHz == 0f) return
         requestedFrameRateHz = 0f
         holder?.surface?.let { applyFrameRate(it, 0f) }
     }
@@ -56,6 +59,9 @@ internal class AndroidPlaybackSurfaceFrameRateHost : PlaybackSurfaceFrameRateHos
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> applyFrameRateApi30(surface, frameRateHz)
         }
     }
+
+    private fun sameFrameRate(first: Float, second: Float): Boolean =
+        kotlin.math.abs(first - second) < 0.01f
 
     @RequiresApi(Build.VERSION_CODES.S)
     private fun applyFrameRateApi31(surface: Surface, frameRateHz: Float) {

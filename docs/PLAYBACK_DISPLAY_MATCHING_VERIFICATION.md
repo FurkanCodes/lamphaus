@@ -1,12 +1,12 @@
 # Playback display matching verification
 
-Scope: playback / TV output selection, explicit surface frame-rate voting, and
-MPV video-cadence reporting. Audio processors, routing, passthrough, track
+Scope: playback / TV output selection, HDR-capable Media3 surfaces and modes,
+explicit surface frame-rate voting, and MPV video-cadence reporting. Audio processors, routing, passthrough, track
 defaults, buffering, and audio timing are unchanged.
 
 Rules: SHR-PROD-07 (localized status messages), SHR-ARC-03 and SHR-ARC-15 (testable platform boundary), SHR-ARC-10 and
 PLY-IMM-04 (source/lifecycle continuity), QA-01, QA-06, QA-07.
-Development is isolated on `codex/playback-frame-rate-matching` from current main (REL-01).
+Development is isolated on `codex/exoplayer-hdr-frame-rate-stability` from current main (REL-01).
 This is a source fix, not a release or production artifact.
 
 ## Automated coverage
@@ -17,7 +17,9 @@ This is a source fix, not a release or production artifact.
   23.976 versus 24, 29.97 versus 30, 59.94 versus 60, insufficient samples,
   source resets and discontinuities.
 - `PlaybackDisplayModeControllerTest`: format stability, startup waiting for a
-  measured cadence, subsequent renditions, confirmed versus refused physical
+  measured cadence, one output decision per media item, cadence-estimator jitter,
+  HDR-safe mode filtering on Android 14+, conservative HDR behavior on older Android,
+  confirmed versus refused physical
   switches, settings changes, original window preference restoration, seamless
   alternatives, independent resolution opt-in, explicit Always surface votes,
   and surface-vote restoration.
@@ -25,6 +27,8 @@ This is a source fix, not a release or production artifact.
   metadata loading surface without exposing playback chrome (`TV-CNT-02`).
 - `Media3EngineFactoryTest`: Media3 votes only for Seamless-only; Always disables
   Media3 voting so the activity's non-seamless surface request is authoritative.
+- `PlaybackHdrTypeTest`: Dolby Vision, HDR10/PQ, HLG, and SDR active-format
+  classification before output-mode selection.
 - `MpvVideoFormatTest`: estimated MPV cadence, container-cadence fallback,
   unknown cadence, and invalid-dimension handling.
 
@@ -36,8 +40,11 @@ rtk ./gradlew :core:player:lintDebug :app:lintDebug --max-workers=2
 rtk ./scripts/check-neutrality.sh
 ```
 
-Result (2026-09-18): passed with zero test failures; Android debug compilation,
+Result (2026-09-19): passed with zero unit-test failures; Android debug compilation,
 core/player lint, app lint, provider-neutrality, and `git diff --check` passed.
+The named `TV-CNT-02` loading test passed on the API 36 TV emulator. The unrelated
+mobile landscape side-pane test does not settle on that TV-only emulator and remains
+part of the mobile-device matrix.
 
 ## Required physical TV checks (not performed)
 
@@ -68,6 +75,10 @@ proven by these tests.
    visible non-seamless switch, Seamless-only never does, both restore on stop,
    and a forced MPV fallback selects the expected output cadence. Record the TV,
    receiver, Android version, source cadence, and observed HDMI output mode.
+7. **QA-06 HDR matrix**: use HDR10, HDR10+, HLG, Dolby Vision profile 5/8, and
+   Dolby Vision profile 7 fallback samples on a named physical TV. Confirm the
+   TV's HDR indicator, active HDMI signal, decoder choice, highlights, and black
+   levels before and after the single startup cadence switch.
 
 Android may decline a mode request based on hardware or system policy. Android
 12+ uses `CHANGE_FRAME_RATE_ALWAYS`; Android 11 has no such strategy argument and
@@ -76,6 +87,11 @@ remains active. Missing Media3 FPS requires 60 video intervals before estimation
 Those frames are decoded silently behind the loading surface, and the movie is
 revealed only after the output decision settles. MPV uses its estimated cadence
 with container cadence as fallback. Known metadata is matched while paused, so
-it adds no warm-up. No audio delay is added by either path.
+it adds no warm-up. After that decision, adaptive rendition and estimator changes
+cannot trigger another physical switch for the same item. Media3 is required to
+render through `SurfaceView`, its HDR-preserving output path. Android 14+ matching
+filters candidates using per-mode HDR capabilities; earlier versions keep the
+current physical mode for HDR and rely on the surface frame-rate vote because they
+do not expose reliable per-mode HDR data. No audio delay is added by either path.
 
 Reference: https://developer.android.com/media/optimize/performance/frame-rate

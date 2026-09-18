@@ -396,5 +396,6 @@
     <string name="playback_display_no_seamless_mode">current mode retained; no better seamless mode</string>
     <string name="playback_display_no_better_mode">current mode retained; no better supported mode</string>
     <string name="playback_display_requested">display mode switch requested</string>
+    <string name="playback_display_hdr_unavailable">current mode retained; no HDR-capable output mode</string>
     <string name="playback_display_current">current display mode</string>
 </resources>

@@ -5,6 +5,7 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.view.View
 import android.view.ViewGroup
+import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -621,6 +622,9 @@ internal fun PlaybackScreen(
         AndroidView(
             factory = { context ->
                 PlayerView(context).apply {
+                    check(videoSurfaceView is SurfaceView) {
+                        "Playback must use SurfaceView so Media3 can preserve HDR and frame timing"
+                    }
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     useController = false
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT

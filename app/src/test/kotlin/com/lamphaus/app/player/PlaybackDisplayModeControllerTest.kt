@@ -30,7 +30,7 @@ class PlaybackDisplayModeControllerTest {
         controller.tick(1_999)
         assertNull(surface.requestedFrameRate)
         controller.tick(1)
-        assertEquals(23.976f, surface.requestedFrameRate)
+        assertEquals(23.976f, surface.requestedFrameRate!!, 0.001f)
     }
 
     @Test
@@ -97,14 +97,93 @@ class PlaybackDisplayModeControllerTest {
     }
 
     @Test
-    fun `QA-06 evaluates a new rendition after the first switch`() {
+    fun `QA-06 locks output after the first switch for the entire media item`() {
         controller.onVideoFormat(1920, 1080, 24f)
         controller.tick(2000)
         output.currentMode = hd24
         controller.tick(500)
         controller.onVideoFormat(3840, 2160, 24f)
         controller.tick(2000)
-        assertEquals(uhd24.id, output.preferredModeId)
+        assertEquals(hd24.id, output.preferredModeId)
+        assertEquals(1, output.preferredModeSetCount)
+    }
+
+    @Test
+    fun `QA-06 cadence jitter does not restart matching or repeat the surface vote`() {
+        controller.onVideoFormat(1920, 1080, 23.976f)
+        controller.tick(1_000)
+        controller.onVideoFormat(1920, 1080, 23.978f)
+        controller.tick(1_000)
+        output.currentMode = hd24
+        controller.tick(500)
+
+        repeat(10) { index ->
+            controller.onVideoFormat(1920, 1080, 23.976f + (index % 3) * 0.001f)
+            controller.tick(500)
+        }
+
+        assertEquals(1, output.preferredModeSetCount)
+        assertEquals(1, surface.requestCount)
+    }
+
+    @Test
+    fun `QA-06 HDR matching never selects an SDR-only display mode`() {
+        val sdrHd24 = PlaybackOutputMode(30, hd24.candidate)
+        val hdrHd24 = PlaybackOutputMode(
+            31,
+            hd24.candidate,
+            supportedHdrTypes = setOf(PlaybackHdrType.HDR10),
+        )
+        val hdrOutput = FakeDisplayHost(uhd60, listOf(uhd60, sdrHd24, hdrHd24))
+        val matcher = PlaybackDisplayModeController(hdrOutput, { config })
+
+        matcher.onVideoFormat(1920, 1080, 24f, PlaybackHdrType.HDR10)
+        matcher.tick(2_000)
+
+        assertEquals(hdrHd24.id, hdrOutput.preferredModeId)
+    }
+
+    @Test
+    fun `QA-06 HDR can select an equivalent HDR mode when cadence matching is off`() {
+        config = config.copy(
+            frameRateMatching = FrameRateMatching.OFF,
+            resolutionMatching = ResolutionMatching.OFF,
+        )
+        val hdrUhd60 = PlaybackOutputMode(
+            40,
+            uhd60.candidate,
+            supportedHdrTypes = setOf(PlaybackHdrType.HDR10),
+        )
+        val hdrOutput = FakeDisplayHost(uhd60, listOf(uhd60, hdrUhd60))
+        val matcher = PlaybackDisplayModeController(hdrOutput, { config })
+
+        matcher.onVideoFormat(3840, 2160, 60f, PlaybackHdrType.HDR10)
+        matcher.tick(2_000)
+
+        assertEquals(hdrUhd60.id, hdrOutput.preferredModeId)
+    }
+
+    @Test
+    fun `QA-06 HDR keeps the current mode when per-mode capability data is unavailable`() {
+        val legacyHdrCurrent = PlaybackOutputMode(
+            id = 50,
+            candidate = uhd60.candidate,
+            supportedHdrTypes = setOf(PlaybackHdrType.HDR10),
+            hdrTypesAreModeSpecific = false,
+        )
+        val legacyHdr24 = PlaybackOutputMode(
+            id = 51,
+            candidate = uhd24.candidate,
+            supportedHdrTypes = setOf(PlaybackHdrType.HDR10),
+            hdrTypesAreModeSpecific = false,
+        )
+        val hdrOutput = FakeDisplayHost(legacyHdrCurrent, listOf(legacyHdrCurrent, legacyHdr24))
+        val matcher = PlaybackDisplayModeController(hdrOutput, { config })
+
+        matcher.onVideoFormat(3840, 2160, 24f, PlaybackHdrType.HDR10)
+        matcher.tick(2_000)
+
+        assertEquals(0, hdrOutput.preferredModeId)
     }
 
     @Test
@@ -173,14 +252,24 @@ class PlaybackDisplayModeControllerTest {
     private class FakeDisplayHost(
         override var currentMode: PlaybackOutputMode?,
         override val supportedModes: List<PlaybackOutputMode>,
-        override var preferredModeId: Int = 0,
-    ) : PlaybackDisplayHost
+        initialPreferredModeId: Int = 0,
+    ) : PlaybackDisplayHost {
+        var preferredModeSetCount = 0
+            private set
+        override var preferredModeId: Int = initialPreferredModeId
+            set(value) {
+                field = value
+                preferredModeSetCount++
+            }
+    }
 
     private class FakeSurfaceFrameRateHost : PlaybackSurfaceFrameRateHost {
         var requestedFrameRate: Float? = null
+        var requestCount: Int = 0
 
         override fun requestFrameRate(frameRateHz: Float) {
             requestedFrameRate = frameRateHz
+            requestCount++
         }
 
         override fun clearFrameRate() {

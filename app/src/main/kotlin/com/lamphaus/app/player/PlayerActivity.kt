@@ -26,6 +26,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import coil3.SingletonImageLoader
@@ -786,7 +788,7 @@ class PlayerActivity : ComponentActivity() {
         val height = format?.height?.takeIf { it > 0 } ?: size.height
         val frameRate = format?.frameRate?.takeIf { it.isFinite() && it > 0f }
             ?: Media3EngineFactory.estimatedVideoFrameRate()
-        matcher.onVideoFormat(width, height, frameRate)
+        matcher.onVideoFormat(width, height, frameRate, format?.playbackHdrType())
     }
 
     /**
@@ -1073,6 +1075,14 @@ class PlayerActivity : ComponentActivity() {
         fun intent(context: Context, request: PlaybackRequest): Intent =
             Intent(context, PlayerActivity::class.java).putExtra(EXTRA_REQUEST, JSON.encodeToString(request))
     }
+}
+
+/** Maps Media3's active decoder format to the HDR capability the output mode must retain. */
+internal fun Format.playbackHdrType(): PlaybackHdrType? = when {
+    sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION -> PlaybackHdrType.DOLBY_VISION
+    colorInfo?.colorTransfer == C.COLOR_TRANSFER_HLG -> PlaybackHdrType.HLG
+    colorInfo?.colorTransfer == C.COLOR_TRANSFER_ST2084 -> PlaybackHdrType.HDR10
+    else -> null
 }
 
 private fun String.isAllowedPlaybackUri(): Boolean {

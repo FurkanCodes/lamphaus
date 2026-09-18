@@ -29,6 +29,7 @@ class PlaybackDisplayModeController internal constructor(
         NO_SEAMLESS_MODE(R.string.playback_display_no_seamless_mode),
         NO_BETTER_MODE(R.string.playback_display_no_better_mode),
         REQUESTED(R.string.playback_display_requested),
+        HDR_UNAVAILABLE(R.string.playback_display_hdr_unavailable),
     }
 
     internal constructor(
@@ -40,19 +41,30 @@ class PlaybackDisplayModeController internal constructor(
 
     // Zero means system-managed; restoring the observed physical ID would pin the window.
     private val originalPreferredModeId = output.preferredModeId
-    private var pendingFormat: Triple<Int, Int, Float>? = null
+    private var pendingFormat: PlaybackVideoFormat? = null
     private var stableMillis = 0L
     private var evaluated = false
     private var evaluateImmediately = false
     private var matchingConfig: Pair<FrameRateMatching, ResolutionMatching>? = null
     private var requestedMode: PlaybackOutputMode? = null
     private var requestMillis = 0L
+    private var outputLockedForItem = false
 
-    fun onVideoFormat(width: Int, height: Int, frameRateHz: Float) {
+    internal fun onVideoFormat(
+        width: Int,
+        height: Int,
+        frameRateHz: Float,
+        hdrType: PlaybackHdrType? = null,
+    ) {
         if (width <= 0 || height <= 0) return
-        val rate = frameRateHz.takeIf { it.isFinite() && it > 0f } ?: 0f
-        val format = Triple(width, height, rate)
-        if (pendingFormat != format) {
+        if (outputLockedForItem || requestedMode != null) return
+        val format = PlaybackVideoFormat(
+            width = width,
+            height = height,
+            frameRateHz = normalizeFrameRate(frameRateHz),
+            hdrType = hdrType,
+        )
+        if (pendingFormat?.matches(format) != true) {
             pendingFormat = format
             stableMillis = 0L
             evaluated = false
@@ -72,7 +84,7 @@ class PlaybackDisplayModeController internal constructor(
         // behind the loading surface until VideoCadenceEstimator has a value.
         // Otherwise the same source becomes "new" about 2–3 seconds after it
         // is visible and causes a late, disruptive display-mode switch.
-        if (config.frameRateMatching != FrameRateMatching.OFF && format.third <= 0f) {
+        if (config.frameRateMatching != FrameRateMatching.OFF && format.frameRateHz <= 0f) {
             return false
         }
         if (!evaluated && requestedMode == null) {
@@ -90,6 +102,7 @@ class PlaybackDisplayModeController internal constructor(
             if (matchingConfig != null) restoreOutputPreferences()
             matchingConfig = settings
             evaluated = false
+            outputLockedForItem = false
             stableMillis = if (evaluateImmediately) STABILITY_MILLIS else 0L
         }
         val currentMode = output.currentMode
@@ -98,15 +111,20 @@ class PlaybackDisplayModeController internal constructor(
             if (currentMode?.id == requested.id) {
                 onModeDecision(DisplayModeDecision(requested.candidate, DisplayModeReason.MATCHED))
                 requestedMode = null
+                outputLockedForItem = true
             } else if (requestMillis >= SWITCH_TIMEOUT_MILLIS) {
                 onModeDecision(DisplayModeDecision(null, DisplayModeReason.NOT_APPLIED))
                 requestedMode = null
+                outputLockedForItem = true
             } else {
                 return
             }
         }
-        if (evaluated) return
-        val (width, height, frameRate) = pendingFormat ?: return
+        if (evaluated || outputLockedForItem) return
+        val format = pendingFormat ?: return
+        val width = format.width
+        val height = format.height
+        val frameRate = format.frameRateHz
         stableMillis += deltaMillis
         if (stableMillis < STABILITY_MILLIS) return
         evaluated = true
@@ -116,28 +134,53 @@ class PlaybackDisplayModeController internal constructor(
         } else {
             surfaceFrameRateHost.clearFrameRate()
         }
-        if (settings.first == FrameRateMatching.OFF && settings.second == ResolutionMatching.OFF) {
+        if (settings.first == FrameRateMatching.OFF && settings.second == ResolutionMatching.OFF &&
+            (format.hdrType == null || currentMode?.supports(format.hdrType) != false)
+        ) {
             onModeDecision(DisplayModeDecision(null, DisplayModeReason.OFF))
+            outputLockedForItem = true
             return
         }
-        if (currentMode == null) return
+        if (currentMode == null) {
+            outputLockedForItem = true
+            return
+        }
+        // Before API 34 Android exposes display-wide HDR capabilities, not the
+        // HDR types for each physical mode. A guessed preferredDisplayModeId
+        // can therefore drop the HDMI link back to SDR. Keep the current mode
+        // and let the Surface frame-rate vote choose a compatible cadence.
+        if (format.hdrType != null && !currentMode.hdrTypesAreModeSpecific) {
+            onModeDecision(DisplayModeDecision(currentMode.candidate, DisplayModeReason.NO_BETTER_MODE))
+            outputLockedForItem = true
+            return
+        }
         val current = currentMode.candidate
         val alternatives = currentMode.alternativeRefreshRates
         // Filter before ranking so an unavailable seamless choice cannot hide a valid one.
         // Resolution opt-in permits resizing at the same refresh rate; it does not
         // grant permission for an unadvertised non-seamless refresh-rate change.
         val modes = output.supportedModes.filter {
-            settings.first != FrameRateMatching.SEAMLESS_ONLY ||
-                isSeamlessDisplayMode(current, it.candidate, alternatives) ||
-                (settings.second == ResolutionMatching.MATCH_SOURCE &&
-                    refreshRateMatches(current.refreshRateHz, it.candidate.refreshRateHz))
+            (format.hdrType == null || it.supports(format.hdrType)) && (
+                settings.first != FrameRateMatching.SEAMLESS_ONLY ||
+                    isSeamlessDisplayMode(current, it.candidate, alternatives) ||
+                    (settings.second == ResolutionMatching.MATCH_SOURCE &&
+                        refreshRateMatches(current.refreshRateHz, it.candidate.refreshRateHz))
+                )
         }
+        if (format.hdrType != null && modes.isEmpty()) {
+            onModeDecision(DisplayModeDecision(null, DisplayModeReason.HDR_UNAVAILABLE))
+            outputLockedForItem = true
+            return
+        }
+        val hdrUpgrade = format.hdrType
+            ?.takeIf { !currentMode.supports(it) }
+            ?.let { modes.firstOrNull { mode -> mode.candidate == current } }
         val wanted = selectDisplayMode(
             current, width, height, frameRate, modes.map { it.candidate },
             matchFrameRate = settings.first != FrameRateMatching.OFF,
             matchResolution = settings.second == ResolutionMatching.MATCH_SOURCE,
         )
-        if (wanted == null) {
+        if (wanted == null && hdrUpgrade == null) {
             val reason = when {
                 frameRate <= 0f && settings.first != FrameRateMatching.OFF ->
                     DisplayModeReason.UNKNOWN_FRAME_RATE
@@ -146,9 +189,10 @@ class PlaybackDisplayModeController internal constructor(
                 else -> DisplayModeReason.NO_BETTER_MODE
             }
             onModeDecision(DisplayModeDecision(null, reason))
+            outputLockedForItem = true
             return
         }
-        val candidate = modes.first { it.candidate == wanted }
+        val candidate = hdrUpgrade ?: modes.first { it.candidate == wanted }
         output.preferredModeId = candidate.id
         requestedMode = candidate
         requestMillis = 0L
@@ -176,6 +220,7 @@ class PlaybackDisplayModeController internal constructor(
         stableMillis = 0L
         evaluateImmediately = false
         matchingConfig = null
+        outputLockedForItem = false
     }
 
     private companion object {
@@ -184,11 +229,55 @@ class PlaybackDisplayModeController internal constructor(
     }
 }
 
+internal enum class PlaybackHdrType { HDR10, HLG, DOLBY_VISION }
+
+private data class PlaybackVideoFormat(
+    val width: Int,
+    val height: Int,
+    val frameRateHz: Float,
+    val hdrType: PlaybackHdrType?,
+) {
+    fun matches(other: PlaybackVideoFormat): Boolean =
+        width == other.width && height == other.height && hdrType == other.hdrType &&
+            when {
+                frameRateHz <= 0f || other.frameRateHz <= 0f -> frameRateHz == other.frameRateHz
+                else -> refreshRateMatches(frameRateHz, other.frameRateHz) ||
+                    kotlin.math.abs(frameRateHz - other.frameRateHz) < FRAME_RATE_JITTER_HZ
+            }
+}
+
+private fun normalizeFrameRate(frameRateHz: Float): Float {
+    if (!frameRateHz.isFinite() || frameRateHz <= 0f) return 0f
+    return KNOWN_FRAME_RATES.firstOrNull {
+        kotlin.math.abs(frameRateHz - it) < FRAME_RATE_JITTER_HZ
+    } ?: frameRateHz
+}
+
+private val KNOWN_FRAME_RATES = floatArrayOf(
+    24000f / 1001f,
+    24f,
+    25f,
+    30000f / 1001f,
+    30f,
+    50f,
+    60000f / 1001f,
+    60f,
+    100f,
+    120000f / 1001f,
+    120f,
+)
+
+private const val FRAME_RATE_JITTER_HZ = 0.01f
+
 internal data class PlaybackOutputMode(
     val id: Int,
     val candidate: DisplayModeCandidate,
     val alternativeRefreshRates: List<Float> = emptyList(),
-)
+    val supportedHdrTypes: Set<PlaybackHdrType> = emptySet(),
+    val hdrTypesAreModeSpecific: Boolean = true,
+) {
+    fun supports(hdrType: PlaybackHdrType): Boolean = hdrType in supportedHdrTypes
+}
 
 /** Small platform boundary so switching, restoration, and confirmation can be regression tested. */
 internal interface PlaybackDisplayHost {
@@ -214,8 +303,10 @@ private class AndroidPlaybackDisplayHost(private val activity: Activity) : Playb
     } else {
         activity.windowManager.defaultDisplay
     }
-    override val currentMode get() = display?.mode?.toOutputMode()
-    override val supportedModes get() = display?.supportedModes?.map { it.toOutputMode() }.orEmpty()
+    override val currentMode get() = display?.let { it.mode.toOutputMode(it) }
+    override val supportedModes get() = display?.let { target ->
+        target.supportedModes.map { it.toOutputMode(target) }
+    }.orEmpty()
     override var preferredModeId: Int
         get() = activity.window.attributes.preferredDisplayModeId
         set(value) {
@@ -224,9 +315,28 @@ private class AndroidPlaybackDisplayHost(private val activity: Activity) : Playb
             activity.window.attributes = layout
         }
 
-    private fun Display.Mode.toOutputMode() = PlaybackOutputMode(
+    @Suppress("DEPRECATION")
+    private fun Display.Mode.toOutputMode(display: Display) = PlaybackOutputMode(
         modeId,
         DisplayModeCandidate(physicalWidth, physicalHeight, refreshRate),
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) alternativeRefreshRates.toList() else emptyList(),
+        supportedHdrTypes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            supportedHdrTypes.toPlaybackHdrTypes()
+        } else {
+            display.hdrCapabilities.supportedHdrTypes.toPlaybackHdrTypes()
+        },
+        hdrTypesAreModeSpecific = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
     )
+
+    private fun IntArray.toPlaybackHdrTypes(): Set<PlaybackHdrType> = buildSet {
+        for (type in this@toPlaybackHdrTypes) {
+            when (type) {
+                Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION -> add(PlaybackHdrType.DOLBY_VISION)
+                Display.HdrCapabilities.HDR_TYPE_HDR10,
+                Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS,
+                -> add(PlaybackHdrType.HDR10)
+                Display.HdrCapabilities.HDR_TYPE_HLG -> add(PlaybackHdrType.HLG)
+            }
+        }
+    }
 }
