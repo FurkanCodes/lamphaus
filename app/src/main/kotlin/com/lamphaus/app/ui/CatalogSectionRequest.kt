@@ -2,8 +2,6 @@ package com.lamphaus.app.ui
 
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.ProviderCatalog
-internal const val CINEMETA_PROVIDER_ID = "com.linvo.cinemeta"
-internal const val CINEMETA_MANIFEST_URL = "https://v3-cinemeta.strem.io/manifest.json"
 
 internal sealed interface CatalogHomePlan {
     data class Request(

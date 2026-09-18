@@ -542,6 +542,33 @@ class HttpProviderClientTest {
         assertEquals("/subtitles/movie/m1.json", server.takeRequest().path)
     }
 
+    @Test
+    fun `subtitle parser preserves addon labels and normalizes opensubtitles languages`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"subtitles":[
+                    {"id":"42","lang":"tur","url":"https://subs.example/download/42","subtitleFileName":"Film.2026.WEB-DL.SDH.srt"},
+                    {"id":"43","lang":"eng","url":"https://subs.example/download/43","label":"English forced","format":"vtt"}
+                ]}""".replace("\n", ""),
+            ),
+        )
+
+        val tracks = (client.subtitles(
+            server.url("/manifest.json").toString(),
+            "movie",
+            "tt1234567",
+            mapOf("filename" to "Film 2026.mkv", "videoSize" to "42"),
+        ) as ProviderResult.Success).value
+
+        assertEquals("/subtitles/movie/tt1234567/filename=Film%202026.mkv&videoSize=42.json", server.takeRequest().path)
+        assertEquals("tr", tracks[0].language)
+        assertEquals("Film.2026.WEB-DL.SDH.srt", tracks[0].label)
+        assertEquals("srt", tracks[0].format)
+        assertEquals("en", tracks[1].language)
+        assertEquals("English forced", tracks[1].label)
+        assertEquals("vtt", tracks[1].format)
+    }
+
     private fun preview(id: String, name: String, provider: String) = MediaPreview(
         id = id,
         type = MediaType.MOVIE,

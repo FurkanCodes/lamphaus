@@ -38,6 +38,7 @@ import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.CompletionPolicy
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.Episode
+import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PlaybackSegment
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSettings
@@ -59,6 +60,7 @@ import com.lamphaus.core.player.PlaybackHeaderRegistry
 import com.lamphaus.core.player.toMediaItem
 import com.lamphaus.app.ui.SourceResolution
 import com.lamphaus.app.ui.resolveSource
+import com.lamphaus.app.ui.subtitleVideoId
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -408,7 +410,7 @@ class PlayerActivity : ComponentActivity() {
             },
         ) ?: return null
         val source = selected.first
-        val subtitles = loadSubtitlesForNext(media.rawType, next.id, source, resolvedProviders)
+        val subtitles = loadSubtitlesForNext(media, next, source, resolvedProviders)
         return current.copy(
             videoId = next.id,
             subtitle = next.episodeLabel(),
@@ -427,8 +429,8 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private suspend fun loadSubtitlesForNext(
-        rawType: String,
-        videoId: String,
+        media: MediaPreview,
+        episode: Episode,
         source: StreamCandidate,
         providers: List<ResolvedPlaybackProvider>,
     ): List<SubtitleTrack> {
@@ -440,16 +442,30 @@ class PlayerActivity : ComponentActivity() {
         return supervisorScope {
             providers.mapNotNull { provider ->
                 val manifest = provider.manifest ?: return@mapNotNull null
-                if (!container.providerAggregator.supports(manifest, "subtitles", rawType, videoId)) {
+                val subtitleVideoId = provider.subscription.subtitleVideoId(
+                    imdbId = media.id,
+                    season = episode.season,
+                    episode = episode.episode,
+                    fallbackVideoId = episode.id,
+                )
+                if (!container.providerAggregator.supports(
+                        manifest,
+                        "subtitles",
+                        media.rawType,
+                        subtitleVideoId,
+                    )
+                ) {
                     return@mapNotNull null
                 }
                 async {
                     (container.providerClient.subtitles(
                         provider.subscription.manifestUrl,
-                        rawType,
-                        videoId,
+                        media.rawType,
+                        subtitleVideoId,
                         extras,
-                    ) as? ProviderResult.Success)?.value.orEmpty()
+                    ) as? ProviderResult.Success)?.value.orEmpty().map { track ->
+                        track.copy(providerName = provider.subscription.displayName)
+                    }
                 }
             }.awaitAll().flatten()
         }

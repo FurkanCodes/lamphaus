@@ -178,6 +178,10 @@ data class SubtitleTrack(
     val url: String,
     val format: String? = null,
     val headers: Map<String, String> = emptyMap(),
+    /** Provider-supplied display text, such as a release or subtitle filename. */
+    val label: String? = null,
+    /** Installed add-on name, attached by the app after the protocol response is parsed. */
+    val providerName: String? = null,
 )
 
 sealed interface ProviderResult<out T> {

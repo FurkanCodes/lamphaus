@@ -141,7 +141,7 @@ class AppViewModel(
 
     private var cloudSyncJob: Job? = null
     private var cloudSyncUserId: String? = null
-    private var defaultCatalogJob: Job? = null
+    private var builtInAddonsJob: Job? = null
     private var searchJob: Job? = null
     private var browseJob: Job? = null
     private val pageJobs = mutableMapOf<String, Job>()
@@ -256,7 +256,7 @@ class AppViewModel(
                     // cloud probe (adopt-before-mint); local mode has no cloud
                     // truth to consult, so create eagerly.
                     if (snapshot.profiles.isEmpty() && !BuildConfig.CLOUD_CONFIGURED) createInitialProfile()
-                    ensureDefaultCatalog(snapshot.providers)
+                    ensureBuiltInAddons(snapshot.providers)
                     startCloudSync(snapshot.account.userId)
                 } else {
                     refreshJob?.cancel()
@@ -459,7 +459,7 @@ class AppViewModel(
     }
 
     fun refreshContent() {
-        ensureDefaultCatalog(state.value.providers)
+        ensureBuiltInAddons(state.value.providers)
         refreshCatalogs(force = true)
     }
 
@@ -776,7 +776,7 @@ class AppViewModel(
     fun toggleProvider(providerId: String, enabled: Boolean) = viewModelScope.launch {
         val current = state.value.providers.firstOrNull { it.id == providerId } ?: return@launch
         if (current.sortOrder < 0) {
-            showMessage("The Cinemeta catalog is always available.")
+            showMessage("${current.displayName} is an included add-on and is always available.")
 
             return@launch
         }
@@ -793,7 +793,7 @@ class AppViewModel(
     fun removeProvider(providerId: String) = viewModelScope.launch {
         val current = state.value.providers.firstOrNull { it.id == providerId } ?: return@launch
         if (current.sortOrder < 0) {
-            showMessage("The Cinemeta catalog cannot be removed.")
+            showMessage("${current.displayName} is an included add-on and cannot be removed.")
             return@launch
         }
         val userId = (state.value.account as? AccountState.SignedIn)?.userId
@@ -1627,7 +1627,7 @@ class AppViewModel(
                 is SourceResolution.Internal -> {
                     mutableState.update { it.copy(sourcePicker = it.sourcePicker?.copy(loading = true)) }
                     val videoId = picker.episode?.id ?: picker.media.id
-                    val tracks = loadSubtitles(picker.media, videoId, source)
+                    val tracks = loadSubtitles(picker.media, picker.episode, videoId, source)
                     val existingProgress = state.value.progress.firstOrNull { it.videoId == videoId }
                     val start = when {
                         picker.startFromBeginning -> 0
@@ -1925,6 +1925,7 @@ class AppViewModel(
 
     private suspend fun loadSubtitles(
         media: MediaPreview,
+        episode: Episode?,
         videoId: String,
         source: StreamCandidate,
     ): List<SubtitleTrack> {
@@ -1939,18 +1940,31 @@ class AppViewModel(
                 .sortedBy(ProviderSubscription::sortOrder)
                 .map { subscription ->
                     async {
+                        val subtitleVideoId = subscription.subtitleVideoId(
+                            imdbId = media.id,
+                            season = episode?.season,
+                            episode = episode?.episode,
+                            fallbackVideoId = videoId,
+                        )
                         val manifest = container.providerClient.manifest(subscription.manifestUrl)
                         if (manifest !is ProviderResult.Success ||
-                            !container.providerAggregator.supports(manifest.value, "subtitles", media.rawType, videoId)
+                            !container.providerAggregator.supports(
+                                manifest.value,
+                                "subtitles",
+                                media.rawType,
+                                subtitleVideoId,
+                            )
                         ) {
                             emptyList()
                         } else {
                             (container.providerClient.subtitles(
                                 subscription.manifestUrl,
                                 media.rawType,
-                                videoId,
+                                subtitleVideoId,
                                 extras,
-                            ) as? ProviderResult.Success)?.value.orEmpty()
+                            ) as? ProviderResult.Success)?.value.orEmpty().map { track ->
+                                track.copy(providerName = subscription.displayName)
+                            }
                         }
                     }
                 }.awaitAll().flatten()
@@ -2022,7 +2036,7 @@ class AppViewModel(
         refreshJob = viewModelScope.launch {
             if (current.providers.isEmpty()) {
                 homeLog("refresh providerless branch")
-                if (defaultCatalogJob?.isActive == true) {
+                if (builtInAddonsJob?.isActive == true) {
                     currentCoroutineContext().ensureActive()
                     mutableState.update { it.copy(refreshing = true) }
                     return@launch
@@ -2286,11 +2300,9 @@ class AppViewModel(
     ) {
         val canonicalAddress = address.canonicalProviderAddress()
         val existingId = state.value.providers.firstOrNull { it.manifestUrl.canonicalProviderAddress() == canonicalAddress }?.id
-        val installationId = existingId ?: if (manifest.id == CINEMETA_PROVIDER_ID || canonicalAddress == CINEMETA_MANIFEST_URL) {
-            CINEMETA_PROVIDER_ID
-        } else {
-            stableInstallationId(manifest.id, canonicalAddress)
-        }
+        val installationId = existingId
+            ?: builtInAddonFor(manifest.id, canonicalAddress)?.id
+            ?: stableInstallationId(manifest.id, canonicalAddress)
         val provider = ProviderSubscription(
             id = installationId,
             manifestUrl = canonicalAddress,
@@ -2317,47 +2329,31 @@ class AppViewModel(
         return "$safeManifestId@${digest.take(12)}"
     }
 
-    private fun ensureDefaultCatalog(providers: List<ProviderSubscription>) {
+    private fun ensureBuiltInAddons(providers: List<ProviderSubscription>) {
         if (BuildConfig.BENCHMARK_FIXTURES) return
         val developmentSources = providers.filter { BuildConfig.DEBUG && it.id == DEVELOPMENT_SOURCE_ID }
-        val existing = providers.firstOrNull {
-            it.id == CINEMETA_PROVIDER_ID || it.manifestUrl == CINEMETA_MANIFEST_URL
-        }
-        val normalized = existing?.let {
-            it.displayName == DEFAULT_CATALOG_DISPLAY_NAME && it.sortOrder == DEFAULT_CATALOG_SORT_ORDER && it.enabled
-        } == true
-        if (developmentSources.isEmpty() && normalized) return
-        if (defaultCatalogJob?.isActive == true) return
-        defaultCatalogJob = viewModelScope.launch {
-            developmentSources.forEach { container.libraryRepository.removeProvider(it.id) }
-            if (existing != null) {
-                val catalog = existing.copy(
-                    manifestUrl = CINEMETA_MANIFEST_URL,
-                    displayName = DEFAULT_CATALOG_DISPLAY_NAME,
-                    enabled = true,
-                    sortOrder = DEFAULT_CATALOG_SORT_ORDER,
-                    updatedAtEpochMillis = System.currentTimeMillis(),
-                )
-                container.libraryRepository.saveProvider(catalog)
-                (state.value.account as? AccountState.SignedIn)?.userId?.let {
-                    container.cloudSyncGateway.saveProvider(it, catalog).onFailure { error ->
-                        CloudLog.w("provider.catalog not synced (${catalog.id})", error)
-                    }
-                }
-                return@launch
+        val currentBuiltIns = BUILT_IN_ADDONS.associateWith { addon ->
+            providers.firstOrNull { provider ->
+                provider.id == addon.id || provider.manifestUrl == addon.manifestUrl
             }
-            when (val result = container.providerClient.manifest(CINEMETA_MANIFEST_URL)) {
-                is ProviderResult.Success -> saveProvider(
-                    address = CINEMETA_MANIFEST_URL,
-                    manifest = result.value,
-                    sortOrder = DEFAULT_CATALOG_SORT_ORDER,
-                    displayName = DEFAULT_CATALOG_DISPLAY_NAME,
-                )
-                is ProviderResult.Failure -> {
-                    defaultCatalogJob = null
-                    refreshCatalogs(force = true)
-                    showMessage("The Cinemeta catalog is temporarily unavailable.")
+        }
+        val normalized = currentBuiltIns.all { (addon, provider) ->
+            provider?.id == addon.id &&
+                provider.manifestUrl == addon.manifestUrl &&
+                provider.displayName == addon.displayName &&
+                provider.sortOrder == addon.sortOrder &&
+                provider.enabled
+        }
+        if (developmentSources.isEmpty() && normalized) return
+        if (builtInAddonsJob?.isActive == true) return
+        builtInAddonsJob = viewModelScope.launch {
+            developmentSources.forEach { container.libraryRepository.removeProvider(it.id) }
+            val now = System.currentTimeMillis()
+            currentBuiltIns.forEach { (addon, existing) ->
+                if (existing != null && existing.id != addon.id) {
+                    container.libraryRepository.removeProvider(existing.id)
                 }
+                container.libraryRepository.saveProvider(addon.subscription(now))
             }
         }
     }
@@ -2604,9 +2600,6 @@ class AppViewModel(
 
     companion object {
         private const val MAX_DISCOVERED_PROVIDERS = 50
-        private const val DEFAULT_CATALOG_SORT_ORDER = -100
-        private const val DEFAULT_CATALOG_DISPLAY_NAME = "Cinemeta"
-
         private const val PAIRING_POLL_MILLIS = 3_000L
         private const val PAIRING_DEVICE_LABEL = "Living room TV"
         private const val DEVELOPMENT_SOURCE_ID = "lamphaus.dev.source"

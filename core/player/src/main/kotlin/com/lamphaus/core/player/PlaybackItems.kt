@@ -11,7 +11,7 @@ fun PlaybackRequest.toMediaItem(): MediaItem {
         MediaItem.SubtitleConfiguration.Builder(subtitle.url.toUri())
             .setId(subtitle.id)
             .setLanguage(subtitle.language)
-            .setLabel(subtitle.language)
+            .setLabel(subtitle.displayLabel())
             .setMimeType(subtitle.subtitleMimeType())
             .setSelectionFlags(0)
             .build()
@@ -35,6 +35,11 @@ fun PlaybackRequest.toMediaItem(): MediaItem {
         )
         .build()
 }
+
+private fun com.lamphaus.core.model.SubtitleTrack.displayLabel(): String =
+    listOfNotNull(providerName, label ?: language)
+        .distinct()
+        .joinToString(" · ")
 
 private fun com.lamphaus.core.model.SubtitleTrack.subtitleMimeType(): String = when {
     format.equals("vtt", ignoreCase = true) || url.contains(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT

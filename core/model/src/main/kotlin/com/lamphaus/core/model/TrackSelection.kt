@@ -18,7 +18,7 @@ fun normalizeBcp47Tag(raw: String?): String {
     val cleaned = raw?.trim()?.replace('_', '-')?.takeIf(String::isNotEmpty) ?: return ""
     val subtags = cleaned.split("-").filter(String::isNotEmpty)
     if (subtags.isEmpty()) return ""
-    val language = subtags[0].lowercase()
+    val language = ISO_639_2_TO_1[subtags[0].lowercase()] ?: subtags[0].lowercase()
     if (language == "und") return ""
     if (language.length < 2 || !language.all { it in 'a'..'z' }) return ""
     val rest = subtags.drop(1)
@@ -32,6 +32,46 @@ fun normalizeBcp47Tag(raw: String?): String {
         }
     return if (rest.isEmpty()) language else "$language-$rest"
 }
+
+/** Common ISO-639-2 codes returned by subtitle add-ons, including legacy bibliographic aliases. */
+private val ISO_639_2_TO_1 = mapOf(
+    "ara" to "ar",
+    "chi" to "zh",
+    "zho" to "zh",
+    "cze" to "cs",
+    "ces" to "cs",
+    "dan" to "da",
+    "dut" to "nl",
+    "nld" to "nl",
+    "eng" to "en",
+    "fin" to "fi",
+    "fre" to "fr",
+    "fra" to "fr",
+    "ger" to "de",
+    "deu" to "de",
+    "gre" to "el",
+    "ell" to "el",
+    "heb" to "he",
+    "hin" to "hi",
+    "hun" to "hu",
+    "ice" to "is",
+    "isl" to "is",
+    "ita" to "it",
+    "jpn" to "ja",
+    "kor" to "ko",
+    "nor" to "no",
+    "pol" to "pl",
+    "por" to "pt",
+    "rum" to "ro",
+    "ron" to "ro",
+    "rus" to "ru",
+    "spa" to "es",
+    "swe" to "sv",
+    "tha" to "th",
+    "tur" to "tr",
+    "ukr" to "uk",
+    "vie" to "vi",
+)
 
 /** Primary language subtag of a normalized tag ("en-US" → "en"). */
 fun baseLanguage(normalizedTag: String): String =
