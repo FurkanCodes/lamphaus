@@ -304,6 +304,11 @@
     <string name="player_subtitles">Subtitles</string>
     <string name="player_more">More options</string>
     <string name="player_close">Close player</string>
+  <string name="player_lock">Lock controls</string>
+  <string name="player_unlock">Unlock controls</string>
+  <string name="player_brightness">Brightness</string>
+  <string name="player_rotate">Rotate player</string>
+  <string name="player_volume">Volume</string>
     <string name="player_pip">Picture in picture</string>
     <string name="player_done">Done</string>
     <string name="player_seek">Playback position</string>

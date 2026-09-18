@@ -40,6 +40,10 @@ Poster cards, buttons, fields, and list rows use 4dp corners. Immersive hero car
 
 State transitions last 150–250ms with fast-out-slow-in or linear-out-slow-in easing. TV focus responds in 160ms; labels lift by 6dp while fading in. Hero artwork crossfades in 220ms with a tiny horizontal drift after a short focus dwell. A one-time 480ms beam crosses the loading mark, and adding to the library receives a 220ms confirmation pulse. Remove animations changes these transitions to instant state changes. Nothing auto-advances while the user is reading.
 
+## Player chrome
+
+Icon-only controls use named tokens (`PlayerChromeTokens`): `48dp` container and `24dp` glyph on mobile, `56dp`/`32dp` on TV, `8dp` gaps, `4s` auto-hide, and a `10%` subtitle lift. Active controls change fill and accent together, never color alone. Mobile shows the brightness and volume rails only in landscape and wide windows, inset past the system gesture edges, and may lock the chrome with a visible unlock control. TV is icon-only at rest and reveals the focused control's label beside the row.
+
 ## Artwork
 
 Posters are 2:3, backdrops 16:9, TV banners 16:9, and icons use adaptive foreground/background layers. Generated fixture artwork is fictional, unbranded, sRGB, and never substitutes for provider-supplied runtime art.

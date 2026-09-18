@@ -30,6 +30,9 @@ import androidx.media3.common.C
 
 internal val LocalPlayerTelevision = staticCompositionLocalOf { false }
 
+/** Reports the label of the control that currently owns TV focus (PLY-CHR-05). */
+internal val LocalPlayerFocusLabel = staticCompositionLocalOf<((String) -> Unit)?> { null }
+
 @Composable
 internal fun PlaybackTheme(isTelevision: Boolean, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalPlayerTelevision provides isTelevision) {
@@ -76,6 +79,8 @@ internal fun PlayerControls(
     onPanel: (PlayerPanel) -> Unit,
     segments: List<PlaybackSegment> = emptyList(),
     onExit: () -> Unit = {},
+    onLock: () -> Unit = {},
+    onToggleOrientation: () -> Unit = {},
 ) {
     val playFocus = remember { FocusRequester() }
     val audioFocus = remember { FocusRequester() }
@@ -107,6 +112,9 @@ internal fun PlayerControls(
     BoxWithConstraints(Modifier.fillMaxSize().onPreviewKeyEvent { onInteraction(); false }) {
         if (isTelevision) {
             // TV-LAY-01: scale to the available window while retaining overscan-safe margins.
+            // Icon-only at rest: the focused control's label fades in beside the
+            // row so recognition never depends on the glyph alone (PLY-CHR-05).
+            var focusedLabel by remember { mutableStateOf<String?>(null) }
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .padding(horizontal = 58.dp, vertical = 32.dp),
@@ -117,6 +125,7 @@ internal fun PlayerControls(
                     snapshot.positionMillis, snapshot.bufferedPositionMillis, snapshot.durationMillis,
                     Modifier.fillMaxWidth(), onSeekTo, onInteraction, segments,
                 )
+                CompositionLocalProvider(LocalPlayerFocusLabel provides { focusedLabel = it }) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlayerActionButton(playIcon, playLabel, Modifier.focusRequester(playFocus),
@@ -144,6 +153,15 @@ internal fun PlayerControls(
                         PlayerRemaining(snapshot.positionMillis, snapshot.durationMillis)
                     }
                 }
+                }
+                Text(
+                    text = focusedLabel.orEmpty(),
+                    color = PlayerOnSurfaceMuted,
+                    fontFamily = PlayerFont,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    modifier = Modifier.heightIn(min = 18.dp),
+                )
             }
         } else {
             val compactHeight = maxHeight < 480.dp
@@ -156,6 +174,9 @@ internal fun PlayerControls(
             ) {
                 PlayerActionButton(Icons.Rounded.Close, stringResource(R.string.player_close), onClick = onExit)
                 PlayerTitle(request, false, Modifier.weight(1f))
+                PlayerActionButton(Icons.Rounded.ScreenRotation, stringResource(R.string.player_rotate),
+                    onClick = onToggleOrientation)
+                PlayerActionButton(Icons.Rounded.Lock, stringResource(R.string.player_lock), onClick = onLock)
                 if (pictureInPictureAvailable) PlayerActionButton(Icons.Rounded.PictureInPictureAlt,
                     stringResource(R.string.player_pip), onClick = onEnterPictureInPicture)
                 PlayerActionButton(Icons.Rounded.MoreHoriz, stringResource(R.string.player_more),
@@ -188,11 +209,11 @@ internal fun PlayerControls(
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PlayerSettingButton(Icons.AutoMirrored.Rounded.VolumeUp, stringResource(R.string.player_audio),
-                        false, Modifier.weight(1f).focusRequester(audioFocus)) { onPanel(PlayerPanel.AUDIO) }
+                        false, Modifier.focusRequester(audioFocus)) { onPanel(PlayerPanel.AUDIO) }
                     PlayerSettingButton(Icons.Rounded.ClosedCaption, stringResource(R.string.player_subtitles),
-                        subtitlesActive, Modifier.weight(1f).focusRequester(subtitlesFocus)) { onPanel(PlayerPanel.SUBTITLES) }
+                        subtitlesActive, Modifier.focusRequester(subtitlesFocus)) { onPanel(PlayerPanel.SUBTITLES) }
                     if (canPlayNext) PlayerSettingButton(Icons.Rounded.SkipNext,
-                        stringResource(R.string.player_next_episode), false, Modifier.weight(1f)) {
+                        stringResource(R.string.player_next_episode), false) {
                         if (!nextEpisodeLoading) onNextEpisode()
                         onInteraction()
                     }

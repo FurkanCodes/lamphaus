@@ -65,6 +65,7 @@ class LamphausPlaybackService : MediaSessionService() {
                                     com.lamphaus.core.model.SubtitleStyle.serializer(),
                                     payload,
                                 ),
+                                liftFraction = args.getFloat(EXTRA_LIFT_FRACTION, 0f),
                             )
                         }
                     }
@@ -99,5 +100,8 @@ class LamphausPlaybackService : MediaSessionService() {
         const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"
         const val EXTRA_DELAY_MILLIS = "delay_millis"
         const val EXTRA_STYLE_JSON = "style_json"
+
+        /** Chrome-visibility subtitle lift as a fraction of the video frame (PLY-IMM-03). */
+        const val EXTRA_LIFT_FRACTION = "lift_fraction"
     }
 }

@@ -1,5 +1,7 @@
 package com.lamphaus.app.player
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
@@ -46,10 +48,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.BrightnessMedium
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ClosedCaption
 import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.Forward10
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PictureInPictureAlt
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -90,6 +96,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,6 +117,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalConfiguration
@@ -238,11 +247,32 @@ internal fun PlaybackScreen(
     onLoadSidecarCues: ((List<SubtitleCue>) -> Unit) -> Unit,
     onApplySyncByLine: (Long, Long) -> Unit,
     onControlsVisibilityChanged: (Boolean) -> Unit = {},
+    onSubtitleLiftChanged: (Float) -> Unit = {},
 ) {
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
     var controlsVisible by remember { mutableStateOf(true) }
     var resizeMode by rememberSaveable { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var panel by remember { mutableStateOf<PlayerPanel?>(null) }
+    var locked by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val hostActivity = context as? Activity
+    var brightnessFraction by remember { mutableFloatStateOf(systemBrightnessFraction(context)) }
+    var volumeFraction by remember { mutableFloatStateOf(mediaVolumeFraction(context)) }
+    var hudText by remember { mutableStateOf<String?>(null) }
+    var hudIcon by remember { mutableStateOf<ImageVector?>(null) }
+    var seekTarget by remember { mutableStateOf<Long?>(null) }
+
+    fun showHud(icon: ImageVector, text: String) {
+        hudIcon = icon
+        hudText = text
+    }
+
+    LaunchedEffect(hudText) {
+        if (hudText != null) {
+            delay(900)
+            hudText = null
+        }
+    }
     var editor by remember { mutableStateOf<PlayerEditor?>(null) }
     var editorReturnTarget by remember { mutableStateOf<PlayerEditor?>(null) }
     var panelParent by remember { mutableStateOf<PlayerPanel?>(null) }
@@ -256,6 +286,7 @@ internal fun PlaybackScreen(
     }
     val wideLayout = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE ||
         windowWidthDp >= 600.dp
+    val landscapeOrientation = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val activeSegment = segments.firstOrNull { segment ->
         val enabled = when (segment.type) {
             PlaybackSegmentType.INTRO -> settings.skipIntroEnabled
@@ -332,7 +363,7 @@ internal fun PlaybackScreen(
 
     LaunchedEffect(controlsVisible, panel, snapshot.playing, interactionVersion) {
         if (controlsVisible && panel == null && snapshot.playing && snapshot.errorMessage == null) {
-            delay(4_000)
+            delay(PlayerChromeTokens.AutoHideMillis)
             controlsVisible = false
         }
     }
@@ -343,6 +374,18 @@ internal fun PlaybackScreen(
 
     LaunchedEffect(controlsVisible, inPictureInPicture, panel) {
         onControlsVisibilityChanged(!inPictureInPicture && (controlsVisible || panel != null))
+    }
+
+    // One lift value drives both engines: Media3 through the subtitle view below,
+    // MPV through the session command (PLY-IMM-03, PLY-IMM-04).
+    LaunchedEffect(controlsVisible, panel, inPictureInPicture) {
+        onSubtitleLiftChanged(
+            if (!inPictureInPicture && (controlsVisible || panel != null)) {
+                PlayerChromeTokens.SubtitleLiftFraction
+            } else {
+                0f
+            },
+        )
     }
 
     LaunchedEffect(inPictureInPicture) {
@@ -356,7 +399,8 @@ internal fun PlaybackScreen(
     BackHandler {
         when {
             // Back unwinds editor -> submenu -> controls -> exit (plan §5),
-            // restoring the originating focus at each layer.
+            // restoring the originating focus at each layer. Lock is one layer.
+            locked -> locked = false
             editor != null -> closeEditor()
             panel != null -> closePanel()
             nextEpisodeCardVisible -> onDismissNextEpisodeCard()
@@ -424,11 +468,13 @@ internal fun PlaybackScreen(
                     else -> false
                 }
             }
-            .pointerInput(player) {
+            .pointerInput(player, locked) {
                 detectTapGestures(onTap = {
-                    controlsVisible = !controlsVisible
-                    panel = null
-                    interactionVersion++
+                    if (!locked) {
+                        controlsVisible = !controlsVisible
+                        panel = null
+                        interactionVersion++
+                    }
                 })
             },
     ) {
@@ -452,17 +498,74 @@ internal fun PlaybackScreen(
                 // (common streaming pattern), at rest position during clean viewing.
                 val liftedStyle = if (controlsVisible || panel != null) {
                     subtitleStyle.copy(
-                        verticalPositionFraction = (subtitleStyle.verticalPositionFraction - 0.10f).coerceIn(0f, 1f),
+                        verticalPositionFraction = (subtitleStyle.verticalPositionFraction -
+                            PlayerChromeTokens.SubtitleLiftFraction).coerceIn(0f, 1f),
                     )
                 } else {
                     subtitleStyle
                 }
                 SubtitleStyleApplier.apply(view.subtitleView!!, liftedStyle)
+                // Explicitly positioned cues (WebVTT automatic lines, ASS) ignore
+                // bottomPaddingFraction, so the whole caption layer shifts with the
+                // chrome instead (PLY-IMM-03).
+                view.subtitleView?.translationY = if (controlsVisible || panel != null) {
+                    -view.height * PlayerChromeTokens.SubtitleLiftFraction
+                } else {
+                    0f
+                }
                 onPlayerViewLayout(view)
             },
             onRelease = { view -> view.player = null },
             modifier = Modifier.fillMaxSize(),
         )
+
+        if (!inPictureInPicture && !isTelevision) {
+            PlayerGestureSurface(
+                enabled = !locked && snapshot.errorMessage == null,
+                onTap = {
+                    controlsVisible = !controlsVisible
+                    panel = null
+                    interactionVersion++
+                },
+                onDoubleTap = { forward ->
+                    val duration = snapshot.durationMillis
+                    if (duration > 0) {
+                        val target = (snapshot.positionMillis + if (forward) 10_000L else -10_000L)
+                            .coerceIn(0L, duration)
+                        player?.seekTo(target)
+                        showHud(
+                            if (forward) Icons.Rounded.Forward10 else Icons.Rounded.Replay10,
+                            "${if (forward) "+" else "\u2212"}10 s",
+                        )
+                    }
+                    revealControls()
+                },
+                onSeekDelta = { deltaPx, widthPx ->
+                    val duration = snapshot.durationMillis
+                    if (duration > 0) {
+                        val next = ((seekTarget ?: snapshot.positionMillis) +
+                            PlayerGesturePolicy.seekDeltaMillis(deltaPx, widthPx)).coerceIn(0L, duration)
+                        seekTarget = next
+                        showHud(Icons.Rounded.FastForward, next.asPlaybackTime())
+                    }
+                },
+                onSeekEnd = {
+                    seekTarget?.let { player?.seekTo(it) }
+                    seekTarget = null
+                    interactionVersion++
+                },
+                onBrightnessDelta = { deltaPx, heightPx ->
+                    brightnessFraction = PlayerGesturePolicy.levelFor(brightnessFraction, deltaPx, heightPx)
+                    applyWindowBrightness(hostActivity, brightnessFraction)
+                    showHud(Icons.Rounded.BrightnessMedium, "${(brightnessFraction * 100).toInt()}%")
+                },
+                onVolumeDelta = { deltaPx, heightPx ->
+                    volumeFraction = PlayerGesturePolicy.levelFor(volumeFraction, deltaPx, heightPx)
+                    if (!setMediaVolumeFraction(context, volumeFraction)) player?.volume = volumeFraction
+                    showHud(Icons.AutoMirrored.Rounded.VolumeUp, "${(volumeFraction * 100).toInt()}%")
+                },
+            )
+        }
 
         if (!inPictureInPicture && snapshot.buffering && snapshot.errorMessage == null) {
             Column(
@@ -497,7 +600,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (!inPictureInPicture && controlsVisible && panel == null && snapshot.errorMessage == null) {
+        if (!inPictureInPicture && controlsVisible && panel == null && !locked && snapshot.errorMessage == null) {
             PlayerControls(
                 request = request,
                 snapshot = snapshot,
@@ -525,7 +628,35 @@ internal fun PlaybackScreen(
                 },
                 segments = segments,
                 onExit = onExit,
+                onLock = {
+                    locked = true
+                    controlsVisible = false
+                    panel = null
+                },
+                onToggleOrientation = {
+                    hostActivity?.requestedOrientation = if (landscapeOrientation) {
+                        ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    }
+                },
             )
+        }
+
+        if (!inPictureInPicture && locked) {
+            // Locked mode only blocks video-surface touches; Back still unwinds and
+            // the chip is a visible, screen-reader reachable unlock (MOB-A11Y-03).
+            PlayerActionButton(
+                Icons.Rounded.LockOpen,
+                stringResource(R.string.player_unlock),
+                Modifier.align(Alignment.CenterStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
+                    .padding(start = 16.dp),
+                active = true,
+            ) {
+                locked = false
+                revealControls()
+            }
         }
 
         val visibleSegment = if (nextEpisodeSkipInCard) null else activeSegment
@@ -607,6 +738,40 @@ internal fun PlaybackScreen(
                     ),
                 )
             }
+        }
+
+        if (!isTelevision && !inPictureInPicture && !locked && wideLayout && (controlsVisible || panel != null)) {
+            PlayerSideRail(
+                icon = Icons.Rounded.BrightnessMedium,
+                label = stringResource(R.string.player_brightness),
+                value = brightnessFraction,
+                onValueChange = { value ->
+                    brightnessFraction = value
+                    applyWindowBrightness(hostActivity, value)
+                },
+                modifier = Modifier.align(Alignment.CenterStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical))
+                    .padding(start = 24.dp)
+                    .fillMaxHeight(0.4f)
+                    .heightIn(max = 320.dp),
+            )
+            PlayerSideRail(
+                icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                label = stringResource(R.string.player_volume),
+                value = volumeFraction,
+                onValueChange = { value ->
+                    volumeFraction = value
+                    if (!setMediaVolumeFraction(context, value)) player?.volume = value
+                },
+                modifier = Modifier.align(Alignment.CenterEnd)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End + WindowInsetsSides.Vertical))
+                    .padding(end = 24.dp)
+                    .fillMaxHeight(0.4f)
+                    .heightIn(max = 320.dp),
+            )
+        }
+        hudText?.let { text ->
+            PlayerHudBubble(hudIcon, text, Modifier.align(Alignment.Center))
         }
 
         snapshot.errorMessage?.takeUnless { inPictureInPicture }?.let { message ->
@@ -780,10 +945,11 @@ internal fun PlayerActionButton(
         return
     }
     var focused by remember { mutableStateOf(false) }
+    val reportFocus = LocalPlayerFocusLabel.current
     Box(
         modifier = modifier
             .size(containerSize)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { focused = it.isFocused; if (it.isFocused) reportFocus?.invoke(label) }
             .clip(RoundedCornerShape(4.dp))
             .background(
                 when {
@@ -837,20 +1003,32 @@ internal fun PlayerSettingButton(
     onClick: () -> Unit,
 ) {
     if (!LocalPlayerTelevision.current) {
-        TextButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-            colors = ButtonDefaults.textButtonColors(contentColor = if (active) PlayerPrimary else PlayerOnSurface)) {
-            Icon(icon, null, Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
+        // Icon-only chrome: the label survives as the accessible name (MOB-A11Y-01),
+        // and the active state changes fill and tint, not color alone (MOB-A11Y-08).
+        FilledIconButton(
+            onClick = onClick,
+            modifier = modifier
+                .size(PlayerChromeTokens.ControlContainer)
+                .semantics {
+                    role = Role.Button
+                    contentDescription = label
+                    selected = active
+                },
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = if (active) PlayerPrimary.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.48f),
+                contentColor = if (active) PlayerPrimary else PlayerOnSurface,
+            ),
+        ) {
+            Icon(icon, null, Modifier.size(PlayerChromeTokens.ControlGlyph))
         }
         return
     }
     var focused by remember { mutableStateOf(false) }
+    val reportFocus = LocalPlayerFocusLabel.current
     Row(
         modifier = modifier
             .heightIn(min = 48.dp)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { focused = it.isFocused; if (it.isFocused) reportFocus?.invoke(label) }
             .clip(RoundedCornerShape(4.dp))
             .background(
                 when {
@@ -870,10 +1048,11 @@ internal fun PlayerSettingButton(
                 contentDescription = label
                 selected = active
             }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .size(PlayerChromeTokens.TvControlContainer),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
+        // Icon-only at rest; the focused label appears beside the row (PLY-CHR-05).
         Icon(
             imageVector = icon,
             contentDescription = null,
@@ -882,16 +1061,7 @@ internal fun PlayerSettingButton(
                 active -> PlayerPrimary
                 else -> PlayerOnSurface
             },
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            text = label,
-            color = if (focused) PlayerFocusedContent else PlayerOnSurface,
-            fontFamily = PlayerFont,
-            fontWeight = FontWeight.Medium,
-            fontSize = 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.size(28.dp),
         )
         if (active && !focused) {
             Box(
@@ -918,25 +1088,44 @@ internal fun PlayerProgress(
     val seekDescription = stringResource(R.string.player_seek)
     if (!LocalPlayerTelevision.current) {
         var scrubPosition by remember { mutableStateOf<Float?>(null) }
-        Slider(
-            value = scrubPosition ?: positionMillis.toFloat().coerceIn(0f, durationMillis.coerceAtLeast(1L).toFloat()),
-            onValueChange = { scrubPosition = it; onInteraction() },
-            onValueChangeFinished = { scrubPosition?.let { onSeekTo(it.toLong()) }; scrubPosition = null },
-            valueRange = 0f..durationMillis.coerceAtLeast(1L).toFloat(),
-            enabled = durationMillis > 0,
-            modifier = modifier.heightIn(min = 48.dp).semantics { contentDescription = seekDescription },
-            thumb = { Box(Modifier.size(12.dp).background(PlayerPrimary, CircleShape)) },
-            track = { state ->
-                Canvas(Modifier.fillMaxWidth().height(4.dp)) {
-                    val radius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                    val played = state.value / durationMillis.coerceAtLeast(1L)
-                    val buffered = bufferedPositionMillis.toFloat() / durationMillis.coerceAtLeast(1L)
-                    drawRoundRect(PlayerTrack, cornerRadius = radius)
-                    drawRoundRect(PlayerBuffered, size = size.copy(width = size.width * buffered.coerceIn(0f, 1f)), cornerRadius = radius)
-                    drawRoundRect(PlayerPrimary, size = size.copy(width = size.width * played.coerceIn(0f, 1f)), cornerRadius = radius)
+        Box(modifier) {
+            Slider(
+                value = scrubPosition ?: positionMillis.toFloat().coerceIn(0f, durationMillis.coerceAtLeast(1L).toFloat()),
+                onValueChange = { scrubPosition = it; onInteraction() },
+                onValueChangeFinished = { scrubPosition?.let { onSeekTo(it.toLong()) }; scrubPosition = null },
+                valueRange = 0f..durationMillis.coerceAtLeast(1L).toFloat(),
+                enabled = durationMillis > 0,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = seekDescription },
+                thumb = { Box(Modifier.size(12.dp).background(PlayerPrimary, CircleShape)) },
+                track = { state ->
+                    Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+                        val radius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                        val played = state.value / durationMillis.coerceAtLeast(1L)
+                        val buffered = bufferedPositionMillis.toFloat() / durationMillis.coerceAtLeast(1L)
+                        drawRoundRect(PlayerTrack, cornerRadius = radius)
+                        drawRoundRect(PlayerBuffered, size = size.copy(width = size.width * buffered.coerceIn(0f, 1f)), cornerRadius = radius)
+                        drawRoundRect(PlayerPrimary, size = size.copy(width = size.width * played.coerceIn(0f, 1f)), cornerRadius = radius)
+                    }
+                },
+            )
+            // Target time while scrubbing, so the thumb never needs to be guessed.
+            scrubPosition?.let { target ->
+                Box(
+                    Modifier.align(Alignment.TopCenter).offset(y = (-20).dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(PlayerSurface.copy(alpha = 0.94f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = target.toLong().asPlaybackTime(),
+                        color = PlayerOnSurface,
+                        fontFamily = PlayerFont,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp,
+                    )
                 }
-            },
-        )
+            }
+        }
         return
     }
     var focused by remember { mutableStateOf(false) }
