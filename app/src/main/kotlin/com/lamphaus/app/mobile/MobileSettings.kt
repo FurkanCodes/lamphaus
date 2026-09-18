@@ -609,7 +609,7 @@ private fun SettingsAddonsPage(state: AppUiState, viewModel: AppViewModel) {
                         supportingContent = {
                             Text(
                                 stringResource(
-                                    if (provider.sortOrder < 0) R.string.included_catalog
+                                    if (provider.sortOrder < 0) R.string.included_addon
                                     else if (provider.enabled) R.string.enabled
                                     else R.string.disabled,
                                 ),

@@ -4098,7 +4098,7 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
                         Text(
                             stringResource(
                                 if (provider.sortOrder < 0) {
-                                    R.string.included_catalog
+                                    R.string.included_addon
                                 } else if (provider.enabled) {
                                     R.string.enabled
                                 } else {

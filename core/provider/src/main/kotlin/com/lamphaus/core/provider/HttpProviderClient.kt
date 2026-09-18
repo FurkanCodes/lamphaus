@@ -14,6 +14,7 @@ import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.StreamFile
 import com.lamphaus.core.model.SubtitleTrack
+import com.lamphaus.core.model.normalizeBcp47Tag
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.URLEncoder
@@ -685,12 +686,17 @@ class HttpProviderClient(
     }
     private fun JsonObject.toSubtitle(): SubtitleTrack? {
         val url = string("url") ?: return null
+        val language = normalizeBcp47Tag(string("lang") ?: string("language"))
+        val filename = firstString("subtitleFileName")
+        val label = firstString("label") ?: filename ?: firstString("movieReleaseName")
         return SubtitleTrack(
             id = string("id") ?: url.hashCode().toString(),
-            language = string("lang") ?: string("language") ?: "und",
+            language = language.ifBlank { "und" },
             url = url,
-            format = string("format") ?: string("ext"),
+            format = firstString("format", "ext")
+                ?: filename?.substringAfterLast('.', "")?.takeIf(String::isNotBlank),
             headers = sanitizeHeaders(obj("behaviorHints")?.obj("proxyHeaders")?.obj("request")),
+            label = label,
         )
     }
 

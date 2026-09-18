@@ -47,7 +47,7 @@
     <string name="addons">Add-ons</string>
     <string name="addon_address">Manifest or add-on catalog address</string>
     <string name="refresh_catalogs">Refresh catalogs</string>
-    <string name="included_catalog">Included catalog</string>
+    <string name="included_addon">Included add-on</string>
     <string name="enabled">Enabled</string>
     <string name="disabled">Disabled</string>
     <string name="remove_provider_format">Remove %1$s</string>

@@ -40,6 +40,9 @@ class TrackSelectionTest {
         assertEquals("", normalizeBcp47Tag(null))
         assertEquals("", normalizeBcp47Tag("  "))
         assertEquals("en", normalizeBcp47Tag("en"))
+        assertEquals("en", normalizeBcp47Tag("eng"))
+        assertEquals("tr", normalizeBcp47Tag("tur"))
+        assertEquals("de-DE", normalizeBcp47Tag("deu-DE"))
     }
 
     @Test
@@ -47,6 +50,8 @@ class TrackSelectionTest {
         assertTrue(languageMatches("en-US", "en"))
         assertTrue(languageMatches("en", "en-US"))
         assertTrue(languageMatches("EN_us", "en-us"))
+        assertTrue(languageMatches("tur", "tr"))
+        assertTrue(languageMatches("eng", "en-US"))
         assertFalse(languageMatches("en", "fr"))
         assertFalse(languageMatches(null, "en"))
         assertFalse(languageMatches("en", ""))
