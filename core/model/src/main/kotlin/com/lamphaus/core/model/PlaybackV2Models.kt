@@ -48,6 +48,10 @@ enum class SubtitleDefaultMode { OFF, FORCED_ONLY, PREFERRED_LANGUAGE }
 @Serializable
 enum class SubtitleEdgeStyle { NONE, DROP_SHADOW, RAISED, DEPRESSED, OUTLINE }
 
+/** Typeface family used when the profile overrides embedded subtitle styling. */
+@Serializable
+enum class SubtitleFontFamily { SYSTEM, SANS_SERIF, SERIF, MONOSPACE }
+
 /**
  * The profile-owned playback defaults (plan §3 defaults). Serialized into the
  * `profile_playback_preferences` cloud payload; absent fields fall back to
@@ -77,6 +81,7 @@ data class SubtitleStyle(
     val sizePercent: Int = 100,
     /** 0 = top of the video frame, 1 = bottom. */
     val verticalPositionFraction: Float = 0.92f,
+    val fontFamily: SubtitleFontFamily = SubtitleFontFamily.SYSTEM,
     val bold: Boolean = false,
     /** sRGB color with alpha in the high byte, e.g. 0xFFFFFFFF. */
     val textColor: Long = 0xFFFFFFFFL,

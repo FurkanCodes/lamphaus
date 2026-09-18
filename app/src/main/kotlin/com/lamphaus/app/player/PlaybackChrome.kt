@@ -232,14 +232,17 @@ internal fun PlayerOverlayLayout(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     tvWidth: Dp = 844.dp,
+    tvScrim: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val availableHeight = maxHeight
         if (isTelevision) {
-            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(
-                Color.Black.copy(alpha = .94f), Color.Black.copy(alpha = .72f), Color.Black.copy(alpha = .45f),
-            ))))
+            if (tvScrim) {
+                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(
+                    Color.Black.copy(alpha = .94f), Color.Black.copy(alpha = .72f), Color.Black.copy(alpha = .45f),
+                ))))
+            }
             Column(
                 modifier.align(Alignment.BottomStart).padding(horizontal = 58.dp, vertical = 32.dp)
                     .widthIn(max = tvWidth).fillMaxWidth().heightIn(max = maxHeight - 64.dp)

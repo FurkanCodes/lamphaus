@@ -4,6 +4,7 @@ import android.graphics.Typeface
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.lamphaus.core.model.SubtitleEdgeStyle
+import com.lamphaus.core.model.SubtitleFontFamily
 import com.lamphaus.core.model.SubtitleStyle
 import com.lamphaus.core.model.SubtitleStylePolicy
 
@@ -37,10 +38,21 @@ object SubtitleStyleApplier {
                 /* windowColor = */ background,
                 edgeType(style.edgeStyle, style.outlineEnabled),
                 edgeColor,
-                if (style.bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT,
+                typeface(style.fontFamily, style.bold),
             ),
         )
     }
+
+    private fun typeface(fontFamily: SubtitleFontFamily, bold: Boolean): Typeface =
+        Typeface.create(
+            when (fontFamily) {
+                SubtitleFontFamily.SYSTEM -> Typeface.DEFAULT
+                SubtitleFontFamily.SANS_SERIF -> Typeface.SANS_SERIF
+                SubtitleFontFamily.SERIF -> Typeface.SERIF
+                SubtitleFontFamily.MONOSPACE -> Typeface.MONOSPACE
+            },
+            if (bold) Typeface.BOLD else Typeface.NORMAL,
+        )
 
     private fun edgeType(edgeStyle: SubtitleEdgeStyle, outlineEnabled: Boolean): Int = when {
         !outlineEnabled && edgeStyle == SubtitleEdgeStyle.NONE -> CaptionStyleCompat.EDGE_TYPE_NONE

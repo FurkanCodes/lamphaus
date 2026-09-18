@@ -29,7 +29,11 @@ class PlaybackChromeTest {
     private var exits = 0
     private var delayMillis = 0L
 
-    private fun show(tv: Boolean, fontScale: Float? = null) {
+    private fun show(
+        tv: Boolean,
+        fontScale: Float? = null,
+        startupPhase: PlaybackStartupPhase = PlaybackStartupPhase.READY,
+    ) {
         compose.runOnUiThread { player = FakeChromePlayer() }
         compose.setContent {
             var style by remember { mutableStateOf(SubtitleStyle()) }
@@ -49,10 +53,18 @@ class PlaybackChromeTest {
                 onSubtitleDelay = { subtitleDelay = it; delayMillis = it }, onAudioDelay = {},
                 onSubtitleStyle = { style = it }, onLoadSidecarCues = { it(emptyList()) },
                 onApplySyncByLine = { _, _ -> },
+                startupPhase = startupPhase,
             )
             }
         }
         compose.waitForIdle()
+    }
+
+    @Test fun playbackLoadingSurfaceShowsMetadataWithoutPlaybackChrome() {
+        show(false, startupPhase = PlaybackStartupPhase.LOADING)
+        compose.onNodeWithTag("playback-loading").assertIsDisplayed()
+        compose.onNodeWithText("The quiet earth").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Play").assertDoesNotExist()
     }
 
     @Test fun TV_FOC_01_audioSelectionAndBackRestoreOrigin() {
@@ -69,18 +81,22 @@ class PlaybackChromeTest {
         assertEquals(0, exits)
     }
 
-    @Test fun TV_NAV_02_subtitleEditorReturnsToAppearanceAndTrackOffWorks() {
+    @Test fun TV_NAV_02_subtitleControlCenterEditsLiveAndTrackOffWorks() {
         show(true)
         compose.onNodeWithContentDescription("Subtitles").performClick()
         compose.onNodeWithText("English").performClick()
         compose.onNodeWithText("English captions").performClick()
         compose.runOnIdle { assertEquals("text-en", player.trackSelectionParameters.overrides.keys.single().id) }
         screenshot("tv-subtitles")
-        compose.onAllNodesWithText("Subtitle appearance").filter(hasClickAction()).onFirst().performClick()
-        compose.onNodeWithText("Subtitle appearance").assertIsDisplayed()
-        screenshot("tv-appearance")
-        pressBack()
-        compose.onAllNodesWithText("Subtitle appearance").filter(hasClickAction()).onFirst().assertIsFocused()
+        compose.onNodeWithText("Font").performScrollTo().performClick()
+        compose.onNodeWithText("Sans serif").assertIsDisplayed()
+        compose.onNodeWithTag("tv-subtitle-appearance")
+            .performScrollToNode(hasText("Timing and sync"))
+        compose.onNodeWithText("Timing and sync").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Increase Timing and sync")
+            .assertHasClickAction()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        compose.runOnIdle { assertEquals(100L, delayMillis) }
         compose.onNodeWithText("Off").performClick()
         compose.runOnIdle { assertTrue(C.TRACK_TYPE_TEXT in player.trackSelectionParameters.disabledTrackTypes) }
         pressBack()

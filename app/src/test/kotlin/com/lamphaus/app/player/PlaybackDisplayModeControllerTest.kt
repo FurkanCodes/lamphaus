@@ -32,6 +32,19 @@ class PlaybackDisplayModeControllerTest {
     }
 
     @Test
+    fun `startup evaluates a stable format before playback`() {
+        controller.onVideoFormat(1920, 1080, 24f)
+        controller.prepareForPlayback()
+        controller.tick(0)
+
+        assertEquals(hd24.id, output.preferredModeId)
+        assertEquals(
+            PlaybackDisplayModeController.DisplayModeReason.REQUESTED,
+            decisions.last().reason,
+        )
+    }
+
+    @Test
     fun `PLY-IMM-04 clears surface rate on restore and live strategy change`() {
         controller.onVideoFormat(1920, 1080, 24f)
         controller.tick(2_000)

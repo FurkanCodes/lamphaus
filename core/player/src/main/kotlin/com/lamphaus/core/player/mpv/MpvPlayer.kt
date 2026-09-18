@@ -212,6 +212,16 @@ class MpvPlayer(
         MpvLibrary.setPropertyString(handle, "sub-bold", if (style.bold) "yes" else "no")
         MpvLibrary.setPropertyString(
             handle,
+            "sub-font",
+            when (style.fontFamily) {
+                com.lamphaus.core.model.SubtitleFontFamily.SYSTEM -> "sans-serif"
+                com.lamphaus.core.model.SubtitleFontFamily.SANS_SERIF -> "sans-serif"
+                com.lamphaus.core.model.SubtitleFontFamily.SERIF -> "serif"
+                com.lamphaus.core.model.SubtitleFontFamily.MONOSPACE -> "monospace"
+            },
+        )
+        MpvLibrary.setPropertyString(
+            handle,
             "sub-color",
             color(style.textColor, com.lamphaus.core.model.SubtitleStylePolicy.clampOpacity(style.textOpacity)),
         )

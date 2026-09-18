@@ -43,6 +43,7 @@ class PlaybackDisplayModeController internal constructor(
     private var pendingFormat: Triple<Int, Int, Float>? = null
     private var stableMillis = 0L
     private var evaluated = false
+    private var evaluateImmediately = false
     private var matchingConfig: Pair<FrameRateMatching, ResolutionMatching>? = null
     private var requestedMode: PlaybackOutputMode? = null
     private var requestMillis = 0L
@@ -58,6 +59,18 @@ class PlaybackDisplayModeController internal constructor(
         }
     }
 
+    /**
+     * Allows the initial format to be evaluated before playback starts. During
+     * normal playback we still wait for [STABILITY_MILLIS] so an adaptive
+     * source can settle; startup already waited for Media3 to reach READY.
+     */
+    fun prepareForPlayback() {
+        if (pendingFormat != null && !evaluated && requestedMode == null) {
+            stableMillis = STABILITY_MILLIS
+            evaluateImmediately = true
+        }
+    }
+
     /** Called on the main thread while playback is active. */
     fun tick(deltaMillis: Long) {
         val config = configProvider()
@@ -66,7 +79,7 @@ class PlaybackDisplayModeController internal constructor(
             if (matchingConfig != null) restoreOutputPreferences()
             matchingConfig = settings
             evaluated = false
-            stableMillis = 0L
+            stableMillis = if (evaluateImmediately) STABILITY_MILLIS else 0L
         }
         val currentMode = output.currentMode
         requestedMode?.let { requested ->
@@ -86,6 +99,7 @@ class PlaybackDisplayModeController internal constructor(
         stableMillis += deltaMillis
         if (stableMillis < STABILITY_MILLIS) return
         evaluated = true
+        evaluateImmediately = false
         if (settings.first == FrameRateMatching.ALWAYS && frameRate > 0f) {
             surfaceFrameRateHost.requestFrameRate(frameRate)
         } else {
@@ -149,6 +163,7 @@ class PlaybackDisplayModeController internal constructor(
         pendingFormat = null
         evaluated = false
         stableMillis = 0L
+        evaluateImmediately = false
         matchingConfig = null
     }
 

@@ -64,6 +64,7 @@ import com.lamphaus.app.ui.subtitleVideoId
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -74,6 +75,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -104,7 +106,13 @@ class PlayerActivity : ComponentActivity() {
     private val pictureInPictureState = mutableStateOf(false)
     private val profilePlaybackPreferencesState = mutableStateOf(ProfilePlaybackPreferences())
     private val streamInfoState = mutableStateOf<String?>(null)
+    private val playbackStartupPhaseState = mutableStateOf(PlaybackStartupPhase.LOADING)
     private var displayTickJob: Job? = null
+    private var startupJob: Job? = null
+    private var startupErrorJob: Job? = null
+    private var playerReadyDeferred: CompletableDeferred<Boolean>? = null
+    private var displayMatchDeferred: CompletableDeferred<Boolean>? = null
+    private var displayModeSwitchInFlight = false
     private var deviceConfigJob: Job? = null
     private var attachedPlayerView: android.view.View? = null
     private var audioRouteFingerprint: String? = null
@@ -149,9 +157,13 @@ class PlayerActivity : ComponentActivity() {
                 activity = this@PlayerActivity,
                 configProvider = { Media3EngineFactory.deviceConfig },
                 onModeDecision = { decision ->
+                    displayModeSwitchInFlight = decision.reason == PlaybackDisplayModeController.DisplayModeReason.REQUESTED
                     streamInfoState.value = buildString {
                         append(decision.appliedMode?.let { "${it.width}x${it.height} @ ${it.refreshRateHz} Hz" } ?: getString(R.string.playback_display_current))
                         append(" \u00b7 ").append(getString(decision.reason.stringRes))
+                    }
+                    if (decision.reason != PlaybackDisplayModeController.DisplayModeReason.REQUESTED) {
+                        displayMatchDeferred?.complete(true)
                     }
                 },
                 surfaceFrameRateHost = frameRateHost,
@@ -163,7 +175,9 @@ class PlayerActivity : ComponentActivity() {
             val preferences = container.playbackPreferencesRepository.profilePreferences(profileId)
             profilePlaybackPreferencesState.value = preferences
             subtitleStyleState.value = preferences.subtitleStyle
-            controller?.let { applyTrackDefaults(it, preferences) }
+            // The controller often connects after profile preferences load;
+            // apply them to the live session instead of losing this race.
+            controllerState.value?.let { applyTrackDefaults(it, preferences) }
         }
         registerAudioRouteListener()
         connect(playback)
@@ -217,6 +231,7 @@ class PlayerActivity : ComponentActivity() {
                     subtitleDelayMillis = subtitleDelayState.value,
                     audioDelayMillis = audioDelayState.value,
                     streamInfo = streamInfoState.value,
+                    startupPhase = playbackStartupPhaseState.value,
                     onSubtitleDelay = ::applySubtitleDelay,
                     onAudioDelay = ::updateAudioRouteDelay,
                     onSubtitleStyle = ::applySubtitleStyle,
@@ -239,6 +254,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun connect(playback: PlaybackRequest) {
+        playbackStartupPhaseState.value = PlaybackStartupPhase.LOADING
         PlaybackHeaderRegistry.begin(playback.source.uri, playback.source.headers)
         playback.source.subtitles.forEach { subtitle ->
             PlaybackHeaderRegistry.put(subtitle.url, subtitle.headers)
@@ -258,16 +274,30 @@ class PlayerActivity : ComponentActivity() {
                     mediaController.addListener(object : Player.Listener {
                         override fun onRenderedFirstFrame() {
                             PerfTrace.mark(PerfTrace.FIRST_VIDEO_FRAME)
+                            startupErrorJob?.cancel()
+                            playbackStartupPhaseState.value = PlaybackStartupPhase.READY
                         }
 
                         override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_READY) {
+                                playerReadyDeferred?.complete(true)
+                                if (mediaController.playWhenReady &&
+                                    mediaController.currentTracks.groups.none { it.type == C.TRACK_TYPE_VIDEO }
+                                ) {
+                                    startupErrorJob?.cancel()
+                                    playbackStartupPhaseState.value = PlaybackStartupPhase.READY
+                                }
+                            }
                             if (playbackState == Player.STATE_ENDED) {
+                                playerReadyDeferred?.complete(false)
+                                displayModeSwitchInFlight = false
                                 displayModeController?.restore()
                                 saveProgress(final = true, naturalEnd = true)
                             }
                         }
 
                         override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                            displayModeSwitchInFlight = false
                             displayModeController?.restore()
                         }
 
@@ -280,17 +310,82 @@ class PlayerActivity : ComponentActivity() {
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
+                            displayModeSwitchInFlight = false
                             displayModeController?.restore()
+                            if (playbackStartupPhaseState.value == PlaybackStartupPhase.LOADING) {
+                                val waiting = playerReadyDeferred
+                                startupErrorJob?.cancel()
+                                startupErrorJob = lifecycleScope.launch {
+                                    // PlaybackEngineFallback may replace the
+                                    // failed Media3 player with MPV here.
+                                    delay(2_000L)
+                                    if (waiting == null) {
+                                        playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
+                                    } else if (playerReadyDeferred === waiting && !waiting.isCompleted) {
+                                        waiting.complete(false)
+                                        playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
+                                    }
+                                }
+                            }
                         }
                     })
-                    mediaController.prepare()
-                    mediaController.play()
-                    startProgressPulse()
-                    restoreSourceTiming(playback)
+                    prepareAndStartPlayback(mediaController, playback)
+                }.onFailure {
+                    playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
                 }
             },
             ContextCompat.getMainExecutor(this),
         )
+    }
+
+    /** Prepare all Media3 tracks and settle the TV output before exposing controls. */
+    private fun prepareAndStartPlayback(mediaController: MediaController, playback: PlaybackRequest) {
+        startupJob?.cancel()
+        startupErrorJob?.cancel()
+        startupJob = lifecycleScope.launch {
+            mediaController.playWhenReady = false
+            val ready = CompletableDeferred<Boolean>()
+            playerReadyDeferred = ready
+            mediaController.prepare()
+            if (mediaController.playbackState == Player.STATE_READY) {
+                ready.complete(true)
+            }
+            val prepared = withTimeoutOrNull(20_000L) { ready.await() } ?: false
+            if (playerReadyDeferred === ready) playerReadyDeferred = null
+            if (!prepared || playbackStartupPhaseState.value == PlaybackStartupPhase.FAILED) return@launch
+
+            awaitDisplayMatch(mediaController)
+            if (playbackStartupPhaseState.value == PlaybackStartupPhase.FAILED) return@launch
+            mediaController.playWhenReady = true
+            mediaController.play()
+            startProgressPulse()
+            restoreSourceTiming(playback)
+        }
+    }
+
+    /**
+     * Requests the matched output while paused. A timeout keeps an unusual
+     * display implementation from holding playback forever; the regular
+     * display tick will continue to observe it once video is running.
+     */
+    private suspend fun awaitDisplayMatch(mediaController: MediaController): Boolean {
+        val matcher = displayModeController ?: return true
+        if (mediaController.currentTracks.groups.none { it.type == C.TRACK_TYPE_VIDEO }) return true
+        val settled = CompletableDeferred<Boolean>()
+        displayMatchDeferred = settled
+        return try {
+            withTimeoutOrNull(DISPLAY_STARTUP_TIMEOUT_MILLIS) {
+                while (!settled.isCompleted) {
+                    updateDisplayVideoFormat()
+                    matcher.prepareForPlayback()
+                    matcher.tick(DISPLAY_STARTUP_TICK_MILLIS)
+                    if (!settled.isCompleted) delay(DISPLAY_STARTUP_TICK_MILLIS)
+                }
+                settled.await()
+            } ?: true
+        } finally {
+            if (displayMatchDeferred === settled) displayMatchDeferred = null
+        }
     }
 
     private fun loadSegments(playback: PlaybackRequest?, settings: PlaybackSettings) {
@@ -481,15 +576,15 @@ class PlayerActivity : ComponentActivity() {
         }
         request = next
         requestState.value = next
+        playbackStartupPhaseState.value = PlaybackStartupPhase.LOADING
         lastSavedPositionMillis = -1L
         nextEpisodeMessageState.value = null
         nextEpisodeDismissedVideoId.value = null
         loadSegments(next, playbackSettingsState.value)
-        restoreSourceTiming(next)
+        displayModeController?.restore()
         controller?.apply {
-            setMediaItem(next.toMediaItem())
-            prepare()
-            play()
+            setMediaItem(next.toMediaItem(), next.startPositionMillis)
+            prepareAndStartPlayback(this, next)
         }
     }
 
@@ -547,7 +642,9 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         saveProgress(final = true)
-        if ((isTelevision || isFinishing) && !isChangingConfigurations) {
+        // A TV mode switch briefly stops the activity. Do not pause the source
+        // in that window or the display match looks like a three-second crash.
+        if ((isTelevision || isFinishing) && !isChangingConfigurations && !displayModeSwitchInFlight) {
             controller?.pause()
             displayModeController?.restore()
         }
@@ -566,6 +663,14 @@ class PlayerActivity : ComponentActivity() {
         surfaceFrameRateHost = null
         displayTickJob?.cancel()
         displayTickJob = null
+        startupJob?.cancel()
+        startupJob = null
+        startupErrorJob?.cancel()
+        startupErrorJob = null
+        playerReadyDeferred?.cancel()
+        playerReadyDeferred = null
+        displayMatchDeferred?.cancel()
+        displayMatchDeferred = null
         deviceConfigJob?.cancel()
         deviceConfigJob = null
         progressPulseJob?.cancel()
@@ -908,6 +1013,8 @@ class PlayerActivity : ComponentActivity() {
         /** Minimum playback advance between periodic progress writes. */
         private const val PROGRESS_SAVE_DELTA_MILLIS = 5_000L
         private const val DISPLAY_TICK_INTERVAL_MILLIS = 500L
+        private const val DISPLAY_STARTUP_TICK_MILLIS = 100L
+        private const val DISPLAY_STARTUP_TIMEOUT_MILLIS = 6_000L
         private const val ACTION_SET_SUBTITLE_DELAY = "lamphaus.playback.SET_SUBTITLE_DELAY"
         private const val EXTRA_DELAY_MILLIS = "delay_millis"
         private const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"
