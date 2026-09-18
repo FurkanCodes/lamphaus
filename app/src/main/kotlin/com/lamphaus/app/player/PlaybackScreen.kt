@@ -412,6 +412,10 @@ internal fun PlaybackScreen(
     val rootFocus = remember { FocusRequester() }
     val reducedMotion = rememberReducedMotion()
     val startupLoading = startupPhase == PlaybackStartupPhase.LOADING
+    // TV never falls back to the small generic buffering indicator. Startup
+    // and later stream rebuffering use the same stable, artwork-led surface.
+    val loadingSurfaceVisible = startupLoading ||
+        (isTelevision && snapshot.buffering && snapshot.errorMessage == null)
     val windowWidthDp = with(LocalDensity.current) {
         LocalWindowInfo.current.containerSize.width.toDp()
     }
@@ -507,15 +511,15 @@ internal fun PlaybackScreen(
         if (!controlsVisible && panel == null) rootFocus.requestFocus()
     }
 
-    LaunchedEffect(startupLoading, controlsVisible, inPictureInPicture, panel) {
-        onControlsVisibilityChanged(!startupLoading && !inPictureInPicture && (controlsVisible || panel != null))
+    LaunchedEffect(loadingSurfaceVisible, controlsVisible, inPictureInPicture, panel) {
+        onControlsVisibilityChanged(!loadingSurfaceVisible && !inPictureInPicture && (controlsVisible || panel != null))
     }
 
     // One lift value drives both engines: Media3 through the subtitle view below,
     // MPV through the session command (PLY-IMM-03, PLY-IMM-04).
-    LaunchedEffect(startupLoading, controlsVisible, panel, inPictureInPicture) {
+    LaunchedEffect(loadingSurfaceVisible, controlsVisible, panel, inPictureInPicture) {
         onSubtitleLiftChanged(
-            if (!startupLoading && !inPictureInPicture && (controlsVisible || panel != null)) {
+            if (!loadingSurfaceVisible && !inPictureInPicture && (controlsVisible || panel != null)) {
                 PlayerChromeTokens.SubtitleLiftFraction
             } else {
                 0f
@@ -533,7 +537,7 @@ internal fun PlaybackScreen(
 
     BackHandler {
         when {
-            startupLoading -> onExit()
+            loadingSurfaceVisible -> onExit()
             // Back unwinds editor -> submenu -> controls -> exit (plan §5),
             // restoring the originating focus at each layer. Lock is one layer.
             locked -> locked = false
@@ -554,7 +558,7 @@ internal fun PlaybackScreen(
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || player == null || startupLoading) return@onPreviewKeyEvent false
+                if (event.type != KeyEventType.KeyDown || player == null || loadingSurfaceVisible) return@onPreviewKeyEvent false
                 when (event.key) {
                     Key.MediaPlayPause -> {
                         if (snapshot.playing) player.pause() else player.play()
@@ -662,7 +666,7 @@ internal fun PlaybackScreen(
 
         if (!inPictureInPicture && !isTelevision) {
             PlayerGestureSurface(
-                enabled = !startupLoading && !locked && snapshot.errorMessage == null,
+                enabled = !loadingSurfaceVisible && !locked && snapshot.errorMessage == null,
                 onTap = {
                     controlsVisible = !controlsVisible
                     panel = null
@@ -708,7 +712,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (!startupLoading && !inPictureInPicture && snapshot.buffering && snapshot.errorMessage == null) {
+        if (!loadingSurfaceVisible && !inPictureInPicture && snapshot.buffering && snapshot.errorMessage == null) {
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -728,10 +732,10 @@ internal fun PlaybackScreen(
             }
         }
 
-        if (!startupLoading && !inPictureInPicture && isTelevision && panel == PlayerPanel.SUBTITLES) {
+        if (!loadingSurfaceVisible && !inPictureInPicture && isTelevision && panel == PlayerPanel.SUBTITLES) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)))
             PlayerLiveSubtitleOverlay(liveSubtitleCues, subtitleStyle)
-        } else if (!startupLoading && !inPictureInPicture && (controlsVisible || panel != null || snapshot.errorMessage != null)) {
+        } else if (!loadingSurfaceVisible && !inPictureInPicture && (controlsVisible || panel != null || snapshot.errorMessage != null)) {
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(
@@ -744,7 +748,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (!startupLoading && !inPictureInPicture && controlsVisible && panel == null && !locked && snapshot.errorMessage == null) {
+        if (!loadingSurfaceVisible && !inPictureInPicture && controlsVisible && panel == null && !locked && snapshot.errorMessage == null) {
             PlayerControls(
                 request = request,
                 snapshot = snapshot,
@@ -786,7 +790,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (!startupLoading && !inPictureInPicture && locked) {
+        if (!loadingSurfaceVisible && !inPictureInPicture && locked) {
             // Locked mode only blocks video-surface touches; Back still unwinds and
             // the chip is a visible, screen-reader reachable unlock (MOB-A11Y-03).
             PlayerActionButton(
@@ -814,7 +818,7 @@ internal fun PlaybackScreen(
             }
         }
         if (
-            !startupLoading && !inPictureInPicture && panel == null && (
+            !loadingSurfaceVisible && !inPictureInPicture && panel == null && (
                 visibleSegment != null ||
                     (nextEpisodeReady && isTelevision) ||
                     (nextEpisodeMessage != null && !nextEpisodeCardVisible)
@@ -842,7 +846,7 @@ internal fun PlaybackScreen(
             )
         }
         AnimatedVisibility(
-            visible = !startupLoading && nextEpisodeCardVisible && !inPictureInPicture && panel == null,
+            visible = !loadingSurfaceVisible && nextEpisodeCardVisible && !inPictureInPicture && panel == null,
             enter = when {
                 reducedMotion -> EnterTransition.None
                 wideLayout -> slideInHorizontally(tween(220)) { it } + fadeIn(tween(220))
@@ -883,7 +887,7 @@ internal fun PlaybackScreen(
             }
         }
 
-        if (!startupLoading && !isTelevision && !inPictureInPicture && !locked && wideLayout && (controlsVisible || panel != null)) {
+        if (!loadingSurfaceVisible && !isTelevision && !inPictureInPicture && !locked && wideLayout && (controlsVisible || panel != null)) {
             PlayerSideRail(
                 icon = Icons.Rounded.BrightnessMedium,
                 label = stringResource(R.string.player_brightness),
@@ -913,7 +917,7 @@ internal fun PlaybackScreen(
                     .heightIn(max = 320.dp),
             )
         }
-        if (!startupLoading) hudText?.let { text ->
+        if (!loadingSurfaceVisible) hudText?.let { text ->
             PlayerHudBubble(hudIcon, text, Modifier.align(Alignment.Center))
         }
 
@@ -925,7 +929,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        panel?.takeUnless { inPictureInPicture || startupLoading }?.let { activePanel ->
+        panel?.takeUnless { inPictureInPicture || loadingSurfaceVisible }?.let { activePanel ->
             if (activePanel == PlayerPanel.INFO) {
                 PlayerStreamInfoPanel(streamInfo = streamInfo, isTelevision = isTelevision, onClose = ::closePanel)
             } else if (editor == PlayerEditor.TIMING) {
@@ -973,7 +977,7 @@ internal fun PlaybackScreen(
             }
         }
 
-        if (startupLoading) {
+        if (loadingSurfaceVisible) {
             PlaybackLoadingSurface(
                 request = request,
                 isTelevision = isTelevision,

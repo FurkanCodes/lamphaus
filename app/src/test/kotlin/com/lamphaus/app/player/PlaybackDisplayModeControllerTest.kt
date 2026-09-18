@@ -5,7 +5,9 @@ import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.core.model.ResolutionMatching
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlaybackDisplayModeControllerTest {
@@ -34,7 +36,25 @@ class PlaybackDisplayModeControllerTest {
     @Test
     fun `startup evaluates a stable format before playback`() {
         controller.onVideoFormat(1920, 1080, 24f)
-        controller.prepareForPlayback()
+        assertTrue(controller.prepareForPlayback())
+        controller.tick(0)
+
+        assertEquals(hd24.id, output.preferredModeId)
+        assertEquals(
+            PlaybackDisplayModeController.DisplayModeReason.REQUESTED,
+            decisions.last().reason,
+        )
+    }
+
+    @Test
+    fun `QA-06 startup waits for measured cadence instead of switching after reveal`() {
+        controller.onVideoFormat(1920, 1080, 0f)
+
+        assertFalse(controller.prepareForPlayback())
+        assertEquals(0, output.preferredModeId)
+
+        controller.onVideoFormat(1920, 1080, 23.976f)
+        assertTrue(controller.prepareForPlayback())
         controller.tick(0)
 
         assertEquals(hd24.id, output.preferredModeId)

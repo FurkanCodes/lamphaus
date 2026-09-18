@@ -111,6 +111,7 @@ class PlayerActivity : ComponentActivity() {
     private var startupJob: Job? = null
     private var startupErrorJob: Job? = null
     private var playerReadyDeferred: CompletableDeferred<Boolean>? = null
+    private var firstFrameDeferred: CompletableDeferred<Boolean>? = null
     private var displayMatchDeferred: CompletableDeferred<Boolean>? = null
     private var displayModeSwitchInFlight = false
     private var deviceConfigJob: Job? = null
@@ -162,7 +163,9 @@ class PlayerActivity : ComponentActivity() {
                         append(decision.appliedMode?.let { "${it.width}x${it.height} @ ${it.refreshRateHz} Hz" } ?: getString(R.string.playback_display_current))
                         append(" \u00b7 ").append(getString(decision.reason.stringRes))
                     }
-                    if (decision.reason != PlaybackDisplayModeController.DisplayModeReason.REQUESTED) {
+                    if (decision.reason != PlaybackDisplayModeController.DisplayModeReason.REQUESTED &&
+                        decision.reason != PlaybackDisplayModeController.DisplayModeReason.UNKNOWN_FRAME_RATE
+                    ) {
                         displayMatchDeferred?.complete(true)
                     }
                 },
@@ -275,21 +278,16 @@ class PlayerActivity : ComponentActivity() {
                         override fun onRenderedFirstFrame() {
                             PerfTrace.mark(PerfTrace.FIRST_VIDEO_FRAME)
                             startupErrorJob?.cancel()
-                            playbackStartupPhaseState.value = PlaybackStartupPhase.READY
+                            firstFrameDeferred?.complete(true)
                         }
 
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             if (playbackState == Player.STATE_READY) {
                                 playerReadyDeferred?.complete(true)
-                                if (mediaController.playWhenReady &&
-                                    mediaController.currentTracks.groups.none { it.type == C.TRACK_TYPE_VIDEO }
-                                ) {
-                                    startupErrorJob?.cancel()
-                                    playbackStartupPhaseState.value = PlaybackStartupPhase.READY
-                                }
                             }
                             if (playbackState == Player.STATE_ENDED) {
                                 playerReadyDeferred?.complete(false)
+                                firstFrameDeferred?.complete(false)
                                 displayModeSwitchInFlight = false
                                 displayModeController?.restore()
                                 saveProgress(final = true, naturalEnd = true)
@@ -310,6 +308,7 @@ class PlayerActivity : ComponentActivity() {
                         }
 
                         override fun onPlayerError(error: PlaybackException) {
+                            firstFrameDeferred?.complete(false)
                             displayModeSwitchInFlight = false
                             displayModeController?.restore()
                             if (playbackStartupPhaseState.value == PlaybackStartupPhase.LOADING) {
@@ -338,28 +337,73 @@ class PlayerActivity : ComponentActivity() {
         )
     }
 
-    /** Prepare all Media3 tracks and settle the TV output before exposing controls. */
+    /** Prepare all Media3 tracks and settle the TV output before exposing video. */
     private fun prepareAndStartPlayback(mediaController: MediaController, playback: PlaybackRequest) {
         startupJob?.cancel()
         startupErrorJob?.cancel()
         startupJob = lifecycleScope.launch {
             mediaController.playWhenReady = false
             val ready = CompletableDeferred<Boolean>()
+            val firstFrame = CompletableDeferred<Boolean>()
             playerReadyDeferred = ready
+            firstFrameDeferred = firstFrame
             mediaController.prepare()
             if (mediaController.playbackState == Player.STATE_READY) {
                 ready.complete(true)
             }
             val prepared = withTimeoutOrNull(20_000L) { ready.await() } ?: false
             if (playerReadyDeferred === ready) playerReadyDeferred = null
-            if (!prepared || playbackStartupPhaseState.value == PlaybackStartupPhase.FAILED) return@launch
+            if (!prepared || playbackStartupPhaseState.value == PlaybackStartupPhase.FAILED) {
+                if (firstFrameDeferred === firstFrame) firstFrameDeferred = null
+                return@launch
+            }
 
-            awaitDisplayMatch(mediaController)
-            if (playbackStartupPhaseState.value == PlaybackStartupPhase.FAILED) return@launch
-            mediaController.playWhenReady = true
-            mediaController.play()
-            startProgressPulse()
-            restoreSourceTiming(playback)
+            val hasVideo = mediaController.currentTracks.groups.any { it.type == C.TRACK_TYPE_VIDEO } ||
+                Media3EngineFactory.currentVideoFormat() != null ||
+                playback.source.mimeType?.startsWith("audio/") != true
+            val originalVolume = mediaController.volume
+            var mutedForDisplayPreparation = false
+            try {
+                if (isTelevision && hasVideo) {
+                    updateDisplayVideoFormat()
+                    val canMatchWhilePaused = displayModeController?.prepareForPlayback() == true
+                    if (!canMatchWhilePaused) {
+                        // Sources without FPS metadata need decoded presentation timestamps.
+                        // Warm them up silently underneath PlaybackLoadingSurface, then match
+                        // the physical output before the movie is ever revealed.
+                        mediaController.volume = 0f
+                        mutedForDisplayPreparation = true
+                        mediaController.playWhenReady = true
+                        mediaController.play()
+                    }
+                    awaitDisplayMatch(mediaController)
+                }
+                if (playbackStartupPhaseState.value == PlaybackStartupPhase.FAILED) return@launch
+
+                restoreSourceTiming(playback)
+                if (mutedForDisplayPreparation) {
+                    mediaController.volume = originalVolume
+                    mutedForDisplayPreparation = false
+                }
+                mediaController.playWhenReady = true
+                mediaController.play()
+                startProgressPulse()
+
+                val frameReady = if (hasVideo) {
+                    withTimeoutOrNull(FIRST_FRAME_TIMEOUT_MILLIS) { firstFrame.await() } ?: false
+                } else {
+                    true
+                }
+                if (frameReady || mediaController.playbackState == Player.STATE_READY) {
+                    startupErrorJob?.cancel()
+                    playbackStartupPhaseState.value = PlaybackStartupPhase.READY
+                }
+            } finally {
+                if (mutedForDisplayPreparation && controller === mediaController) {
+                    mediaController.volume = originalVolume
+                }
+                if (firstFrameDeferred === firstFrame) firstFrameDeferred = null
+            }
         }
     }
 
@@ -377,8 +421,9 @@ class PlayerActivity : ComponentActivity() {
             withTimeoutOrNull(DISPLAY_STARTUP_TIMEOUT_MILLIS) {
                 while (!settled.isCompleted) {
                     updateDisplayVideoFormat()
-                    matcher.prepareForPlayback()
-                    matcher.tick(DISPLAY_STARTUP_TICK_MILLIS)
+                    if (matcher.prepareForPlayback()) {
+                        matcher.tick(DISPLAY_STARTUP_TICK_MILLIS)
+                    }
                     if (!settled.isCompleted) delay(DISPLAY_STARTUP_TICK_MILLIS)
                 }
                 settled.await()
@@ -669,6 +714,8 @@ class PlayerActivity : ComponentActivity() {
         startupErrorJob = null
         playerReadyDeferred?.cancel()
         playerReadyDeferred = null
+        firstFrameDeferred?.cancel()
+        firstFrameDeferred = null
         displayMatchDeferred?.cancel()
         displayMatchDeferred = null
         deviceConfigJob?.cancel()
@@ -1014,7 +1061,8 @@ class PlayerActivity : ComponentActivity() {
         private const val PROGRESS_SAVE_DELTA_MILLIS = 5_000L
         private const val DISPLAY_TICK_INTERVAL_MILLIS = 500L
         private const val DISPLAY_STARTUP_TICK_MILLIS = 100L
-        private const val DISPLAY_STARTUP_TIMEOUT_MILLIS = 6_000L
+        private const val DISPLAY_STARTUP_TIMEOUT_MILLIS = 12_000L
+        private const val FIRST_FRAME_TIMEOUT_MILLIS = 5_000L
         private const val ACTION_SET_SUBTITLE_DELAY = "lamphaus.playback.SET_SUBTITLE_DELAY"
         private const val EXTRA_DELAY_MILLIS = "delay_millis"
         private const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"

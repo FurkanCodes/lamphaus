@@ -64,11 +64,22 @@ class PlaybackDisplayModeController internal constructor(
      * normal playback we still wait for [STABILITY_MILLIS] so an adaptive
      * source can settle; startup already waited for Media3 to reach READY.
      */
-    fun prepareForPlayback() {
-        if (pendingFormat != null && !evaluated && requestedMode == null) {
+    fun prepareForPlayback(): Boolean {
+        val format = pendingFormat ?: return false
+        val config = configProvider()
+        // Many containers omit FPS metadata. Do not settle startup against an
+        // unknown cadence: the activity will decode a bounded, muted warm-up
+        // behind the loading surface until VideoCadenceEstimator has a value.
+        // Otherwise the same source becomes "new" about 2–3 seconds after it
+        // is visible and causes a late, disruptive display-mode switch.
+        if (config.frameRateMatching != FrameRateMatching.OFF && format.third <= 0f) {
+            return false
+        }
+        if (!evaluated && requestedMode == null) {
             stableMillis = STABILITY_MILLIS
             evaluateImmediately = true
         }
+        return true
     }
 
     /** Called on the main thread while playback is active. */

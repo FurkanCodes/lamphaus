@@ -16,10 +16,13 @@ This is a source fix, not a release or production artifact.
 - `VideoCadenceEstimatorTest`: absent metadata, millisecond container timestamps,
   23.976 versus 24, 29.97 versus 30, 59.94 versus 60, insufficient samples,
   source resets and discontinuities.
-- `PlaybackDisplayModeControllerTest`: format stability, subsequent renditions,
-  confirmed versus refused physical switches, settings changes, original window
-  preference restoration, seamless alternatives, independent resolution opt-in,
-  explicit Always surface votes, and surface-vote restoration.
+- `PlaybackDisplayModeControllerTest`: format stability, startup waiting for a
+  measured cadence, subsequent renditions, confirmed versus refused physical
+  switches, settings changes, original window preference restoration, seamless
+  alternatives, independent resolution opt-in, explicit Always surface votes,
+  and surface-vote restoration.
+- `PlaybackChromeTest`: TV startup and rebuffering retain the full artwork and
+  metadata loading surface without exposing playback chrome (`TV-CNT-02`).
 - `Media3EngineFactoryTest`: Media3 votes only for Seamless-only; Always disables
   Media3 voting so the activity's non-seamless surface request is authoritative.
 - `MpvVideoFormatTest`: estimated MPV cadence, container-cadence fallback,
@@ -38,9 +41,10 @@ core/player lint, app lint, provider-neutrality, and `git diff --check` passed.
 
 ## Required physical TV checks (not performed)
 
-`adb devices` reported an API 36 TV emulator (`sdk_google_atv64_arm64`) and an
-API 36 phone emulator, but no physical TV. Unit tests simulate the display;
-Android/HDMI acceptance and visible switching are not proven by these tests.
+`PlaybackChromeTest` passed on an API 36 TV emulator
+(`sdk_google_atv64_arm64`), but no physical TV was connected. Unit tests
+simulate the display; Android/HDMI acceptance and visible switching are not
+proven by these tests.
 
 1. **QA-07 output matrix**: on a TV advertising 720p/1080p/4K, play matching
    sources and cropped 1920×800/3840×1600 films. Check the TV's actual signal
@@ -68,9 +72,10 @@ Android/HDMI acceptance and visible switching are not proven by these tests.
 Android may decline a mode request based on hardware or system policy. Android
 12+ uses `CHANGE_FRAME_RATE_ALWAYS`; Android 11 has no such strategy argument and
 receives the two-argument seamless hint while the physical display-mode path
-remains active. Missing Media3 FPS requires 60 video intervals before estimation;
-MPV uses its estimated cadence with container cadence as fallback. Requests then
-use the existing two-second format-stability gate. No pause or audio delay is
-added for this process.
+remains active. Missing Media3 FPS requires 60 video intervals before estimation.
+Those frames are decoded silently behind the loading surface, and the movie is
+revealed only after the output decision settles. MPV uses its estimated cadence
+with container cadence as fallback. Known metadata is matched while paused, so
+it adds no warm-up. No audio delay is added by either path.
 
 Reference: https://developer.android.com/media/optimize/performance/frame-rate

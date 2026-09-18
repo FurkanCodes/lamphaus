@@ -33,8 +33,9 @@ class PlaybackChromeTest {
         tv: Boolean,
         fontScale: Float? = null,
         startupPhase: PlaybackStartupPhase = PlaybackStartupPhase.READY,
+        playbackState: Int = Player.STATE_READY,
     ) {
-        compose.runOnUiThread { player = FakeChromePlayer() }
+        compose.runOnUiThread { player = FakeChromePlayer(playbackState) }
         compose.setContent {
             var style by remember { mutableStateOf(SubtitleStyle()) }
             var subtitleDelay by remember { mutableLongStateOf(0L) }
@@ -62,6 +63,13 @@ class PlaybackChromeTest {
 
     @Test fun playbackLoadingSurfaceShowsMetadataWithoutPlaybackChrome() {
         show(false, startupPhase = PlaybackStartupPhase.LOADING)
+        compose.onNodeWithTag("playback-loading").assertIsDisplayed()
+        compose.onNodeWithText("The quiet earth").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Play").assertDoesNotExist()
+    }
+
+    @Test fun TV_CNT_02_bufferingKeepsFullPlaybackLoadingSurface() {
+        show(true, playbackState = Player.STATE_BUFFERING)
         compose.onNodeWithTag("playback-loading").assertIsDisplayed()
         compose.onNodeWithText("The quiet earth").assertIsDisplayed()
         compose.onNodeWithContentDescription("Play").assertDoesNotExist()
@@ -198,7 +206,9 @@ class PlaybackChromeTest {
 }
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-private class FakeChromePlayer : SimpleBasePlayer(Looper.getMainLooper()) {
+private class FakeChromePlayer(
+    private val currentPlaybackState: Int = Player.STATE_READY,
+) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var parameters = TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT
     private var position = 120_000L
     private var speed = PlaybackParameters.DEFAULT
@@ -224,7 +234,7 @@ private class FakeChromePlayer : SimpleBasePlayer(Looper.getMainLooper()) {
             .setPlaylist(listOf(MediaItemData.Builder("fixture").setMediaItem(MediaItem.fromUri("https://example.invalid/video"))
                 .setDurationUs(3_600_000_000L).setIsSeekable(true).setTracks(tracks).build()))
             .setCurrentMediaItemIndex(0).setContentPositionMs(position).setContentBufferedPositionMs(PositionSupplier { 600_000L })
-            .setPlaybackState(Player.STATE_READY).setPlaybackParameters(speed)
+            .setPlaybackState(currentPlaybackState).setPlaybackParameters(speed)
             .setPlayWhenReady(playing, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setTrackSelectionParameters(parameters).build()
     }
