@@ -115,9 +115,9 @@ object Media3EngineFactory {
             .setMediaSourceFactory(DefaultMediaSourceFactory(resolvingDataSource))
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
-            // ALWAYS permits non-seamless switches; those are physical
-            // display-mode changes driven by display-mode matching (plan §2),
-            // not this Media3 surface hint.
+            // ALWAYS is owned by PlayerActivity's explicit three-argument
+            // Surface.setFrameRate call. Media3 can only request seamless
+            // changes, so it must stay off to avoid competing surface votes.
             .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategy(config))
             .setLoadControl(
                 DefaultLoadControl.Builder()
@@ -179,11 +179,10 @@ object Media3EngineFactory {
         sessionPlayer?.let { applyDeviceConfig(it, config) }
     }
 
-    private fun videoChangeFrameRateStrategy(config: DevicePlaybackConfig): Int =
+    internal fun videoChangeFrameRateStrategy(config: DevicePlaybackConfig): Int =
         when (config.frameRateMatching) {
-            FrameRateMatching.OFF -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
-            FrameRateMatching.SEAMLESS_ONLY, FrameRateMatching.ALWAYS ->
-                C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
+            FrameRateMatching.SEAMLESS_ONLY -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
+            FrameRateMatching.OFF, FrameRateMatching.ALWAYS -> C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
         }
 }
 

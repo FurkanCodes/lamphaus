@@ -92,6 +92,7 @@ class PlayerActivity : ComponentActivity() {
     private var segmentLookupJob: Job? = null
     private var nextEpisodeResolutionJob: Job? = null
     private var displayModeController: PlaybackDisplayModeController? = null
+    private var surfaceFrameRateHost: AndroidPlaybackSurfaceFrameRateHost? = null
     private val sidecarLoader = com.lamphaus.core.player.SidecarSubtitleLoader()
     private var subtitleCues: List<com.lamphaus.core.model.SubtitleCue> = emptyList()
     private var uiPlayer: Player? = null
@@ -140,6 +141,8 @@ class PlayerActivity : ComponentActivity() {
         // low-memory playback and return-to-browse measurement on a physical target.
         SingletonImageLoader.get(this).memoryCache?.clear()
         if (isTelevision) {
+            val frameRateHost = AndroidPlaybackSurfaceFrameRateHost()
+            surfaceFrameRateHost = frameRateHost
             displayModeController = PlaybackDisplayModeController(
                 activity = this@PlayerActivity,
                 configProvider = { Media3EngineFactory.deviceConfig },
@@ -149,6 +152,7 @@ class PlayerActivity : ComponentActivity() {
                         append(" \u00b7 ").append(getString(decision.reason.stringRes))
                     }
                 },
+                surfaceFrameRateHost = frameRateHost,
             )
         }
         lifecycleScope.launch {
@@ -500,6 +504,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun updatePipSourceRect(playerView: android.view.View) {
         attachedPlayerView = playerView
+        surfaceFrameRateHost?.attachPlayerView(playerView)
         if (isTelevision || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val sourceRect = Rect()
         if (!playerView.getGlobalVisibleRect(sourceRect)) return
@@ -540,6 +545,8 @@ class PlayerActivity : ComponentActivity() {
         }
         audioDeviceCallback = null
         displayModeController?.restore()
+        surfaceFrameRateHost?.release()
+        surfaceFrameRateHost = null
         displayTickJob?.cancel()
         displayTickJob = null
         deviceConfigJob?.cancel()

@@ -18,8 +18,36 @@ class PlaybackDisplayModeControllerTest {
         resolutionMatching = ResolutionMatching.MATCH_SOURCE,
     )
     private val output = FakeDisplayHost(uhd60, listOf(uhd60, hd60, hd24, uhd24))
+    private val surface = FakeSurfaceFrameRateHost()
     private val decisions = mutableListOf<PlaybackDisplayModeController.DisplayModeDecision>()
-    private val controller = PlaybackDisplayModeController(output, { config }, decisions::add)
+    private val controller = PlaybackDisplayModeController(output, { config }, decisions::add, surface)
+
+    @Test
+    fun `QA-06 always requests non seamless surface rate after stability`() {
+        controller.onVideoFormat(1920, 1080, 23.976f)
+        controller.tick(1_999)
+        assertNull(surface.requestedFrameRate)
+        controller.tick(1)
+        assertEquals(23.976f, surface.requestedFrameRate)
+    }
+
+    @Test
+    fun `PLY-IMM-04 clears surface rate on restore and live strategy change`() {
+        controller.onVideoFormat(1920, 1080, 24f)
+        controller.tick(2_000)
+        assertEquals(24f, surface.requestedFrameRate)
+
+        config = config.copy(frameRateMatching = FrameRateMatching.SEAMLESS_ONLY)
+        controller.tick(500)
+        assertNull(surface.requestedFrameRate)
+
+        config = config.copy(frameRateMatching = FrameRateMatching.ALWAYS)
+        controller.tick(500)
+        controller.tick(1_500)
+        assertEquals(24f, surface.requestedFrameRate)
+        controller.restore()
+        assertNull(surface.requestedFrameRate)
+    }
 
     @Test
     fun `QA-06 waits for stability and confirms the physical switch`() {
@@ -114,4 +142,16 @@ class PlaybackDisplayModeControllerTest {
         override val supportedModes: List<PlaybackOutputMode>,
         override var preferredModeId: Int = 0,
     ) : PlaybackDisplayHost
+
+    private class FakeSurfaceFrameRateHost : PlaybackSurfaceFrameRateHost {
+        var requestedFrameRate: Float? = null
+
+        override fun requestFrameRate(frameRateHz: Float) {
+            requestedFrameRate = frameRateHz
+        }
+
+        override fun clearFrameRate() {
+            requestedFrameRate = null
+        }
+    }
 }
