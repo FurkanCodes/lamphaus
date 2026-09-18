@@ -147,7 +147,12 @@ export function renderChangelog(source: string): { paragraphs: string[]; items: 
 export async function loadVerifiedFeed(): Promise<FeedStatus> {
   let res: Response;
   try {
-    res = await fetch(FEED_URL, { headers: { Accept: "application/json" } });
+    const feedUrl = new URL(FEED_URL);
+    feedUrl.searchParams.set("requestedAt", Date.now().toString());
+    res = await fetch(feedUrl, {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
   } catch {
     return { kind: "error", reason: "offline" };
   }
