@@ -519,7 +519,7 @@ internal fun PlaybackScreen(
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (!inPictureInPicture) {
+        if (!inPictureInPicture && !isTelevision) {
             PlayerGestureSurface(
                 enabled = !locked && snapshot.errorMessage == null,
                 onTap = {
@@ -740,7 +740,7 @@ internal fun PlaybackScreen(
             }
         }
 
-        if (!inPictureInPicture && !locked && wideLayout && (controlsVisible || panel != null)) {
+        if (!isTelevision && !inPictureInPicture && !locked && wideLayout && (controlsVisible || panel != null)) {
             PlayerSideRail(
                 icon = Icons.Rounded.BrightnessMedium,
                 label = stringResource(R.string.player_brightness),
@@ -1048,10 +1048,11 @@ internal fun PlayerSettingButton(
                 contentDescription = label
                 selected = active
             }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .size(PlayerChromeTokens.TvControlContainer),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
+        // Icon-only at rest; the focused label appears beside the row (PLY-CHR-05).
         Icon(
             imageVector = icon,
             contentDescription = null,
@@ -1060,16 +1061,7 @@ internal fun PlayerSettingButton(
                 active -> PlayerPrimary
                 else -> PlayerOnSurface
             },
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            text = label,
-            color = if (focused) PlayerFocusedContent else PlayerOnSurface,
-            fontFamily = PlayerFont,
-            fontWeight = FontWeight.Medium,
-            fontSize = 13.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.size(28.dp),
         )
         if (active && !focused) {
             Box(
