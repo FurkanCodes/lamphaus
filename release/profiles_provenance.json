@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-10T21:38:43Z",
-  "sourceCommit": "e1c5cbede093d05f897029ebbf4ca680e183659e",
+  "generatedAt": "2026-09-18T17:50:39Z",
+  "sourceCommit": "d9126d7bc64a491f1ba6b87b53a29a3f42426604",
   "profileKind": "startup",
-  "profileSha256": "22f2048efe899e7d72994f4fdd3282699de1c674a02eba586b678a6a578e9959",
+  "profileSha256": "f418518b562185d1bfd3a92e4beece90a4c5ed3a4fbd96b88c6b3fe4963f433d",
   "devices": {
-    "mobile": "2506BPN68G physical phone",
-    "tv": "sdk_google_atv64_arm64 Android 16 emulator"
+    "mobile": "FocusPhone(AVD) Android 16 emulator",
+    "tv": "Television_4K(AVD) Android 16 emulator"
   },
   "rules": ["QA-07", "QA-08"]
 }
