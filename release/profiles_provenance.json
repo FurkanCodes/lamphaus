@@ -10,5 +10,6 @@
   "rules": [
     "QA-07",
     "QA-08"
-  ]
+  ],
+  "retainedFor": "1.0.0-beta.15: owner chose to reuse the beta.14 TV profile although Home loading changed; regenerate next time startup or Home paths change (REL-04)"
 }
