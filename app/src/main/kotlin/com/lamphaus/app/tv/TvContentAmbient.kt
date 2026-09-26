@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalResources
 import coil3.SingletonImageLoader
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
@@ -115,8 +116,9 @@ internal fun rememberTvContentAmbient(focusedMedia: () -> MediaPreview?): TvCont
     )
     val background by rememberUpdatedState(androidx.tv.material3.MaterialTheme.colorScheme.background)
     val ambient = remember { TvContentAmbient() }
-    val displaySize = remember(context) {
-        context.resources.displayMetrics.let { maxOf(it.widthPixels, 1) to maxOf(it.heightPixels, 1) }
+    val resources = LocalResources.current
+    val displaySize = remember(resources) {
+        resources.displayMetrics.let { maxOf(it.widthPixels, 1) to maxOf(it.heightPixels, 1) }
     }
 
     LaunchedEffect(ambient) {
