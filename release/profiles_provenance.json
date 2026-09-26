@@ -1,11 +1,14 @@
 {
-  "generatedAt": "2026-09-18T21:21:43Z",
-  "sourceCommit": "ef124d1627a460b8b2d167374575d15d05ff3402",
+  "generatedAt": "2026-09-26T05:33:33Z",
+  "sourceCommit": "99211fa74125c1c8fe1b93853071f24218af89e1",
   "profileKind": "startup",
-  "profileSha256": "d5152bd080737b2b70c18890ae203f07d1352b042902a85a725a1eceb60106b2",
+  "profileSha256": "dbe4d1de01c0801e92cae26b2f31c97ff39cbcffdfbea2802a419af155947312",
   "devices": {
     "mobile": "FocusPhone(AVD) Android 16 emulator (retained 2026-09-18)",
-    "tv": "Television_4K(AVD) Android 16 emulator (regenerated 2026-09-19)"
+    "tv": "Television_4K(AVD) Android 16 emulator, landscape, SwiftShader (regenerated with playback journey)"
   },
-  "rules": ["QA-07", "QA-08"]
+  "rules": [
+    "QA-07",
+    "QA-08"
+  ]
 }
