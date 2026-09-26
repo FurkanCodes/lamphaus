@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import coil3.SingletonImageLoader
+import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
@@ -46,12 +47,13 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-// QA-08: the ambient image is drawn at TvAmbientTokens.imageAlpha under
-// near-opaque scrims, so a quarter-resolution decode is visually identical to
-// a full 1920x1080 one while using a quarter of the memory (about 2 MB instead
-// of 8 MB per focus change) and leaving room in the image cache for posters.
-private const val DISPLAY_WIDTH = 960
-private const val DISPLAY_HEIGHT = 540
+// The ambient artwork is decoded and baked at the size the app draws at
+// (1920x1080 on a 1080p TV interface, 3840x2160 on a 4K one), so it keeps the
+// artwork's full on-screen sharpness. A quarter-resolution version looked
+// soft on large TVs. Low-memory TVs default the background off instead.
+// Artwork-free fallbacks are only gradients, so they stay at half resolution.
+private const val FALLBACK_WIDTH = 960
+private const val FALLBACK_HEIGHT = 540
 private const val PALETTE_SAMPLE_SIZE = 96
 private const val PALETTE_CACHE_CAPACITY = 32
 
@@ -113,6 +115,9 @@ internal fun rememberTvContentAmbient(focusedMedia: () -> MediaPreview?): TvCont
     )
     val background by rememberUpdatedState(androidx.tv.material3.MaterialTheme.colorScheme.background)
     val ambient = remember { TvContentAmbient() }
+    val displaySize = remember(context) {
+        context.resources.displayMetrics.let { maxOf(it.widthPixels, 1) to maxOf(it.heightPixels, 1) }
+    }
 
     LaunchedEffect(ambient) {
         snapshotFlow {
@@ -124,7 +129,7 @@ internal fun rememberTvContentAmbient(focusedMedia: () -> MediaPreview?): TvCont
                 delay(TvMotionTokens.heroUpdateDelayMillis)
                 val loaded = if (focusedMediaKey != null && artwork != null) {
                     withContext(Dispatchers.IO) {
-                        loadAmbient(context, artwork, background, defaultAccent, defaultAccentContainer)
+                        loadAmbient(context, artwork, displaySize, background, defaultAccent, defaultAccentContainer)
                     }
                 } else {
                     null
@@ -135,7 +140,12 @@ internal fun rememberTvContentAmbient(focusedMedia: () -> MediaPreview?): TvCont
                         // No artwork: the same scrims over the plain background,
                         // so every change stays a composite-to-composite fade.
                         TvContentAmbientState(
-                            composite = composeAmbient(null, background, defaultAccentContainer),
+                            composite = composeAmbient(
+                                null,
+                                FALLBACK_WIDTH to FALLBACK_HEIGHT,
+                                background,
+                                defaultAccentContainer,
+                            ),
                         )
                     }
             }
@@ -197,11 +207,16 @@ private fun verticalScrimStops(background: Color) = arrayOf(
 )
 
 /** The ambient stack (TvAmbientTokens) baked by [bakeArtwork] at 960x540. */
-internal fun composeAmbient(artwork: Bitmap?, background: Color, accentContainer: Color): ImageBitmap =
+internal fun composeAmbient(
+    artwork: Bitmap?,
+    size: Pair<Int, Int>,
+    background: Color,
+    accentContainer: Color,
+): ImageBitmap =
     bakeArtwork(
         artwork = artwork,
-        width = DISPLAY_WIDTH,
-        height = DISPLAY_HEIGHT,
+        width = size.first,
+        height = size.second,
         background = background,
         imageAlpha = TvAmbientTokens.imageAlpha,
         scrims = listOf(
@@ -232,6 +247,7 @@ internal fun selectArtworkSource(context: Context, resolution: ArtworkResolution
 private suspend fun loadAmbient(
     context: Context,
     artwork: AmbientArtworkSource,
+    displaySize: Pair<Int, Int>,
     background: Color,
     defaultAccent: Color,
     defaultAccentContainer: Color,
@@ -242,9 +258,12 @@ private suspend fun loadAmbient(
     val displayResult = imageLoader.execute(
         ImageRequest.Builder(context)
             .data(artwork.data)
-            .size(Size(DISPLAY_WIDTH, DISPLAY_HEIGHT))
+            .size(Size(displaySize.first, displaySize.second))
             .allowHardware(false)
             .bitmapConfig(Bitmap.Config.ARGB_8888)
+            // Only the baked composite is kept; a full-screen decode in the
+            // shared memory cache would push posters out.
+            .memoryCachePolicy(CachePolicy.DISABLED)
             .build(),
     )
     if (displayResult !is SuccessResult) return null
@@ -267,7 +286,7 @@ private suspend fun loadAmbient(
 
     val accentContainer = palette?.accentContainer ?: defaultAccentContainer
     return TvContentAmbientState(
-        composite = composeAmbient(displayResult.image.toBitmap(), background, accentContainer),
+        composite = composeAmbient(displayResult.image.toBitmap(), displaySize, background, accentContainer),
         accent = palette?.accent ?: defaultAccent,
         accentContainer = accentContainer,
     )
