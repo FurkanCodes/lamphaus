@@ -66,7 +66,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -2362,7 +2364,11 @@ class AppViewModel(
         }
     }
 
-    private suspend fun createInitialProfile() {
+    // Runs inside the snapshot collector's collectLatest block, and each save
+    // below emits a new snapshot. Without NonCancellable the first save
+    // cancelled the rest: fixture add-ons stopped after one, and the cloud
+    // profile save and active-profile write could be skipped.
+    private suspend fun createInitialProfile() = withContext(NonCancellable) {
         val now = System.currentTimeMillis()
         val profile = Profile(UUID.randomUUID().toString(), "Home", "moon", ProfileKind.ADULT, updatedAtEpochMillis = now)
         container.libraryRepository.saveProfile(profile, null)
