@@ -26,4 +26,20 @@ class Media3EngineFactoryTest {
             Media3EngineFactory.videoChangeFrameRateStrategy(config),
         )
     }
+
+    @Test
+    fun `engine settings rebuild the player, frame-rate matching applies live`() {
+        val base = DevicePlaybackConfig()
+
+        assertEquals(false, Media3EngineFactory.needsRebuild(base, base.copy(frameRateMatching = FrameRateMatching.ALWAYS)))
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(downmixMode = com.lamphaus.core.model.DownmixMode.STEREO)))
+        assertEquals(
+            true,
+            Media3EngineFactory.needsRebuild(base, base.copy(dolbyVisionHandling = com.lamphaus.core.model.DolbyVisionHandling.HDR10_BASE_LAYER)),
+        )
+        assertEquals(
+            true,
+            Media3EngineFactory.needsRebuild(base, base.copy(audioOutputMode = com.lamphaus.core.model.AudioOutputMode.FORCE_DECODE)),
+        )
+    }
 }

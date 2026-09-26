@@ -10,9 +10,13 @@ import com.lamphaus.core.model.PlaybackSessionState
 class LamphausPlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
 
+    /** The device settings the current session player was built with. */
+    private var playerConfig = Media3EngineFactory.deviceConfig
+
     override fun onCreate() {
         super.onCreate()
-        val player = Media3EngineFactory.createPlayer(this)
+        playerConfig = Media3EngineFactory.deviceConfig
+        val player = Media3EngineFactory.createPlayer(this, playerConfig)
         Media3EngineFactory.sessionPlayer = player
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val sessionActivity = launchIntent?.let {
@@ -27,7 +31,30 @@ class LamphausPlaybackService : MediaSessionService() {
             .apply { sessionActivity?.let(::setSessionActivity) }
             .setCallback(sessionCallback)
             .build()
-        PlaybackEngineFallback.install(mediaSession!!) { state ->
+        installFallback(mediaSession!!)
+    }
+
+    /**
+     * Audio output, decoder priority, downmix, and Dolby Vision are fixed
+     * when ExoPlayer is built, and this service outlives many playbacks. A
+     * new playback therefore gets a fresh player when those settings changed,
+     * but only while nothing is loaded, so playback is never interrupted.
+     */
+    private fun refreshPlayerIfSettingsChanged(session: MediaSession) {
+        val wanted = Media3EngineFactory.deviceConfig
+        if (!Media3EngineFactory.needsRebuild(playerConfig, wanted)) return
+        val current = session.player
+        if (current.mediaItemCount > 0 && current.playbackState != androidx.media3.common.Player.STATE_IDLE) return
+        val fresh = Media3EngineFactory.createPlayer(this, wanted)
+        playerConfig = wanted
+        session.player = fresh
+        Media3EngineFactory.sessionPlayer = fresh
+        current.release()
+        installFallback(session)
+    }
+
+    private fun installFallback(session: MediaSession) {
+        PlaybackEngineFallback.install(session) { state ->
             // The session now exposes MPV's Media3-compatible state. Drop the
             // failed ExoPlayer snapshot so callers use MPV's selected video
             // format (including its observed frame rate) instead.
@@ -44,6 +71,32 @@ class LamphausPlaybackService : MediaSessionService() {
      * on the client side, so both engines honor one activity contract.
      */
     private val sessionCallback = object : MediaSession.Callback {
+        /**
+         * Grants the timing and style commands to this app's own controllers.
+         * Without the grant Media3 rejects every custom command, so MPV never
+         * received subtitle delay, style, or chrome lift.
+         */
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            // Each playback connects its own controller: apply changed engine settings first.
+            if (controller.packageName == packageName) refreshPlayerIfSettingsChanged(session)
+            if (controller.packageName != packageName) {
+                return MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
+            }
+            val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                .apply {
+                    CUSTOM_ACTIONS.forEach { action ->
+                        add(androidx.media3.session.SessionCommand(action, android.os.Bundle.EMPTY))
+                    }
+                }
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(commands)
+                .build()
+        }
+
         override fun onCustomCommand(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -98,6 +151,11 @@ class LamphausPlaybackService : MediaSessionService() {
         const val ACTION_SET_SUBTITLE_DELAY = "lamphaus.playback.SET_SUBTITLE_DELAY"
         const val ACTION_SET_AUDIO_DELAY = "lamphaus.playback.SET_AUDIO_DELAY"
         const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"
+        val CUSTOM_ACTIONS = listOf(
+            ACTION_SET_SUBTITLE_DELAY,
+            ACTION_SET_AUDIO_DELAY,
+            ACTION_APPLY_SUBTITLE_STYLE,
+        )
         const val EXTRA_DELAY_MILLIS = "delay_millis"
         const val EXTRA_STYLE_JSON = "style_json"
 

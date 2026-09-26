@@ -342,6 +342,17 @@
     <string name="player_zoom_detail">Fill the screen by cropping the picture.</string>
     <string name="player_fill_detail">Fill the screen by changing the picture proportions.</string>
     <string name="player_info_empty">Stream details are not available yet.</string>
+    <string name="player_stats_video">Video</string>
+    <string name="player_stats_audio">Audio</string>
+    <string name="player_stats_output">Audio output</string>
+    <string name="player_stats_passthrough">Passthrough to the receiver</string>
+    <string name="player_stats_decoded">Decoded by %1$s</string>
+    <string name="player_stats_buffer">Buffer</string>
+    <string name="player_stats_buffer_value">%1$.1f s ahead</string>
+    <string name="player_stats_network">Network</string>
+    <string name="player_stats_network_value">%1$.1f Mbps</string>
+    <string name="player_stats_dropped">Dropped frames</string>
+    <string name="player_stats_display">Display</string>
     <string name="player_automatic">Automatic</string>
     <string name="player_best_track">Best supported track</string>
     <string name="player_no_audio">No selectable audio tracks were reported by this source.</string>
@@ -359,6 +370,8 @@
     <string name="player_reset">Reset</string>
     <string name="player_reset_all">Reset all</string>
     <string name="player_loading">Loading…</string>
+    <string name="player_paused">Paused</string>
+    <string name="player_episode_label">S%1$d · E%2$d</string>
     <string name="player_sync_now">Sync now</string>
     <string name="player_capture_again">Capture again</string>
     <string name="player_sync_help">When you hear a spoken line, press Sync now. Then choose that line below.</string>

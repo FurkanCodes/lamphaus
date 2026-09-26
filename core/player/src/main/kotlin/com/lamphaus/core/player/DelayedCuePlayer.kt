@@ -62,7 +62,8 @@ class DelayedCuePlayer(
     }
 
     private val wrappedListener = object : Player.Listener {
-        override fun onCues(cueGroup: CueGroup) {
+        override fun onCues(rawCueGroup: CueGroup) {
+            val cueGroup = RtlSubtitleText.embed(rawCueGroup)
             history.addLast(cueGroup)
             while (history.size > HISTORY_LIMIT) history.removeFirst()
             scheduleDelivery(cueGroup)
@@ -267,7 +268,7 @@ class DelayedCuePlayer(
     }
 
     override fun getCurrentCues(): CueGroup {
-        if (delayMillis <= 0L) return inner.currentCues
+        if (delayMillis <= 0L) return RtlSubtitleText.embed(inner.currentCues)
         val target = inner.currentPosition * 1000 - delayMillis * 1000
         return history.lastOrNull { it.presentationTimeUs <= target } ?: CueGroup(emptyList(), inner.currentPosition * 1000)
     }

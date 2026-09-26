@@ -189,6 +189,7 @@ import com.lamphaus.core.model.RatingSourceScore
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.FrameRateMatching
+import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
 import com.lamphaus.core.model.SpoilerProtectionSettings
@@ -3392,6 +3393,76 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setDevicePlaybackConfig(
                         device.copy(
                             resolutionMatching = if (it) ResolutionMatching.MATCH_SOURCE else ResolutionMatching.OFF,
+                        ),
+                    )
+                },
+            )
+        }
+        item {
+            Text(
+                text = "Audio and video · ${PlaybackEngineOptions.APPLIES_NEXT_PLAYBACK}",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = "Audio output",
+                description = PlaybackEngineOptions.AUDIO_OUTPUT_DESCRIPTION,
+                value = PlaybackEngineOptions.audioOutputLabel(device.audioOutputMode),
+                onClick = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(
+                            audioOutputMode = PlaybackEngineOptions.next(
+                                PlaybackEngineOptions.audioOutputModes, device.audioOutputMode,
+                            ),
+                        ),
+                    )
+                },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = "Downmix",
+                description = PlaybackEngineOptions.DOWNMIX_DESCRIPTION,
+                value = PlaybackEngineOptions.downmixLabel(device.downmixMode),
+                onClick = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(
+                            downmixMode = PlaybackEngineOptions.next(PlaybackEngineOptions.downmixModes, device.downmixMode),
+                        ),
+                    )
+                },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = "Dolby Vision",
+                description = PlaybackEngineOptions.DOLBY_VISION_DESCRIPTION,
+                value = PlaybackEngineOptions.dolbyVisionLabel(device.dolbyVisionHandling),
+                onClick = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(
+                            dolbyVisionHandling = PlaybackEngineOptions.next(
+                                PlaybackEngineOptions.dolbyVisionModes, device.dolbyVisionHandling,
+                            ),
+                        ),
+                    )
+                },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = "Decoder priority",
+                description = PlaybackEngineOptions.DECODER_PRIORITY_DESCRIPTION,
+                value = PlaybackEngineOptions.decoderPriorityLabel(device.decoderPriority),
+                onClick = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(
+                            decoderPriority = PlaybackEngineOptions.next(
+                                PlaybackEngineOptions.decoderPriorities, device.decoderPriority,
+                            ),
                         ),
                     )
                 },

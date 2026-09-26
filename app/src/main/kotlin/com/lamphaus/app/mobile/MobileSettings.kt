@@ -96,6 +96,7 @@ import com.lamphaus.core.model.NextEpisodePolicy
 import com.lamphaus.core.model.NextEpisodeThresholdMode
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.FrameRateMatching
+import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
 import java.util.Locale
@@ -250,6 +251,43 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
+            SettingsCard("Audio and video") {
+                PlaybackEngineChoiceRow(
+                    title = "Audio output",
+                    description = PlaybackEngineOptions.AUDIO_OUTPUT_DESCRIPTION,
+                    value = PlaybackEngineOptions.audioOutputLabel(device.audioOutputMode),
+                    onClick = { choiceDialog = PlaybackChoiceDialog.AUDIO_OUTPUT },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackEngineChoiceRow(
+                    title = "Downmix",
+                    description = PlaybackEngineOptions.DOWNMIX_DESCRIPTION,
+                    value = PlaybackEngineOptions.downmixLabel(device.downmixMode),
+                    onClick = { choiceDialog = PlaybackChoiceDialog.DOWNMIX },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackEngineChoiceRow(
+                    title = "Dolby Vision",
+                    description = PlaybackEngineOptions.DOLBY_VISION_DESCRIPTION,
+                    value = PlaybackEngineOptions.dolbyVisionLabel(device.dolbyVisionHandling),
+                    onClick = { choiceDialog = PlaybackChoiceDialog.DOLBY_VISION },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackEngineChoiceRow(
+                    title = "Decoder priority",
+                    description = PlaybackEngineOptions.DECODER_PRIORITY_DESCRIPTION,
+                    value = PlaybackEngineOptions.decoderPriorityLabel(device.decoderPriority),
+                    onClick = { choiceDialog = PlaybackChoiceDialog.DECODER },
+                )
+                Text(
+                    PlaybackEngineOptions.APPLIES_NEXT_PLAYBACK,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+        }
+        item {
             SettingsCard(stringResource(R.string.episode_playback)) {
                 PlaybackSettingRow(
                     title = stringResource(R.string.skip_intro),
@@ -302,6 +340,34 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setDevicePlaybackConfig(device.copy(frameRateMatching = mode))
                 }
             }
+            PlaybackChoiceDialog.AUDIO_OUTPUT -> PlaybackEngineOptions.audioOutputModes.map { mode ->
+                PlaybackChoice(PlaybackEngineOptions.audioOutputLabel(mode), device.audioOutputMode == mode) {
+                    viewModel.setDevicePlaybackConfig(device.copy(audioOutputMode = mode))
+                }
+            }
+            PlaybackChoiceDialog.DOWNMIX -> PlaybackEngineOptions.downmixModes.map { mode ->
+                PlaybackChoice(PlaybackEngineOptions.downmixLabel(mode), device.downmixMode == mode) {
+                    viewModel.setDevicePlaybackConfig(device.copy(downmixMode = mode))
+                }
+            }
+            PlaybackChoiceDialog.DOLBY_VISION -> PlaybackEngineOptions.dolbyVisionModes.map { mode ->
+                PlaybackChoice(
+                    PlaybackEngineOptions.dolbyVisionLabel(mode),
+                    PlaybackEngineOptions.dolbyVisionLabel(device.dolbyVisionHandling) ==
+                        PlaybackEngineOptions.dolbyVisionLabel(mode),
+                ) {
+                    viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionHandling = mode))
+                }
+            }
+            PlaybackChoiceDialog.DECODER -> PlaybackEngineOptions.decoderPriorities.map { priority ->
+                PlaybackChoice(
+                    PlaybackEngineOptions.decoderPriorityLabel(priority),
+                    PlaybackEngineOptions.decoderPriorityLabel(device.decoderPriority) ==
+                        PlaybackEngineOptions.decoderPriorityLabel(priority),
+                ) {
+                    viewModel.setDevicePlaybackConfig(device.copy(decoderPriority = priority))
+                }
+            }
         }
         AlertDialog(
             onDismissRequest = { choiceDialog = null },
@@ -311,6 +377,10 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                         PlaybackChoiceDialog.AUDIO -> "Default audio"
                         PlaybackChoiceDialog.SUBTITLES -> "Default subtitles"
                         PlaybackChoiceDialog.FRAME_RATE -> "Match frame rate"
+                        PlaybackChoiceDialog.AUDIO_OUTPUT -> "Audio output"
+                        PlaybackChoiceDialog.DOWNMIX -> "Downmix"
+                        PlaybackChoiceDialog.DOLBY_VISION -> "Dolby Vision"
+                        PlaybackChoiceDialog.DECODER -> "Decoder priority"
                     },
                 )
             },
@@ -337,7 +407,18 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
     }
 }
 
-private enum class PlaybackChoiceDialog { AUDIO, SUBTITLES, FRAME_RATE }
+private enum class PlaybackChoiceDialog { AUDIO, SUBTITLES, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOLBY_VISION, DECODER }
+
+@Composable
+private fun PlaybackEngineChoiceRow(title: String, description: String, value: String, onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(description) },
+        trailingContent = { Text(value) },
+        modifier = Modifier.clickable(role = Role.Button, onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
+}
 
 private data class PlaybackChoice(val label: String, val selected: Boolean, val onClick: () -> Unit)
 

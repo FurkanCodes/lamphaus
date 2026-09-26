@@ -62,4 +62,25 @@ class PlayerUiPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `TV-NAV-05 holding a seek key speeds up from ten seconds to a minute`() {
+        assertEquals(10_000L, remoteSeekStepMillis(0))
+        assertEquals(20_000L, remoteSeekStepMillis(3))
+        assertEquals(30_000L, remoteSeekStepMillis(8))
+        assertEquals(60_000L, remoteSeekStepMillis(40))
+    }
+
+    @Test
+    fun `subtitle languages fall back from preferred to secondary to device`() {
+        val prefs = com.lamphaus.core.model.ProfilePlaybackPreferences(
+            preferredSubtitleLanguageTag = "tr",
+            secondarySubtitleLanguageTag = "en",
+        )
+        assertEquals(listOf("tr", "en"), preferredSubtitleLanguages(prefs, deviceLanguageTag = "en-US"))
+        assertEquals(
+            listOf("de-DE"),
+            preferredSubtitleLanguages(com.lamphaus.core.model.ProfilePlaybackPreferences(), "de-DE"),
+        )
+    }
 }

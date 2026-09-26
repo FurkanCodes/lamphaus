@@ -241,6 +241,7 @@ class PlayerActivity : ComponentActivity() {
                     subtitleDelayMillis = subtitleDelayState.value,
                     audioDelayMillis = audioDelayState.value,
                     streamInfo = streamInfoState.value,
+                    streamStats = Media3EngineFactory::playbackStats,
                     startupPhase = playbackStartupPhaseState.value,
                     onSubtitleDelay = ::applySubtitleDelay,
                     onAudioDelay = ::updateAudioRouteDelay,
@@ -323,8 +324,9 @@ class PlayerActivity : ComponentActivity() {
                                 startupErrorJob?.cancel()
                                 startupErrorJob = lifecycleScope.launch {
                                     // PlaybackEngineFallback may replace the
-                                    // failed Media3 player with MPV here.
-                                    delay(2_000L)
+                                    // failed Media3 player with MPV here, and
+                                    // the engine re-prepares network errors.
+                                    delay(4_000L)
                                     if (waiting == null) {
                                         playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
                                     } else if (playerReadyDeferred === waiting && !waiting.isCompleted) {
@@ -458,10 +460,10 @@ class PlayerActivity : ComponentActivity() {
         if (audioLanguages.isNotEmpty()) {
             parameters.setPreferredAudioLanguages(*audioLanguages.toTypedArray())
         }
-        val subtitleLanguages = listOf(
-            preferences.preferredSubtitleLanguageTag,
-            preferences.secondarySubtitleLanguageTag,
-        ).filter(String::isNotBlank).distinct()
+        val subtitleLanguages = preferredSubtitleLanguages(
+            preferences,
+            deviceLanguageTag = resources.configuration.locales[0].toLanguageTag(),
+        )
         when (preferences.subtitleDefaultMode) {
             SubtitleDefaultMode.OFF -> parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             SubtitleDefaultMode.FORCED_ONLY -> parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
@@ -700,8 +702,24 @@ class PlayerActivity : ComponentActivity() {
             controller?.pause()
             displayModeController?.restore()
         }
+        if (isFinishing) releaseSessionSource()
         if (isFinishing) PerfTrace.mark(PerfTrace.RETURN_TO_BROWSE)
         super.onStop()
+    }
+
+    /**
+     * Leaving the player frees the stream right away: the session service can
+     * outlive this activity for half an hour, and would otherwise keep the
+     * connection and the whole forward buffer on the heap while the viewer
+     * browses (QA-08). Only this activity's own item is stopped, so a player
+     * that already took over the session is never interrupted.
+     */
+    private fun releaseSessionSource() {
+        val mediaController = controller ?: return
+        val playback = request ?: return
+        if (mediaController.currentMediaItem?.mediaId != playback.videoId) return
+        mediaController.stop()
+        mediaController.clearMediaItems()
     }
 
     override fun onDestroy() {
