@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import androidx.compose.foundation.lazy.itemsIndexed
 import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -146,18 +147,21 @@ internal fun TvSimilarRail(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
         SectionTitle(stringResource(R.string.similar_title))
+        val row = rememberTvRowFocus()
         LazyRow(
+            modifier = Modifier.tvRowFocus(row),
             contentPadding = PaddingValues(
                 start = TvLayoutTokens.screenHorizontalPadding,
                 end = TvLayoutTokens.screenHorizontalPadding,
             ),
             horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
         ) {
-            items(similar, key = MediaPreview::stableKey) { media ->
+            itemsIndexed(similar, key = { _, media -> media.stableKey }) { index, media ->
                 TvMediaCard(
                     media = media,
                     onClick = { onOpenMedia(media) },
                     onFocused = { onFocused(media) },
+                    modifier = Modifier.tvRowItem(row, index),
                     showLabel = true,
                     revealLabelOnFocus = true,
                 )

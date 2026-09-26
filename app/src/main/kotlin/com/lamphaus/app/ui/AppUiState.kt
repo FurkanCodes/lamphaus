@@ -178,6 +178,20 @@ data class HomeCatalogBatchState(
     val pendingRowCount: Int = 0,
 )
 
+/** TV Home layouts (TV-CNT-01, TV-CNT-03). */
+enum class TvHomeLayout {
+    /** A featured hero followed by poster rows. */
+    CLASSIC,
+
+    /** No hero; the focused title widens in its row and its details appear below it. */
+    SPOTLIGHT,
+    ;
+
+    companion object {
+        fun fromName(name: String?): TvHomeLayout = entries.firstOrNull { it.name == name } ?: CLASSIC
+    }
+}
+
 /**
  * The viewer's explicit choice wins; otherwise background artwork is on,
  * except on devices Android classifies as low-memory, where it starts off.
@@ -301,6 +315,7 @@ data class AppUiState(
     val localOnlyArtworkKeys: Boolean = false,
     /** Effective TV background artwork choice (see [effectiveBackgroundArtwork]). */
     val backgroundArtworkEnabled: Boolean = true,
+    val tvHomeLayout: TvHomeLayout = TvHomeLayout.CLASSIC,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playbackSettings: PlaybackSettings = PlaybackSettings(),
@@ -336,6 +351,7 @@ data class AppUiState(
         kenBurnsEnabled = kenBurnsEnabled,
         localOnlyArtworkKeys = localOnlyArtworkKeys,
         backgroundArtworkEnabled = backgroundArtworkEnabled,
+        tvHomeLayout = tvHomeLayout,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,

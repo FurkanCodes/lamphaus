@@ -56,6 +56,13 @@
     <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
     <string name="background_artwork">Background artwork</string>
     <string name="background_artwork_description">Shows the selected title\'s artwork dimly behind browsing screens on this TV. Turn off for a plainer, lighter look.</string>
+    <string name="home_layout">Home layout</string>
+    <string name="home_layout_classic">Classic</string>
+    <string name="home_layout_spotlight">Spotlight</string>
+    <string name="home_layout_classic_description">A large featured title at the top, with poster rows below.</string>
+    <string name="home_layout_spotlight_description">No featured banner. The selected title widens in its row, and its details appear underneath.</string>
+    <string name="media_type_movie">Movie</string>
+    <string name="media_type_series">Series</string>
     <string name="spoiler_protection">Spoiler protection</string>
     <string name="playback">Playback</string>
     <string name="player_subtitle_languages">Language</string>
