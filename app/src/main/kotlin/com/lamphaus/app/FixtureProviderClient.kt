@@ -22,10 +22,17 @@ import kotlinx.coroutines.delay
  * and playback-start timings are reproducible and never touch a personal
  * account, provider URL, or the network (SHR-PROD-06).
  *
- * With [stress] enabled (build property `lamphaus.benchmarkStress`) each
- * catalog returns [STRESS_ITEMS_PER_CATALOG] synthetic rows and the last
- * provider answers after [STRESS_SLOW_PROVIDER_DELAY_MILLIS], so the matrix
- * can exercise a delayed provider without a real network.
+ * With [stress] enabled (build property `lamphaus.benchmarkStress`):
+ * - every provider exposes [STRESS_MANIFEST]'s six catalogs, so the 20 seeded
+ *   providers add 120 Home rows;
+ * - each catalog answers after a deterministic 150-1200 ms and returns
+ *   [STRESS_ITEMS_PER_CATALOG] synthetic rows, while some catalogs are
+ *   empty;
+ * - each provider offers [STRESS_STREAMS_PER_PROVIDER] sources after a
+ *   staggered delay;
+ * - one provider times out and the last answers after
+ *   [STRESS_SLOW_PROVIDER_DELAY_MILLIS].
+ * The matrix can therefore exercise large addon sets without a real network.
  *
  * Only the benchmark/debug fixture build paths construct this; production
  * always uses [com.lamphaus.core.provider.HttpProviderClient].
@@ -35,7 +42,7 @@ class FixtureProviderClient(
 ) : ProviderClient {
 
     override suspend fun manifest(manifestUrl: String): ProviderResult<ProviderManifest> =
-        ProviderResult.Success(FIXTURE_MANIFEST)
+        ProviderResult.Success(if (stress) STRESS_MANIFEST else FIXTURE_MANIFEST)
 
     override suspend fun discoverProviderUrls(catalogUrl: String): ProviderResult<List<String>> =
         ProviderResult.Success(listOf(FIXTURE_MANIFEST_URL))
@@ -53,8 +60,15 @@ class FixtureProviderClient(
                     "Stress fixture provider timed out.",
                 )
             }
-            if (index == stressProviderCount() - 1) {
-                delay(STRESS_SLOW_PROVIDER_DELAY_MILLIS)
+            delay(
+                if (index == stressProviderCount() - 1) {
+                    STRESS_SLOW_PROVIDER_DELAY_MILLIS
+                } else {
+                    stressLatencyMillis(index, query.catalogId)
+                },
+            )
+            if (query.search.isNullOrBlank() && stressCatalogIsEmpty(index, query.catalogId)) {
+                return ProviderResult.Success(emptyList())
             }
             return ProviderResult.Success(stressItems(providerId, query))
         }
@@ -91,7 +105,22 @@ class FixtureProviderClient(
         providerId: String,
         type: String,
         id: String,
-    ): ProviderResult<List<StreamCandidate>> = ProviderResult.Success(emptyList())
+    ): ProviderResult<List<StreamCandidate>> {
+        if (!stress) return ProviderResult.Success(emptyList())
+        val index = providerIndex(providerId)
+        if (index == stressProviderCount() - 2) {
+            return ProviderResult.Failure(ProviderFailureKind.TIMEOUT, "Stress fixture provider timed out.")
+        }
+        delay(
+            if (index == stressProviderCount() - 1) {
+                STRESS_SLOW_PROVIDER_DELAY_MILLIS
+            } else {
+                // Staggered so later providers can answer before earlier ones.
+                STRESS_STREAM_MIN_DELAY_MILLIS + (index * 373L) % STRESS_STREAM_DELAY_SPREAD_MILLIS
+            },
+        )
+        return ProviderResult.Success(fixtureStressStreams(index, id))
+    }
 
     override suspend fun subtitles(
         manifestUrl: String,
@@ -128,6 +157,12 @@ class FixtureProviderClient(
         const val STRESS_ITEMS_PER_CATALOG = 100
         const val STRESS_LIBRARY_ROWS = 10_000
         const val STRESS_SLOW_PROVIDER_DELAY_MILLIS = 5_000L
+        const val STRESS_STREAMS_PER_PROVIDER = 15
+        private const val STRESS_CATALOG_MIN_DELAY_MILLIS = 150L
+        private const val STRESS_CATALOG_DELAY_SPREAD_MILLIS = 1_050L
+        private const val STRESS_STREAM_MIN_DELAY_MILLIS = 150L
+        private const val STRESS_STREAM_DELAY_SPREAD_MILLIS = 2_400L
+        private val STRESS_CATALOG_IDS = listOf("featured", "trending", "fresh")
 
         internal const val STRESS_ID_PREFIX = "fixture:stress:"
 
@@ -139,6 +174,31 @@ class FixtureProviderClient(
             providerId.substringAfterLast('-').toIntOrNull()?.coerceAtLeast(0) ?: 0
 
         internal fun stressProviderCount(): Int = STRESS_PROVIDER_COUNT
+
+        /** Deterministic per-catalog latency for the stress fixture. */
+        internal fun stressLatencyMillis(provider: Int, catalogId: String): Long =
+            STRESS_CATALOG_MIN_DELAY_MILLIS +
+                Math.floorMod((provider * 31 + catalogId.hashCode()).toLong(), STRESS_CATALOG_DELAY_SPREAD_MILLIS)
+
+        /** A quarter of providers have an empty "fresh" catalog. */
+        internal fun stressCatalogIsEmpty(provider: Int, catalogId: String): Boolean =
+            catalogId == "fresh" && provider % 4 == 1
+
+        /** Deterministic synthetic sources for the stress fixture. */
+        internal fun fixtureStressStreams(provider: Int, videoId: String): List<StreamCandidate> {
+            val qualities = listOf("2160p", "1080p", "720p", "480p")
+            return List(STRESS_STREAMS_PER_PROVIDER) { index ->
+                val quality = qualities[index % qualities.size]
+                StreamCandidate(
+                    providerId = stressProviderId(provider),
+                    name = "Fixture ${provider + 1}\n$quality",
+                    title = "Stress source ${index + 1} for $videoId",
+                    description = "Synthetic $quality source used to exercise long source lists.",
+                    url = "https://fixture.lamphaus.invalid/stream/$provider/$index.mp4",
+                    videoSize = 700_000_000L + index * 150_000_000L,
+                )
+            }
+        }
 
         /** Deterministic synthetic catalog rows for the stress fixture. */
         internal fun fixtureStressItems(provider: Int, count: Int, type: String = "movie"): List<MediaPreview> =
@@ -156,6 +216,23 @@ class FixtureProviderClient(
                 genres = listOf("Drama", "Science fiction"),
                 contentRating = if (isSeries) "TV-14" else "PG-13",
                 providerIds = setOf(stressProviderId(provider)),
+            )
+        }
+
+        /** Six catalogs per provider so 20 stress providers add 120 Home rows. */
+        val STRESS_MANIFEST: ProviderManifest by lazy {
+            FIXTURE_MANIFEST.copy(
+                catalogs = listOf("movie", "series").flatMap { type ->
+                    STRESS_CATALOG_IDS.map { catalogId ->
+                        ProviderCatalog(
+                            type = type,
+                            id = catalogId,
+                            name = catalogId.replaceFirstChar(Char::uppercase),
+                            extras = setOf("search", "skip"),
+                            extraWireNames = mapOf("search" to "search", "skip" to "skip"),
+                        )
+                    }
+                },
             )
         }
 

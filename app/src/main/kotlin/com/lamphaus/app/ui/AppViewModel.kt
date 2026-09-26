@@ -1496,7 +1496,11 @@ class AppViewModel(
     fun openSources(media: MediaPreview, episode: Episode? = null, startFromBeginning: Boolean = false) {
         sourceJob?.cancel()
         sourceJob = viewModelScope.launch {
-            if (media.id.startsWith("fixture:")) {
+            // Stress titles go through the real source picker so long, slow
+            // source lists can be measured; other fixtures auto-play.
+            val stressSourceTitle = BuildConfig.BENCHMARK_STRESS &&
+                media.id.startsWith(FixtureProviderClient.STRESS_ID_PREFIX)
+            if (media.id.startsWith("fixture:") && !stressSourceTitle) {
                 if (BuildConfig.BENCHMARK_FIXTURES) {
                     val uri = container.benchmarkMediaUri()
                     mutableState.update {

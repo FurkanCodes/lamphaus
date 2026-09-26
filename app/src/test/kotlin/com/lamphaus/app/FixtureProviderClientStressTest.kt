@@ -64,4 +64,37 @@ class FixtureProviderClientStressTest {
         assertTrue(successful is com.lamphaus.core.model.ProviderResult.Success)
         assertTrue((successful as com.lamphaus.core.model.ProviderResult.Success).value.size >= FixtureProviderClient.STRESS_ITEMS_PER_CATALOG)
     }
+
+    @Test
+    fun `stress manifest adds six home catalogs per provider`() = kotlinx.coroutines.runBlocking {
+        val client = FixtureProviderClient(stress = true)
+        val manifest = client.manifest(FixtureProviderClient.stressProviderManifestUrl(0))
+
+        val catalogs = (manifest as com.lamphaus.core.model.ProviderResult.Success).value.catalogs
+        assertEquals(6, catalogs.size)
+        assertEquals(6, catalogs.map { "${it.type}:${it.id}" }.distinct().size)
+    }
+
+    @Test
+    fun `stress catalogs have bounded deterministic latency and some empty rows`() {
+        val latencies = (0 until FixtureProviderClient.STRESS_PROVIDER_COUNT).flatMap { provider ->
+            listOf("featured", "trending", "fresh").map { FixtureProviderClient.stressLatencyMillis(provider, it) }
+        }
+        assertTrue(latencies.all { it in 150L..1_200L })
+        assertEquals(latencies, (0 until FixtureProviderClient.STRESS_PROVIDER_COUNT).flatMap { provider ->
+            listOf("featured", "trending", "fresh").map { FixtureProviderClient.stressLatencyMillis(provider, it) }
+        })
+        assertTrue(FixtureProviderClient.stressCatalogIsEmpty(1, "fresh"))
+        assertTrue(!FixtureProviderClient.stressCatalogIsEmpty(1, "featured"))
+    }
+
+    @Test
+    fun `stress streams are unique and belong to their provider`() {
+        val streams = FixtureProviderClient.fixtureStressStreams(provider = 2, videoId = "fixture:stress:movie:1")
+
+        assertEquals(FixtureProviderClient.STRESS_STREAMS_PER_PROVIDER, streams.size)
+        assertEquals(streams.size, streams.map { it.url }.distinct().size)
+        assertTrue(streams.all { it.providerId == FixtureProviderClient.stressProviderId(2) })
+        assertTrue(streams.all { it.url!!.startsWith("https://") })
+    }
 }
