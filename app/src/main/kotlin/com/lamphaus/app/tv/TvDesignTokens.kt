@@ -20,6 +20,8 @@ internal object TvLayoutTokens {
     val bottomListPadding = 108.dp
     val posterWidth = 153.dp
     val posterHeight = 231.dp
+    /** Spotlight layout: the focused poster widens to 16:9 at poster height (TV-CNT-03). */
+    val spotlightExpandedWidth = 411.dp
     val landscapeCardWidth = 256.dp
     val landscapeCardHeight = 144.dp
     val heroHeight = 320.dp

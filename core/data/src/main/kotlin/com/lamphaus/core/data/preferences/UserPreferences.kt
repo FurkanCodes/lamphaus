@@ -41,6 +41,8 @@ data class UserSettings(
      * the right answer depends on each TV.
      */
     val backgroundArtwork: Boolean? = null,
+    /** Device-local TV Home layout name; null means the default (classic). */
+    val tvHomeLayout: String? = null,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playback: PlaybackSettings = PlaybackSettings(),
@@ -75,6 +77,7 @@ class UserPreferences(private val context: Context) {
             kenBurnsEnabled = values[KEN_BURNS_ENABLED] ?: true,
             localOnlyArtworkKeys = values[LOCAL_ONLY_ARTWORK_KEYS] ?: false,
             backgroundArtwork = values[BACKGROUND_ARTWORK],
+            tvHomeLayout = values[TV_HOME_LAYOUT],
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -153,6 +156,13 @@ class UserPreferences(private val context: Context) {
     suspend fun setBackgroundArtwork(enabled: Boolean) {
         context.dataStore.edit {
             it[BACKGROUND_ARTWORK] = enabled
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setTvHomeLayout(name: String) {
+        context.dataStore.edit {
+            it[TV_HOME_LAYOUT] = name
         }
     }
 
@@ -245,6 +255,7 @@ class UserPreferences(private val context: Context) {
         val CRASH_REPORTS = booleanPreferencesKey("crash_reports")
         val LOCAL_ONLY_ARTWORK_KEYS = booleanPreferencesKey("local_only_artwork_keys")
         val BACKGROUND_ARTWORK = booleanPreferencesKey("background_artwork")
+        val TV_HOME_LAYOUT = stringPreferencesKey("tv_home_layout")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")
         val SPOILER_BLUR_EPISODE_ARTWORK = booleanPreferencesKey("spoiler_blur_episode_artwork")

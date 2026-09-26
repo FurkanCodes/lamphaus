@@ -47,9 +47,18 @@ hardware.
 | PERF-17 first-profile seeding (`SHR-ARC-09`) | benchmark fixture | same | add-ons seeded on first launch | 1 of 20 (collectLatest cancelled the setup) | 20 of 20 | fixture correctness | `createInitialProfile` runs `NonCancellable` | keep |
 | PERF-18 Background artwork setting (`TV-FOC-02`, `QA-08`) | SEI Box R 4K Plus, default fixture, row browse, 3 cold runs, `dumpsys gfxinfo` | `060329a` → `feature/tv-background-artwork-setting` | janky %, frame median, GPU median | on: 8.8%, 19.7 ms, 9.5 ms | off: 8.2%, 18.4 ms, 8.4 ms | about 1 ms GPU; also no artwork decode or palette work per focus change | device-local Appearance toggle; automatic default is off on Android low-RAM devices and on elsewhere; an explicit choice wins and survives sign-out | keep |
 | PERF-19 Home background back to display resolution (`TV-CLR-01`, `QA-08`) | SEI Box R 4K Plus, default fixture, row browse, 3 cold runs | `63303a6` → same branch | janky %, frame median, GPU median; edge energy of a 640×640 right-side crop | 960×540 baked: 8.8%, 19.7 ms, 9.5 ms; edge energy 0.265 | display-size baked (1920×1080 here): 8.8%, 18.8 ms, 9.4 ms; edge energy 0.308 | same speed, 16% more on-screen detail | the owner saw the quarter-resolution background as soft; it now bakes at the drawn size (4K on 4K interfaces) and skips Coil's memory cache; artwork-free fallbacks stay at half resolution | keep |
+| PERF-20 Spotlight Home layout (`TV-CNT-03`, `QA-08`) | SEI Box R 4K Plus, stress fixture (120 rows), `benchmarkRelease`, 3 cold runs, `dumpsys gfxinfo`; same APK with the layout switched in Settings | Classic → Spotlight on `feature/tv-spotlight-home` | janky %, frame P50, missed deadlines | row browse (12 moves): 11.0–12.0%, P50 21–24 ms, 41–45 missed; brisk vertical (20 moves): 10.8–12.6%, P50 23–26 ms, 29–33 missed of 259–269 frames | row browse: 9.3–11.9%, P50 27–32 ms, 31–39 missed; vertical: 27–32%, P50 34–40 ms, 35–39 missed of 122–129 frames | fewer missed frames along a row, about 6 more over 20 row changes | Spotlight draws no hero crossfade or label fades, so it renders about half the frames and its janky % overstates the gap; missed deadlines are the fairer comparison. Width animates in the layout phase only; the still is laid out at full size so Coil decodes it once | keep |
+| PERF-20 Spotlight cache window (`TV-CNT-03`, `QA-08`) | same TV, vertical journey, `perfetto -a` | first Spotlight build → cache window | longest key dispatch; missed deadlines | 97.8 ms (the row above, pinned off-screen, was built inside the key press); 40–41 missed | 17.0 ms; 35–39 missed | about 6× shorter worst input stall | `LazyLayoutCacheWindow` keeps one row pitch composed ahead of and behind the viewport | keep |
+| PERF-20 diagnostics (not kept) | same TV, vertical journey | Spotlight | missed deadlines | — | width snapped: 35–39; dimming, details slot and top pinning removed together: 33–38 | none decisive | the remaining cost is the lazy list's own layout during the scroll animation plus about 10 ms of recomposition per move; the 160 ms widening stays | animation kept |
 
 ## Tradeoffs recorded
 
+- PERF-20: Spotlight is slightly heavier than Classic when changing rows
+  (about 0.3 more missed frames per move) and lighter when browsing along a
+  row. Stress fixture items carry no stills, so still decoding cost was not
+  part of these numbers; real stills are decoded once at the expanded card
+  size and the next card's still is prefetched on focus. Classic keeps the
+  default lazy list without a cache window.
 - PERF-17: Home rows reveal only as an in-order settled prefix (user
   decision), so a very slow add-on still delays the rows after it. They are
   already loaded when it answers, and the request starts about 6 rows

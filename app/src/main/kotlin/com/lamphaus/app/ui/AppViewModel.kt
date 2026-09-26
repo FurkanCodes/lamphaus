@@ -184,6 +184,7 @@ class AppViewModel(
                     kenBurnsEnabled = settings.kenBurnsEnabled,
                     localOnlyArtworkKeys = settings.localOnlyArtworkKeys,
                     backgroundArtwork = settings.backgroundArtwork,
+                    tvHomeLayout = settings.tvHomeLayout,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
                     playbackSettings = settings.playback,
@@ -241,6 +242,7 @@ class AppViewModel(
                             snapshot.backgroundArtwork,
                             container.isLowRamDevice,
                         ),
+                        tvHomeLayout = TvHomeLayout.fromName(snapshot.tvHomeLayout),
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
                         playbackSettings = snapshot.playbackSettings,
@@ -1872,6 +1874,10 @@ class AppViewModel(
         container.preferences.setBackgroundArtwork(enabled)
     }
 
+    fun setTvHomeLayout(layout: TvHomeLayout) = viewModelScope.launch {
+        container.preferences.setTvHomeLayout(layout.name)
+    }
+
     fun setKenBurnsEnabled(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setKenBurnsEnabled(enabled)
         pushSyncedSettings()
@@ -2694,6 +2700,7 @@ class AppViewModel(
         val kenBurnsEnabled: Boolean,
         val localOnlyArtworkKeys: Boolean,
         val backgroundArtwork: Boolean?,
+        val tvHomeLayout: String?,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
         val playbackSettings: PlaybackSettings,
