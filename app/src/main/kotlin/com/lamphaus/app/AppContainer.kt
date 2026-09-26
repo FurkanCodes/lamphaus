@@ -55,7 +55,7 @@ class AppContainer(context: Context) {
     /** Only test APKs carry this generated clip; no production session or network is involved. */
     suspend fun benchmarkMediaUri(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
         check(BuildConfig.BENCHMARK_FIXTURES)
-        val clip = java.io.File(applicationContext.filesDir, "benchmark.mp4")
+        val clip = java.io.File(applicationContext.filesDir, com.lamphaus.app.player.BENCHMARK_CLIP_FILE_NAME)
         if (!clip.exists()) {
             applicationContext.assets.open("benchmark.mp4").use { input ->
                 clip.outputStream().use(input::copyTo)

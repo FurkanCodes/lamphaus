@@ -135,7 +135,12 @@ class PlayerActivity : ComponentActivity() {
         request = intent.getStringExtra(EXTRA_REQUEST)
             ?.let { runCatching { JSON.decodeFromString<PlaybackRequest>(it) }.getOrNull() }
         val playback = request
-        if (playback == null || !playback.source.uri.isAllowedPlaybackUri()) {
+        val benchmarkClipUri = if (BuildConfig.BENCHMARK_FIXTURES) {
+            android.net.Uri.fromFile(java.io.File(filesDir, BENCHMARK_CLIP_FILE_NAME)).toString()
+        } else {
+            null
+        }
+        if (playback == null || !isAllowedPlaybackUri(playback.source.uri, BuildConfig.DEBUG, benchmarkClipUri)) {
             finish()
             return
         }
@@ -1085,10 +1090,20 @@ internal fun Format.playbackHdrType(): PlaybackHdrType? = when {
     else -> null
 }
 
-private fun String.isAllowedPlaybackUri(): Boolean {
-    if (startsWith("https://")) return true
-    if (!BuildConfig.DEBUG) return false
-    val uri = runCatching { URI(this) }.getOrNull() ?: return false
+/** File name of the generated clip that only benchmark/test APKs carry (`AppContainer.benchmarkMediaUri`). */
+internal const val BENCHMARK_CLIP_FILE_NAME = "benchmark.mp4"
+
+/**
+ * Production accepts only HTTPS. Debug builds also accept loopback HTTP, and
+ * benchmark APKs accept exactly their own bundled clip ([benchmarkClipUri],
+ * null in production) so profile and timing journeys reach real playback
+ * (REL-04, QA-06).
+ */
+internal fun isAllowedPlaybackUri(value: String, debug: Boolean, benchmarkClipUri: String?): Boolean {
+    if (value.startsWith("https://")) return true
+    if (benchmarkClipUri != null && value == benchmarkClipUri) return true
+    if (!debug) return false
+    val uri = runCatching { URI(value) }.getOrNull() ?: return false
     return uri.scheme.equals("http", ignoreCase = true) && uri.host in setOf("localhost", "127.0.0.1", "10.0.2.2")
 }
 
