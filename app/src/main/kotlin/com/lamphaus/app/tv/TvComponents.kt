@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,6 +74,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -131,6 +133,10 @@ internal fun Modifier.tvContentFocusBoundary(
             }
         }
     }
+        // One group for the whole page: without it the exit rule applied to
+        // every row and chip strip, so Up from any of them jumped straight to
+        // the navigation and skipped the controls above (TV-NAV-05).
+        .focusGroup()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -149,6 +155,7 @@ internal fun TvEditableTextField(
 ) {
     var editing by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
     var imeWasVisible by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val browseDescription = stringResource(R.string.press_select_to_edit)
@@ -193,9 +200,23 @@ internal fun TvEditableTextField(
             }
             .onPreviewKeyEvent { event ->
                 if (!editing) {
+                    // Browsing: the D-pad moves between controls. A text field
+                    // otherwise swallows arrows for its cursor, which trapped
+                    // Up below the navigation (TV-NAV-03, TV-NAV-05).
+                    val direction = when (event.key) {
+                        Key.DirectionUp -> FocusDirection.Up
+                        Key.DirectionLeft -> FocusDirection.Left
+                        Key.DirectionRight -> FocusDirection.Right
+                        else -> null
+                    }
                     when {
                         event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown ->
-                            onNavigateDown()
+                            onNavigateDown() || focusManager.moveFocus(FocusDirection.Down)
+
+                        direction != null && event.type == KeyEventType.KeyDown -> {
+                            focusManager.moveFocus(direction)
+                            true
+                        }
 
                         event.key == Key.DirectionCenter || event.key == Key.Enter -> {
                             if (event.type == KeyEventType.KeyUp) {
@@ -259,15 +280,22 @@ internal fun TvTopNavigation(
         modifier = modifier
             .fillMaxWidth()
             .height(TvLayoutTokens.topBarHeight)
-            .onFocusChanged { onHasFocus(it.hasFocus) },
+            .onFocusChanged { onHasFocus(it.hasFocus) }
+            // Down enters the page at its entry control; when that control is
+            // not on screen (an empty grid, a scrolled list), fall back to the
+            // nearest control below instead of doing nothing (TV-NAV-05).
+            .onPreviewKeyEvent { event ->
+                event.type == KeyEventType.KeyDown &&
+                    event.key == Key.DirectionDown &&
+                    runCatching { contentDownRequester.requestFocus() }.getOrDefault(false)
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TvProfileNavigationItem(
             selected = selectedDestination == TvDestination.SETTINGS,
             profile = activeProfile,
             modifier = Modifier
-                .focusRequester(requesters.getValue(TvDestination.SETTINGS))
-                .focusProperties { down = contentDownRequester },
+                .focusRequester(requesters.getValue(TvDestination.SETTINGS)),
             onFocused = { onDestination(TvDestination.SETTINGS) },
             onClick = { onDestination(TvDestination.SETTINGS) },
         )
@@ -277,8 +305,7 @@ internal fun TvTopNavigation(
                 destination = destination,
                 selected = selectedDestination == destination,
                 modifier = Modifier
-                    .focusRequester(requesters.getValue(destination))
-                    .focusProperties { down = contentDownRequester },
+                    .focusRequester(requesters.getValue(destination)),
                 onFocused = { onDestination(destination) },
                 onClick = { onDestination(destination) },
             )

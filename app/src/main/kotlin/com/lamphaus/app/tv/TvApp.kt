@@ -17,6 +17,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,6 +81,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -812,6 +814,12 @@ private fun TvSignedIn(
         pendingMediaKey = media.stableKey
         viewModel.loadDetail(media)
     }
+    // The hero and a row card can show the same title; Back returns to the
+    // one the viewer actually opened (TV-NAV-07).
+    val openHeroMedia: (MediaPreview) -> Unit = { media ->
+        pendingMediaKey = heroRestoreKey(media)
+        viewModel.loadDetail(media)
+    }
     // Focus moves update lastFocusedMedia on every D-pad press. It is read
     // only by the ambient's snapshot flow, never here in composition, so
     // moving focus does not recompose this whole screen (QA-08).
@@ -869,7 +877,14 @@ private fun TvSignedIn(
             onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
             onOpenMedia = openMedia,
             onFocusedMedia = { lastFocusedMedia = it },
-            onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
+            onLibrary = {
+                val preview = state.selectedDetail.preview
+                if (state.library.any { it.mediaKey == preview.stableKey }) {
+                    viewModel.removeFromLibrary(preview.stableKey)
+                } else {
+                    viewModel.addToLibrary(preview)
+                }
+            },
             onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
             onRetryEnrichment = viewModel::retryDetailEnrichment,
         )
@@ -937,6 +952,7 @@ private fun TvSignedIn(
                     TvDestination.HOME -> TvHome(
                         state = state,
                         onMedia = openMedia,
+                        onHeroMedia = openHeroMedia,
                         onFocused = { lastFocusedMedia = it },
                         onAddSource = {
                             destination = TvDestination.SETTINGS
@@ -1024,6 +1040,7 @@ private fun TvSignedIn(
 private fun TvHome(
     state: AppUiState,
     onMedia: (MediaPreview) -> Unit,
+    onHeroMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
     onAddSource: () -> Unit,
     onLoadMore: (String) -> Unit,
@@ -1128,14 +1145,14 @@ private fun TvHome(
                         kenBurnsEnabled = state.kenBurnsEnabled,
                         rowsHaveFocus = contentHasFocus,
                         media = media,
-                        onMedia = onMedia,
+                        onMedia = onHeroMedia,
                         onFocused = { focusedCandidate = media; onFocused(media) },
                         carouselItems = heroItems,
                         onPrevious = { moveCarousel(-1) },
                         onNext = { moveCarousel(1) },
                         modifier = Modifier
                             .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
-                            .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
+                            .mediaFocusRestore(heroRestoreKey(media), restoreMediaKey, onFocusRestored)
                             .focusRequester(initialFocusRequester),
                     )
                 }
@@ -1250,6 +1267,8 @@ private fun TvHome(
     }
 }
 
+internal fun heroRestoreKey(media: MediaPreview): String = "hero:${media.stableKey}"
+
 // QA-08: skeleton pulses run every frame while content loads. Reading the
 // animated value only while drawing keeps them out of recomposition and
 // layout; the pulse range and timing are unchanged (TV-CNT-02).
@@ -1349,6 +1368,7 @@ private fun TvContinueWatchingRow(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
+    val row = rememberTvRowFocus()
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
         Text(
             text = stringResource(R.string.continue_watching),
@@ -1359,6 +1379,7 @@ private fun TvContinueWatchingRow(
             color = MaterialTheme.colorScheme.onBackground,
         )
         LazyRow(
+            modifier = Modifier.tvRowFocus(row),
             horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
             contentPadding = PaddingValues(
                 start = TvLayoutTokens.screenHorizontalPadding,
@@ -1366,13 +1387,15 @@ private fun TvContinueWatchingRow(
                 bottom = TvLayoutTokens.screenBottomPadding,
             ),
         ) {
-            items(items, key = { it.first.stableKey }) { (media, progress) ->
+            itemsIndexed(items, key = { _, item -> item.first.stableKey }) { index, (media, progress) ->
                 TvContinueWatchingCard(
                     media = media,
                     progress = progress,
                     onClick = { onMedia(media) },
                     onFocused = { onFocused(media) },
-                    modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
+                    modifier = Modifier
+                        .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
+                        .tvRowItem(row, index),
                 )
             }
         }
@@ -1696,7 +1719,11 @@ private fun TvCatalogRow(
                 pulse = { pulse.value },
             )
         } else if (section.items.isNotEmpty() || section.hasMore || section.loadMoreError != null) {
+            val row = rememberTvRowFocus()
+            val showAction = section.loadMoreError != null || section.hasMore
+            val trailing = rememberTrailingActionFocus(showAction, section.items.size)
             LazyRow(
+                modifier = Modifier.tvRowFocus(row),
                 horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                 contentPadding = PaddingValues(
                     start = TvLayoutTokens.screenHorizontalPadding,
@@ -1704,23 +1731,30 @@ private fun TvCatalogRow(
                     bottom = TvLayoutTokens.screenBottomPadding,
                 ),
             ) {
-                items(section.items, key = MediaPreview::stableKey) { media ->
+                itemsIndexed(section.items, key = { _, media -> media.stableKey }) { index, media ->
                     TvMediaCard(
                         media = media,
                         onClick = { onMedia(media) },
                         onFocused = { onFocused(media) },
                         showRating = section.providerId == CINEMETA_PROVIDER_ID,
-                        modifier = Modifier.mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored),
+                        modifier = Modifier
+                            .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
+                            .tvRowItem(row, index)
+                            .trailingItem(trailing, index),
                         showLabel = true,
                         revealLabelOnFocus = true,
                     )
                 }
-                if (section.loadMoreError != null || section.hasMore) {
+                if (trailing.visible(showAction)) {
                     item("catalog-action") {
                         TvAction(
                             label = stringResource(if (section.loadMoreError != null) R.string.retry else R.string.load_more),
                             icon = Icons.Outlined.Refresh,
-                            onClick = if (section.loadMoreError != null) onRetry else onLoadMore,
+                            modifier = Modifier.trailingAction(trailing),
+                            onClick = {
+                                trailing.onPressed(section.items.size)
+                                if (section.loadMoreError != null) onRetry() else onLoadMore()
+                            },
                         )
                     }
                 }
@@ -1891,15 +1925,22 @@ private fun TvDiscover(
             }
             return@Column
         }
+        // Down from the navigation lands on the top-most control, the
+        // selected catalog chip (TV-NAV-05); the grid below may be empty.
+        val selectedIndex = browse.targets.indexOfFirst { it.id == browse.selectedCatalogId }.coerceAtLeast(0)
+        val chipRow = rememberTvRowFocus(selectedIndex)
         LazyRow(
+            modifier = Modifier.tvRowFocus(chipRow),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(start = TvLayoutTokens.screenHorizontalPadding),
         ) {
-            items(browse.targets, key = CatalogBrowseTarget::id) { target ->
+            itemsIndexed(browse.targets, key = { _, target -> target.id }) { index, target ->
                 TvFilterChip(
                     label = target.catalog.name,
                     selected = browse.selectedCatalogId == target.id,
                     onClick = { onBrowseCatalog(target.id) },
+                    modifier = (if (index == selectedIndex) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                        .tvRowItem(chipRow, index),
                 )
             }
         }
@@ -1911,7 +1952,7 @@ private fun TvDiscover(
                 loading = browse.loading,
                 onMedia = onMedia,
                 onFocused = onFocused,
-                initialFocusRequester = initialFocusRequester,
+                initialFocusRequester = remember { FocusRequester() },
                 restoreMediaKey = restoreMediaKey,
                 onFocusRestored = onFocusRestored,
                 onLoadMore = onLoadMore,
@@ -1951,7 +1992,6 @@ private fun TvDiscover(
                                 onBrowseGenre(null)
                                 showResults = true
                             },
-                            modifier = Modifier.focusRequester(initialFocusRequester),
                         )
                     }
                     items(genres, key = { it }) { genre ->
@@ -2162,40 +2202,58 @@ private fun TvSearch(
         if (query.isBlank()) {
             val browse = state.browse
             val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(browse.targets.map { it.catalog.type }.distinct(), key = { it }) { type ->
+            val types = browse.targets.map { it.catalog.type }.distinct()
+            val typeRow = rememberTvRowFocus(types.indexOf(browse.selectedType).coerceAtLeast(0))
+            LazyRow(
+                modifier = Modifier.tvRowFocus(typeRow),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                itemsIndexed(types, key = { _, type -> type }) { index, type ->
                     TvFilterChip(
                         label = type.replaceFirstChar(Char::uppercase),
                         selected = browse.selectedType == type,
                         onClick = { onBrowseType(type) },
+                        modifier = Modifier.tvRowItem(typeRow, index),
                     )
                 }
             }
             Spacer(Modifier.height(12.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(browse.targets.filter { it.catalog.type == browse.selectedType }, key = { it.id }) { target ->
+            val catalogs = browse.targets.filter { it.catalog.type == browse.selectedType }
+            val catalogRow = rememberTvRowFocus(catalogs.indexOfFirst { it.id == browse.selectedCatalogId }.coerceAtLeast(0))
+            LazyRow(
+                modifier = Modifier.tvRowFocus(catalogRow),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                itemsIndexed(catalogs, key = { _, target -> target.id }) { index, target ->
                     TvFilterChip(
                         label = target.catalog.name,
                         selected = browse.selectedCatalogId == target.id,
                         onClick = { onBrowseCatalog(target.id) },
+                        modifier = Modifier.tvRowItem(catalogRow, index),
                     )
                 }
             }
             selectedTarget?.genres?.takeIf(List<String>::isNotEmpty)?.let { genres ->
                 Spacer(Modifier.height(12.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val genreRow = rememberTvRowFocus((genres.indexOf(browse.selectedGenre) + 1).coerceAtLeast(0))
+                LazyRow(
+                    modifier = Modifier.tvRowFocus(genreRow),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     item {
                         TvFilterChip(
                             label = stringResource(R.string.all_genres),
                             selected = browse.selectedGenre == null,
                             onClick = { onBrowseGenre(null) },
+                            modifier = Modifier.tvRowItem(genreRow, 0),
                         )
                     }
-                    items(genres, key = { it }) { genre ->
+                    itemsIndexed(genres, key = { _, genre -> genre }) { index, genre ->
                         TvFilterChip(
                             label = genre,
                             selected = browse.selectedGenre == genre,
                             onClick = { onBrowseGenre(genre) },
+                            modifier = Modifier.tvRowItem(genreRow, index + 1),
                         )
                     }
                 }
@@ -2209,7 +2267,7 @@ private fun TvSearch(
                     media = result.items,
                     onMedia = onMedia,
                     onFocused = onFocused,
-                    initialFocusRequester = initialFocusRequester,
+                    initialFocusRequester = remember { FocusRequester() },
                     restoreMediaKey = restoreMediaKey,
                     onFocusRestored = onFocusRestored,
                     section = result,
@@ -2436,19 +2494,21 @@ internal fun TvSeasonChips(
     onSeasonSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val seasonRow = rememberTvRowFocus(seasonNumbers.indexOf(selectedSeason).coerceAtLeast(0))
     LazyRow(
-        modifier = modifier,
+        modifier = modifier.tvRowFocus(seasonRow),
         contentPadding = PaddingValues(
             start = TvLayoutTokens.screenHorizontalPadding,
             end = TvLayoutTokens.screenHorizontalPadding,
         ),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(seasonNumbers, key = { it }) { season ->
+        itemsIndexed(seasonNumbers, key = { _, season -> season }) { index, season ->
             TvFilterChip(
                 label = stringResource(R.string.season_format, season),
                 selected = selectedSeason == season,
                 onClick = { onSeasonSelected(season) },
+                modifier = Modifier.tvRowItem(seasonRow, index),
             )
         }
     }
@@ -2667,8 +2727,11 @@ private fun TvDetailScreen(
                         ),
                         onSelectRating = { selectedRating = it },
                     )
+                    val actionRow = rememberTvRowFocus()
                     Row(
-                        modifier = Modifier.padding(top = 12.dp),
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .tvRowFocus(actionRow, plainRow = true),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         val nextUpLabel = nextUp?.episode?.numberParts()?.let { number ->
@@ -2687,6 +2750,7 @@ private fun TvDetailScreen(
                             icon = Icons.Outlined.PlayArrow,
                             modifier = Modifier
                                 .focusRequester(playFocus)
+                                .tvRowItem(actionRow, 0)
                                 .onFocusChanged { if (it.isFocused) lastActionFocus = playFocus },
                             // A series plays its next episode, never the series id.
                             onClick = { onPlay(nextUp?.episode) },
@@ -2700,13 +2764,15 @@ private fun TvDetailScreen(
                                     scaleY = libraryPulse.value
                                 }
                                 .focusRequester(libraryFocus)
+                                .tvRowItem(actionRow, 1)
                                 .onFocusChanged { if (it.isFocused) lastActionFocus = libraryFocus },
-                            enabled = !inLibrary,
+                            // A toggle, so the action stays reachable (TV-FOC-01, QA-07).
                             onClick = onLibrary,
                         )
                         TvAction(
                             label = stringResource(R.string.edit_artwork),
                             icon = Icons.Outlined.Palette,
+                            modifier = Modifier.tvRowItem(actionRow, 2),
                             onClick = onEditArtwork,
                         )
                     }
@@ -2744,16 +2810,19 @@ private fun TvDetailScreen(
                     val episodeRowState = remember(selectedSeason) {
                         LazyListState(firstVisibleItemIndex = nextUpIndex.coerceAtLeast(0))
                     }
+                    val episodeRow = remember(selectedSeason) { TvRowFocus(nextUpIndex.coerceAtLeast(0)) }
                     LazyRow(
                         state = episodeRowState,
+                        modifier = Modifier.tvRowFocus(episodeRow),
                         contentPadding = PaddingValues(
                             start = TvLayoutTokens.screenHorizontalPadding,
                             end = TvLayoutTokens.screenHorizontalPadding,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                     ) {
-                        items(visibleEpisodes, key = Episode::id) { episode ->
+                        itemsIndexed(visibleEpisodes, key = { _, episode -> episode.id }) { index, episode ->
                             TvEpisodeCard(
+                                modifier = Modifier.tvRowItem(episodeRow, index),
                                 media = detail.preview,
                                 episode = episode,
                                 watched = episode.id in watchedEpisodeIds,
@@ -3134,6 +3203,7 @@ private enum class TvSettingsSection(
     SPOILERS(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ABOUT(R.string.about, Icons.Outlined.Info),
 }
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun TvSettings(
     state: AppUiState,
@@ -3172,6 +3242,11 @@ private fun TvSettings(
         Column(
             modifier = Modifier
                 .width(TvLayoutTokens.settingsMenuWidth)
+                .focusProperties {
+                    exit = { direction ->
+                        if (direction == FocusDirection.Down) FocusRequester.Cancel else FocusRequester.Default
+                    }
+                }
                 .onPreviewKeyEvent { event ->
                     if (
                         event.type == KeyEventType.KeyDown &&
@@ -3215,7 +3290,26 @@ private fun TvSettings(
             }
         }
         Spacer(Modifier.width(72.dp))
-        Box(Modifier.width(TvLayoutTokens.settingsContentWidth).fillMaxHeight()) {
+        Box(
+            Modifier
+                .width(TvLayoutTokens.settingsContentWidth)
+                .fillMaxHeight()
+                // The pane is one group: Left returns to its section in the
+                // menu, Up to the navigation, and Down at its end stays put
+                // instead of landing on (and switching to) another section
+                // (TV-NAV-05).
+                .focusProperties {
+                    exit = { direction ->
+                        when (direction) {
+                            FocusDirection.Left -> sectionFocusRequester
+                            FocusDirection.Up -> topNavigationRequester
+                            FocusDirection.Down, FocusDirection.Right -> FocusRequester.Cancel
+                            else -> FocusRequester.Default
+                        }
+                    }
+                }
+                .focusGroup(),
+        ) {
             when (shownSection) {
                 TvSettingsSection.PROFILES -> TvProfilesSettings(state, viewModel)
                 TvSettingsSection.SOURCES -> TvSourcesSettings(state, viewModel)

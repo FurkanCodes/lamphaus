@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -197,7 +196,7 @@ internal fun TvSpotlightRow(
 ) {
     var focusedMedia by remember { mutableStateOf<MediaPreview?>(null) }
     val prefetchStill = rememberStillPrefetcher()
-    val firstCard = remember { FocusRequester() }
+    val row = rememberTvRowFocus()
     TvSpotlightRowFrame(
         title = section.title,
         subtitle = section.providerName,
@@ -208,9 +207,11 @@ internal fun TvSpotlightRow(
         if (section.initialLoading && section.items.isEmpty()) {
             TvSpotlightCardsSkeleton()
         } else if (section.items.isNotEmpty() || section.hasMore || section.loadMoreError != null) {
+            val showAction = section.loadMoreError != null || section.hasMore
+            val trailing = rememberTrailingActionFocus(showAction, section.items.size)
             SpotlightRowScrolling {
                 LazyRow(
-                    modifier = Modifier.focusRestorer(firstCard),
+                    modifier = Modifier.tvRowFocus(row),
                     horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                     contentPadding = PaddingValues(horizontal = TvLayoutTokens.screenHorizontalPadding),
                 ) {
@@ -225,16 +226,22 @@ internal fun TvSpotlightRow(
                             },
                             modifier = Modifier
                                 .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
-                                .firstItemFocus(index, firstCard, firstItemFocusRequester),
+                                .tvRowItem(row, index)
+                                .homeEntry(index, firstItemFocusRequester)
+                                .trailingItem(trailing, index),
                         )
                     }
-                    if (section.loadMoreError != null || section.hasMore) {
+                    if (trailing.visible(showAction)) {
                         item("catalog-action") {
                             TvAction(
                                 label = stringResource(if (section.loadMoreError != null) R.string.retry else R.string.load_more),
                                 icon = Icons.Outlined.Refresh,
-                                onClick = if (section.loadMoreError != null) onRetry else onLoadMore,
-                                modifier = Modifier.onFocusChanged { if (it.isFocused) focusedMedia = null },
+                                onClick = {
+                                    trailing.onPressed(section.items.size)
+                                    if (section.loadMoreError != null) onRetry() else onLoadMore()
+                                },
+                                modifier = Modifier.trailingAction(trailing)
+                                    .onFocusChanged { if (it.isFocused) focusedMedia = null },
                             )
                         }
                     }
@@ -264,7 +271,7 @@ internal fun TvSpotlightContinueWatchingRow(
     firstItemFocusRequester: FocusRequester? = null,
 ) {
     var focusedMedia by remember { mutableStateOf<MediaPreview?>(null) }
-    val firstCard = remember { FocusRequester() }
+    val row = rememberTvRowFocus()
     TvSpotlightRowFrame(
         title = stringResource(R.string.continue_watching),
         subtitle = null,
@@ -274,7 +281,7 @@ internal fun TvSpotlightContinueWatchingRow(
     ) {
         SpotlightRowScrolling {
             LazyRow(
-                modifier = Modifier.focusRestorer(firstCard),
+                modifier = Modifier.tvRowFocus(row),
                 horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                 contentPadding = PaddingValues(horizontal = TvLayoutTokens.screenHorizontalPadding),
             ) {
@@ -289,7 +296,8 @@ internal fun TvSpotlightContinueWatchingRow(
                         },
                         modifier = Modifier
                             .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
-                            .firstItemFocus(index, firstCard, firstItemFocusRequester),
+                            .tvRowItem(row, index)
+                                .homeEntry(index, firstItemFocusRequester),
                     )
                 }
             }
@@ -297,19 +305,9 @@ internal fun TvSpotlightContinueWatchingRow(
     }
 }
 
-/**
- * Entering a row lands on the card it last had, else its first card, rather
- * than whatever sits under the previous row's wide card (TV-NAV-05).
- */
-private fun Modifier.firstItemFocus(
-    index: Int,
-    rowFirstCard: FocusRequester,
-    homeEntry: FocusRequester?,
-): Modifier {
-    if (index != 0) return this
-    val withRow = focusRequester(rowFirstCard)
-    return if (homeEntry != null) withRow.focusRequester(homeEntry) else withRow
-}
+/** The Home entry requester sits on the first card of the first row. */
+private fun Modifier.homeEntry(index: Int, homeEntry: FocusRequester?): Modifier =
+    if (index == 0 && homeEntry != null) focusRequester(homeEntry) else this
 
 /** A focusable placeholder row while the first catalog window loads (TV-CNT-02). */
 @Composable
