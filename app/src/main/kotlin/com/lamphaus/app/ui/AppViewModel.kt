@@ -1938,8 +1938,9 @@ class AppViewModel(
         container.preferences.setPlaybackSettings(settings)
     }
 
-    // Frame-rate hint applies live via applyDeviceConfigToSession; audioOutputMode/
-    // decoderPriority/downmixMode/HDR path apply on next createPlayer (next playback).
+    // Frame-rate hint applies live via applyDeviceConfigToSession; audio output,
+    // decoder priority, downmix, and Dolby Vision rebuild the idle session player
+    // when the next playback connects (LamphausPlaybackService).
     fun setDevicePlaybackConfig(config: DevicePlaybackConfig) = viewModelScope.launch {
         container.preferences.setDevicePlayback(config)
     }

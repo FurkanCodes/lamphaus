@@ -58,3 +58,42 @@ internal fun subtitleLanguageDisplayName(
         }
         ?: unknownLabel
 }
+
+/** Quiet time after the last remote seek key before the accumulated seek runs. */
+internal const val REMOTE_SEEK_COMMIT_DELAY_MILLIS = 450L
+
+/**
+ * Seek step for a remote key, growing while it is held (Nuvio's scrub
+ * rates): 10 s for a tap, then 20 s, 30 s, and a minute on a long hold.
+ * [repeatCount] is the key event's auto-repeat count.
+ */
+internal fun remoteSeekStepMillis(repeatCount: Int): Long = when {
+    repeatCount >= 15 -> 60_000L
+    repeatCount >= 8 -> 30_000L
+    repeatCount >= 3 -> 20_000L
+    else -> 10_000L
+}
+
+/** Idle time paused before the TV pause overlay replaces the chrome (Nuvio uses 5 s). */
+internal const val PAUSE_OVERLAY_DELAY_MILLIS = 5_000L
+
+/** Keys that act on playback even while the pause overlay is up. */
+internal val PLAY_PAUSE_KEYS = setOf(
+    androidx.compose.ui.input.key.Key.MediaPlayPause,
+    androidx.compose.ui.input.key.Key.MediaPlay,
+    androidx.compose.ui.input.key.Key.MediaPause,
+)
+
+/**
+ * Subtitle languages in fallback order: preferred, then secondary, then the
+ * device language — an empty preference means the device language
+ * ([com.lamphaus.core.model.ProfilePlaybackPreferences]).
+ */
+internal fun preferredSubtitleLanguages(
+    preferences: com.lamphaus.core.model.ProfilePlaybackPreferences,
+    deviceLanguageTag: String,
+): List<String> = listOf(
+    preferences.preferredSubtitleLanguageTag,
+    preferences.secondarySubtitleLanguageTag,
+    deviceLanguageTag,
+).filter(String::isNotBlank).distinctBy { Locale.forLanguageTag(it).language }

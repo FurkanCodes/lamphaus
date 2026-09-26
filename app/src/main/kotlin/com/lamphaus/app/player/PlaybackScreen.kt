@@ -60,6 +60,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ClosedCaption
 import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
@@ -369,6 +370,7 @@ internal fun PlaybackScreen(
     subtitleDelayMillis: Long,
     audioDelayMillis: Long,
     streamInfo: String?,
+    streamStats: () -> com.lamphaus.core.player.PlaybackStats? = { null },
     onSubtitleDelay: (Long) -> Unit,
     onAudioDelay: (Long) -> Unit,
     onSubtitleStyle: (SubtitleStyle) -> Unit,
@@ -399,6 +401,29 @@ internal fun PlaybackScreen(
         hudText = text
     }
 
+    // Remote seeks accumulate into one target while keys keep arriving, then
+    // seek once: tap-tap-tap is a single +30 s jump, and a held key speeds up
+    // (Nuvio's scrub rates) without a rebuffer per repeat.
+    var keySeekTarget by remember { mutableStateOf<Long?>(null) }
+    fun keySeek(forward: Boolean, repeatCount: Int) {
+        val activePlayer = player ?: return
+        val step = remoteSeekStepMillis(repeatCount)
+        val base = keySeekTarget ?: activePlayer.currentPosition
+        val duration = snapshot.durationMillis.takeIf { it > 0 } ?: Long.MAX_VALUE
+        val next = (base + if (forward) step else -step).coerceIn(0L, duration)
+        keySeekTarget = next
+        showHud(
+            if (forward) Icons.Rounded.FastForward else Icons.Rounded.FastRewind,
+            next.asPlaybackTime(),
+        )
+    }
+    LaunchedEffect(keySeekTarget) {
+        val target = keySeekTarget ?: return@LaunchedEffect
+        delay(REMOTE_SEEK_COMMIT_DELAY_MILLIS)
+        player?.seekTo(target)
+        keySeekTarget = null
+    }
+
     LaunchedEffect(hudText) {
         if (hudText != null) {
             delay(900)
@@ -413,10 +438,47 @@ internal fun PlaybackScreen(
     val rootFocus = remember { FocusRequester() }
     val reducedMotion = rememberReducedMotion()
     val startupLoading = startupPhase == PlaybackStartupPhase.LOADING
-    // TV never falls back to the small generic buffering indicator. Startup
-    // and later stream rebuffering use the same stable, artwork-led surface.
-    val loadingSurfaceVisible = startupLoading ||
-        (isTelevision && snapshot.buffering && snapshot.errorMessage == null)
+    // Media3 reports BUFFERING for every seek and every momentary stall. Only
+    // buffering that persists is shown; a blip keeps the last frame on screen.
+    val stalled = snapshot.buffering && snapshot.errorMessage == null
+    var rebufferIndicatorVisible by remember { mutableStateOf(false) }
+    var sustainedRebuffer by remember { mutableStateOf(false) }
+    LaunchedEffect(stalled) {
+        rebufferIndicatorVisible = false
+        sustainedRebuffer = false
+        if (!stalled) return@LaunchedEffect
+        delay(PlayerChromeTokens.RebufferIndicatorDelayMillis)
+        rebufferIndicatorVisible = true
+        delay(PlayerChromeTokens.RebufferSurfaceDelayMillis - PlayerChromeTokens.RebufferIndicatorDelayMillis)
+        sustainedRebuffer = true
+    }
+    // The engine re-prepares transient network errors on its own, so an error
+    // is only surfaced once it outlives that retry (SHR-PROD-04).
+    var shownError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(snapshot.errorMessage) {
+        val message = snapshot.errorMessage
+        if (message != null && shownError == null) delay(PlayerChromeTokens.ErrorRevealDelayMillis)
+        shownError = message
+    }
+    // TV startup and sustained rebuffering during clean viewing share the stable,
+    // artwork-led surface. While the viewer operates the chrome, the frame and
+    // chrome stay put and the compact indicator reports progress instead.
+    val rebufferSurfaceVisible = isTelevision && sustainedRebuffer && !controlsVisible && panel == null
+    val loadingSurfaceVisible = startupLoading || rebufferSurfaceVisible
+    // TV: a few idle seconds paused trade the chrome for the title and
+    // synopsis over the dimmed frame (Nuvio-style). Any key brings it back.
+    var pauseOverlayVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(isTelevision, snapshot.playing, stalled, panel, interactionVersion, shownError, startupLoading, inPictureInPicture) {
+        pauseOverlayVisible = false
+        if (!isTelevision || snapshot.playing || stalled || panel != null || shownError != null ||
+            startupLoading || inPictureInPicture
+        ) {
+            return@LaunchedEffect
+        }
+        delay(PAUSE_OVERLAY_DELAY_MILLIS)
+        controlsVisible = false
+        pauseOverlayVisible = true
+    }
     val windowWidthDp = with(LocalDensity.current) {
         LocalWindowInfo.current.containerSize.width.toDp()
     }
@@ -480,7 +542,6 @@ internal fun PlaybackScreen(
 
             override fun onPlayerError(error: PlaybackException) {
                 snapshot = player.snapshot().copy(errorMessage = error.safeMessage())
-                controlsVisible = true
             }
 
             override fun onCues(cueGroup: CueGroup) {
@@ -538,14 +599,15 @@ internal fun PlaybackScreen(
 
     BackHandler {
         when {
-            loadingSurfaceVisible -> onExit()
+            startupLoading -> onExit()
+            pauseOverlayVisible -> revealControls()
             // Back unwinds editor -> submenu -> controls -> exit (plan §5),
             // restoring the originating focus at each layer. Lock is one layer.
             locked -> locked = false
             editor != null -> closeEditor()
             panel != null -> closePanel()
             nextEpisodeCardVisible -> onDismissNextEpisodeCard()
-            snapshot.errorMessage != null -> onExit()
+            shownError != null -> onExit()
             controlsVisible -> controlsVisible = false
             else -> onExit()
         }
@@ -559,7 +621,14 @@ internal fun PlaybackScreen(
             .focusRequester(rootFocus)
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown || player == null || loadingSurfaceVisible) return@onPreviewKeyEvent false
+                if (event.type != KeyEventType.KeyDown || player == null || startupLoading) return@onPreviewKeyEvent false
+                // Any key is interaction: it restarts the auto-hide and pause-overlay timers.
+                interactionVersion++
+                if (pauseOverlayVisible && event.key !in PLAY_PAUSE_KEYS) {
+                    // The first key only dismisses the overlay; it never seeks or moves focus.
+                    revealControls()
+                    return@onPreviewKeyEvent true
+                }
                 when (event.key) {
                     Key.MediaPlayPause -> {
                         if (snapshot.playing) player.pause() else player.play()
@@ -577,12 +646,12 @@ internal fun PlaybackScreen(
                         true
                     }
                     Key.MediaRewind -> {
-                        player.seekBack()
+                        keySeek(forward = false, event.nativeKeyEvent.repeatCount)
                         revealControls()
                         true
                     }
                     Key.MediaFastForward -> {
-                        player.seekForward()
+                        keySeek(forward = true, event.nativeKeyEvent.repeatCount)
                         revealControls()
                         true
                     }
@@ -590,13 +659,15 @@ internal fun PlaybackScreen(
                         revealControls()
                         true
                     } else false
-                    Key.DirectionLeft -> if (!controlsVisible) {
-                        player.seekBack()
+                    // A seek that started with the chrome hidden keeps the
+                    // D-pad until it commits, so holding never wanders focus.
+                    Key.DirectionLeft -> if (!controlsVisible || keySeekTarget != null) {
+                        keySeek(forward = false, event.nativeKeyEvent.repeatCount)
                         revealControls()
                         true
                     } else false
-                    Key.DirectionRight -> if (!controlsVisible) {
-                        player.seekForward()
+                    Key.DirectionRight -> if (!controlsVisible || keySeekTarget != null) {
+                        keySeek(forward = true, event.nativeKeyEvent.repeatCount)
                         revealControls()
                         true
                     } else false
@@ -670,7 +741,7 @@ internal fun PlaybackScreen(
 
         if (!inPictureInPicture && !isTelevision) {
             PlayerGestureSurface(
-                enabled = !loadingSurfaceVisible && !locked && snapshot.errorMessage == null,
+                enabled = !loadingSurfaceVisible && !locked && shownError == null,
                 onTap = {
                     controlsVisible = !controlsVisible
                     panel = null
@@ -716,7 +787,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (!loadingSurfaceVisible && !inPictureInPicture && snapshot.buffering && snapshot.errorMessage == null) {
+        if (!loadingSurfaceVisible && !inPictureInPicture && rebufferIndicatorVisible) {
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -739,7 +810,7 @@ internal fun PlaybackScreen(
         if (!loadingSurfaceVisible && !inPictureInPicture && isTelevision && panel == PlayerPanel.SUBTITLES) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)))
             PlayerLiveSubtitleOverlay(liveSubtitleCues, subtitleStyle)
-        } else if (!loadingSurfaceVisible && !inPictureInPicture && (controlsVisible || panel != null || snapshot.errorMessage != null)) {
+        } else if (!loadingSurfaceVisible && !inPictureInPicture && (controlsVisible || panel != null || shownError != null)) {
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(
@@ -752,7 +823,7 @@ internal fun PlaybackScreen(
             )
         }
 
-        if (!loadingSurfaceVisible && !inPictureInPicture && controlsVisible && panel == null && !locked && snapshot.errorMessage == null) {
+        if (!loadingSurfaceVisible && !inPictureInPicture && controlsVisible && panel == null && !locked && shownError == null) {
             PlayerControls(
                 request = request,
                 snapshot = snapshot,
@@ -925,17 +996,31 @@ internal fun PlaybackScreen(
             PlayerHudBubble(hudIcon, text, Modifier.align(Alignment.Center))
         }
 
-        snapshot.errorMessage?.takeUnless { inPictureInPicture }?.let { message ->
+        shownError?.takeUnless { inPictureInPicture }?.let { message ->
             PlayerErrorPanel(
                 message = message,
-                onRetry = { player?.prepare(); player?.play() },
+                onRetry = {
+                    player?.run {
+                        // A live stream that fell behind its window resumes at the live edge.
+                        if (playerError?.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                            seekToDefaultPosition()
+                        }
+                        prepare()
+                        play()
+                    }
+                },
                 onOpenExternally = onOpenExternally,
             )
         }
 
         panel?.takeUnless { inPictureInPicture || loadingSurfaceVisible }?.let { activePanel ->
             if (activePanel == PlayerPanel.INFO) {
-                PlayerStreamInfoPanel(streamInfo = streamInfo, isTelevision = isTelevision, onClose = ::closePanel)
+                PlayerStreamInfoPanel(
+                    streamInfo = streamInfo,
+                    streamStats = streamStats,
+                    isTelevision = isTelevision,
+                    onClose = ::closePanel,
+                )
             } else if (editor == PlayerEditor.TIMING) {
                 PlayerTimingEditor(
                     isTelevision = isTelevision,
@@ -979,6 +1064,14 @@ internal fun PlaybackScreen(
                     onOpenExternally = onOpenExternally,
                 )
             }
+        }
+
+        AnimatedVisibility(
+            visible = pauseOverlayVisible,
+            enter = fadeIn(tween(if (reducedMotion) 0 else 220)),
+            exit = fadeOut(tween(if (reducedMotion) 0 else 160)),
+        ) {
+            PausedInfoOverlay(request)
         }
 
         if (loadingSurfaceVisible) {
@@ -2136,15 +2229,74 @@ private fun PlayerChoiceRow(
 }
 
 @Composable
-private fun PlayerStreamInfoPanel(streamInfo: String?, isTelevision: Boolean, onClose: () -> Unit) {
+private fun PlayerStreamInfoPanel(
+    streamInfo: String?,
+    streamStats: () -> com.lamphaus.core.player.PlaybackStats?,
+    isTelevision: Boolean,
+    onClose: () -> Unit,
+) {
     val closeFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (isTelevision) closeFocus.requestFocus() }
+    // Live engine numbers, refreshed each second while the panel is open.
+    var stats by remember { mutableStateOf(streamStats()) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            stats = streamStats()
+            delay(1_000)
+        }
+    }
+    val rows = buildList {
+        stats?.let { current ->
+            current.videoFormat?.let { add(stringResource(R.string.player_stats_video) to it.videoSummary()) }
+            current.audioFormat?.let { format ->
+                add(stringResource(R.string.player_stats_audio) to format.audioSummary())
+                add(
+                    stringResource(R.string.player_stats_output) to (
+                        current.audioDecoder?.let { stringResource(R.string.player_stats_decoded, it) }
+                            ?: stringResource(R.string.player_stats_passthrough)
+                        ),
+                )
+            }
+            add(stringResource(R.string.player_stats_buffer) to
+                stringResource(R.string.player_stats_buffer_value, current.bufferedMillis / 1_000f))
+            if (current.bandwidthBitsPerSecond > 0) {
+                add(stringResource(R.string.player_stats_network) to
+                    stringResource(R.string.player_stats_network_value, current.bandwidthBitsPerSecond / 1_000_000f))
+            }
+            add(stringResource(R.string.player_stats_dropped) to current.droppedFrames.toString())
+        }
+        streamInfo?.let { add(stringResource(R.string.player_stats_display) to it) }
+    }
     PlayerOverlayLayout(stringResource(R.string.player_info), isTelevision, onClose, tvWidth = 560.dp) {
-        Text(streamInfo ?: stringResource(R.string.player_info_empty),
-            style = MaterialTheme.typography.bodyLarge, color = PlayerOnSurfaceMuted)
+        if (rows.isEmpty()) {
+            Text(stringResource(R.string.player_info_empty),
+                style = MaterialTheme.typography.bodyLarge, color = PlayerOnSurfaceMuted)
+        }
+        rows.forEach { (label, value) ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(label, style = MaterialTheme.typography.bodyMedium, color = PlayerOnSurfaceMuted,
+                    modifier = Modifier.widthIn(min = 120.dp))
+                Text(value, style = MaterialTheme.typography.bodyMedium, color = PlayerOnSurface)
+            }
+        }
         PlayerTextButton(stringResource(R.string.player_done), onClose, Modifier.focusRequester(closeFocus))
     }
 }
+
+private fun Format.videoSummary(): String = listOfNotNull(
+    "${width}×${height}".takeIf { width > 0 && height > 0 },
+    frameRate.takeIf { it > 0f }?.let { "%.3f fps".format(it).replace(Regex("\\.?0+ fps$"), " fps") },
+    sampleMimeType?.let { friendlyCodecName(it) },
+    playbackHdrType()?.name?.replace('_', ' '),
+    bitrate.takeIf { it > 0 }?.let { "%.1f Mbps".format(it / 1_000_000f) },
+).joinToString(" · ")
+
+private fun Format.audioSummary(): String = listOfNotNull(
+    sampleMimeType?.let { friendlyCodecName(it) },
+    channelLayout(channelCount),
+    sampleRate.takeIf { it > 0 }?.let { "${it / 1_000.0} kHz" },
+    bitrate.takeIf { it > 0 }?.let { "${it / 1_000} kbps" },
+).joinToString(" · ")
 
 @Composable
 private fun PlayerTimingEditor(
@@ -2699,53 +2851,6 @@ private fun Tracks.options(trackType: Int): List<TrackOption> = groups
             )
         }
     }
-
-private fun Format.trackTitle(index: Int): String {
-    label?.takeIf(String::isNotBlank)?.let { return it }
-    language?.takeIf { it.isNotBlank() && it != "und" }?.let { code ->
-        Locale.forLanguageTag(code).displayLanguage.takeIf(String::isNotBlank)?.let { return it }
-    }
-    return "Track ${index + 1}"
-}
-
-private fun Format.trackDetails(trackType: Int): String? = buildList {
-    if (selectionFlags and C.SELECTION_FLAG_DEFAULT != 0) add("Default")
-    if (selectionFlags and C.SELECTION_FLAG_FORCED != 0) add("Forced")
-    if (roleFlags and C.ROLE_FLAG_CAPTION != 0) add("Captions")
-    if (roleFlags and C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND != 0) add("SDH")
-    if (roleFlags and C.ROLE_FLAG_COMMENTARY != 0) add("Commentary")
-    if (roleFlags and C.ROLE_FLAG_DESCRIBES_VIDEO != 0) add("Audio description")
-    if (trackType == C.TRACK_TYPE_AUDIO && channelCount > 0) {
-        add(when (channelCount) {
-            1 -> "Mono"
-            2 -> "Stereo"
-            6 -> "5.1"
-            8 -> "7.1"
-            else -> "$channelCount channels"
-        })
-    }
-    sampleMimeType?.friendlyCodecName()?.let(::add)
-    if (trackType == C.TRACK_TYPE_AUDIO && sampleRate > 0) add("${sampleRate / 1_000.0} kHz")
-    if (bitrate > 0) add("${bitrate / 1_000} kbps")
-}.joinToString(" · ").ifBlank { null }
-
-private fun String.friendlyCodecName(): String = when (lowercase(Locale.ROOT)) {
-    "audio/eac3-joc" -> "Dolby Atmos"
-    "audio/eac3" -> "Dolby Digital Plus"
-    "audio/ac3" -> "Dolby Digital"
-    "audio/true-hd" -> "Dolby TrueHD"
-    "audio/vnd.dts", "audio/dts" -> "DTS"
-    "audio/vnd.dts.hd", "audio/dts-hd" -> "DTS-HD"
-    "audio/mp4a-latm" -> "AAC"
-    "audio/opus" -> "Opus"
-    "audio/flac" -> "FLAC"
-    "audio/mpeg" -> "MP3"
-    "text/vtt" -> "WebVTT"
-    "application/x-subrip" -> "SRT"
-    "text/x-ssa", "text/x-ass" -> "ASS/SSA"
-    "application/ttml+xml" -> "TTML"
-    else -> substringAfter('/').uppercase(Locale.ROOT)
-}
 
 private fun Player.selectTrack(trackType: Int, option: TrackOption) {
     trackSelectionParameters = trackSelectionParameters.buildUpon()

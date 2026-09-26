@@ -14,15 +14,27 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.lamphaus.core.model.AudioOutputMode
 import com.lamphaus.core.player.audio.DelayAudioProcessor
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.extractor.DefaultExtractorsFactory
+import io.github.peerless2012.ass.media.AssHandler
+import io.github.peerless2012.ass.media.kt.withAssMkvSupport
+import io.github.peerless2012.ass.media.kt.withAssSupport
+import io.github.peerless2012.ass.media.parser.AssSubtitleParserFactory
+import io.github.peerless2012.ass.media.type.AssRenderType
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.lamphaus.core.model.DecoderPriority
+import com.lamphaus.core.model.DownmixMode
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
 import com.lamphaus.core.model.DevicePlaybackConfig
 import com.lamphaus.core.model.FrameRateMatching
 
@@ -50,9 +62,8 @@ object Media3EngineFactory {
     val audioDelayProcessor = DelayAudioProcessor()
 
     fun createPlayer(context: Context, config: DevicePlaybackConfig = deviceConfig): ExoPlayer {
-        val httpDataSource = DefaultHttpDataSource.Factory()
-            .setUserAgent("Lamphaus/1.0")
-            .setAllowCrossProtocolRedirects(true)
+        val bufferPlan = StreamingPolicy.bufferPlan(Runtime.getRuntime().maxMemory())
+        val httpDataSource = PlaybackNetworking.httpDataSourceFactory()
         val resolvingDataSource = ResolvingDataSource.Factory(
             DefaultDataSource.Factory(context, httpDataSource),
         ) { dataSpec ->
@@ -70,6 +81,35 @@ object Media3EngineFactory {
                 AudioCapabilities.getCapabilities(context)
         }
         val renderersFactory = object : DefaultRenderersFactory(context) {
+            override fun buildVideoRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                eventHandler: android.os.Handler,
+                eventListener: VideoRendererEventListener,
+                allowedVideoJoiningTimeMs: Long,
+                out: java.util.ArrayList<Renderer>,
+            ) {
+                super.buildVideoRenderers(
+                    context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
+                    eventHandler, eventListener, allowedVideoJoiningTimeMs, out,
+                )
+                // Same settings as Media3's own renderer, plus the DV policy.
+                val index = out.indexOfFirst { it.javaClass == MediaCodecVideoRenderer::class.java }
+                if (index < 0) return
+                out[index] = DolbyVisionAwareVideoRenderer(
+                    mediaCodecSelector,
+                    MediaCodecVideoRenderer.Builder(context)
+                        .setAllowedJoiningTimeMs(allowedVideoJoiningTimeMs)
+                        .setEnableDecoderFallback(enableDecoderFallback)
+                        .setEventHandler(eventHandler)
+                        .setEventListener(eventListener)
+                        .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY),
+                    config.dolbyVisionHandling,
+                )
+            }
+
             override fun buildAudioSink(
                 context: Context,
                 enableFloatOutput: Boolean,
@@ -77,7 +117,7 @@ object Media3EngineFactory {
             ): AudioSink =
                 DefaultAudioSink.Builder(context)
                     .setAudioCapabilities(audioCapabilities)
-                    .setAudioProcessors(arrayOf(audioDelayProcessor))
+                    .setAudioProcessors(audioProcessors(config.downmixMode))
                     .setEnableAudioTrackPlaybackParams(true)
                     .build()
         }
@@ -107,30 +147,44 @@ object Media3EngineFactory {
             setParameters(
                 buildUponParameters()
                     .setAllowAudioMixedMimeTypeAdaptiveness(true)
-                    .setAllowVideoMixedMimeTypeAdaptiveness(true),
+                    .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                    // Never downmix: keep multichannel tracks eligible even
+                    // when the device reports fewer output channels.
+                    .setConstrainAudioChannelCountToDeviceCapabilities(
+                        config.downmixMode != DownmixMode.NEVER,
+                    ),
             )
         }
-        return ExoPlayer.Builder(context, renderersFactory)
+        // Styled ASS/SSA through libass (Nuvio's approach): embedded Matroska
+        // and sidecar tracks are rendered to positioned bitmap cues, so they
+        // travel the normal subtitle path — delay, HDR, and the session included.
+        val assHandler = AssHandler(AssRenderType.CUES)
+        val assParsers = AssSubtitleParserFactory(assHandler)
+        return ExoPlayer.Builder(context, renderersFactory.withAssSupport(assHandler))
             .setTrackSelector(trackSelector)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolvingDataSource))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    resolvingDataSource,
+                    DefaultExtractorsFactory().withAssMkvSupport(assParsers, assHandler),
+                )
+                    .setSubtitleParserFactory(assParsers)
+                    .setLoadErrorHandlingPolicy(StreamingLoadErrorPolicy()),
+            )
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
             // ALWAYS is owned by PlayerActivity's explicit three-argument
             // Surface.setFrameRate call. Media3 can only request seamless
             // changes, so it must stay off to avoid competing surface votes.
             .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategy(config))
-            .setLoadControl(
-                DefaultLoadControl.Builder()
-                    // Large remuxes can fill a low-memory TV's heap long before the time-based
-                    // buffer is reached. Keep a small, byte-bounded buffer and let playback
-                    // refill it continuously instead of retaining hundreds of megabytes.
-                    .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
-                    .setTargetBufferBytes(32 * 1024 * 1024)
-                    .setPrioritizeTimeOverSizeThresholds(false)
-                    .build(),
-            )
+            .setLoadControl(loadControl(bufferPlan))
+            // Holds Wi-Fi out of power save while playing; a dozing radio is a
+            // classic cause of short mid-episode stalls on TV boxes (QA-08).
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             .apply {
+                assHandler.init(this)
+                addListener(AutoRetryListener(this))
+                statsCollector = PlaybackStatsCollector().also(::addAnalyticsListener)
                 videoCadenceEstimator.reset()
                 setVideoFrameMetadataListener { presentationTimeUs, _, _, _ ->
                     videoCadenceEstimator.onFrame(presentationTimeUs)
@@ -152,6 +206,67 @@ object Media3EngineFactory {
             }
     }
     /**
+     * Decoded audio passes through the optional stereo fold-down, then the
+     * route delay. Bitstream passthrough bypasses both (it cannot be mixed).
+     */
+    private fun audioProcessors(downmixMode: DownmixMode): Array<AudioProcessor> {
+        if (downmixMode != DownmixMode.STEREO) return arrayOf(audioDelayProcessor)
+        val downmix = ChannelMixingAudioProcessor().apply {
+            StereoDownmix.supportedChannelCounts.forEach { channels ->
+                putChannelMixingMatrix(ChannelMixingMatrix(channels, 2, StereoDownmix.coefficients(channels)))
+            }
+        }
+        return arrayOf(downmix, audioDelayProcessor)
+    }
+
+    /**
+     * Time wins over the byte budget until the minimum buffer is met, so a
+     * high-bitrate remux cannot starve itself (Nuvio's setting). Media3 still
+     * stops early when the heap nears its limit.
+     */
+    private fun loadControl(plan: PlaybackBufferPlan): DefaultLoadControl =
+        DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                plan.minBufferMs,
+                plan.maxBufferMs,
+                plan.bufferForPlaybackMs,
+                plan.bufferForPlaybackAfterRebufferMs,
+            )
+            .setTargetBufferBytes(plan.targetBufferBytes)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(plan.backBufferMs, true)
+            .build()
+
+    /**
+     * Nuvio-style recovery for errors that escape the load retries: re-prepare
+     * at the same position after a short pause, at most twice per stretch of
+     * healthy playback (SHR-PROD-04).
+     */
+    private class AutoRetryListener(private val player: ExoPlayer) : Player.Listener {
+        private val handler = android.os.Handler(player.applicationLooper)
+        private var attempts = 0
+        private var lastRetryAt = 0L
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastRetryAt > StreamingPolicy.AUTO_RETRY_RESET_MS) attempts = 0
+            val status = generateSequence<Throwable>(error) { it.cause }
+                .filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>()
+                .firstOrNull()?.responseCode
+            if (!StreamingPolicy.shouldAutoRetry(error.errorCode, status, attempts)) return
+            attempts++
+            lastRetryAt = now
+            handler.postDelayed({
+                if (player.playerError == null) return@postDelayed
+                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                    player.seekToDefaultPosition()
+                }
+                player.prepare()
+            }, StreamingPolicy.AUTO_RETRY_DELAY_MS)
+        }
+    }
+
+    /**
      * Live session player in the same process (set by LamphausPlaybackService).
      * Lets the activity apply the frame-rate hint without recreating the player.
      */
@@ -160,10 +275,38 @@ object Media3EngineFactory {
 
     private val videoCadenceEstimator = VideoCadenceEstimator()
 
+    private var statsCollector: PlaybackStatsCollector? = null
+
+    /** Main-thread snapshot for the Info panel; null when MPV owns the session. */
+    fun playbackStats(): PlaybackStats? {
+        val player = sessionPlayer ?: return null
+        val collector = statsCollector
+        return PlaybackStats(
+            videoFormat = player.videoFormat,
+            videoDecoder = collector?.videoDecoder,
+            audioFormat = player.audioFormat,
+            audioDecoder = collector?.audioDecoder,
+            bufferedMillis = player.totalBufferedDuration,
+            bandwidthBitsPerSecond = collector?.bandwidthBitsPerSecond ?: 0,
+            droppedFrames = player.videoDecoderCounters?.droppedBufferCount ?: 0,
+        )
+    }
+
     /** Main-thread snapshot of the decoder's active rendition, including absent manifest FPS. */
     fun currentVideoFormat(): Format? = sessionPlayer?.videoFormat
 
     fun estimatedVideoFrameRate(): Float = videoCadenceEstimator.frameRate
+
+    /**
+     * True when [wanted] changes something only a new player can apply:
+     * audio output, decoder priority, downmix, or Dolby Vision handling.
+     * Frame-rate matching applies live and never needs a rebuild.
+     */
+    fun needsRebuild(builtWith: DevicePlaybackConfig, wanted: DevicePlaybackConfig): Boolean =
+        builtWith.audioOutputMode != wanted.audioOutputMode ||
+            builtWith.decoderPriority != wanted.decoderPriority ||
+            builtWith.downmixMode != wanted.downmixMode ||
+            builtWith.dolbyVisionHandling != wanted.dolbyVisionHandling
 
     /**
      * Live-applies what ExoPlayer supports without recreation: the frame-rate
