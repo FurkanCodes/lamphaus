@@ -113,8 +113,12 @@ fun MediaArtwork(
         resolvedMedia.posterUrl ?: resolvedMedia.backgroundUrl
     }
     when {
-        local != null -> Image(
-            painter = painterResource(local),
+        // Fixture posters are 1024x1536 PNGs; painterResource decoded them
+        // synchronously on the main thread for every card (about 22 ms each on
+        // the emulator). Coil decodes them off-thread at the displayed size,
+        // exactly like remote artwork (QA-08).
+        local != null -> AsyncImage(
+            model = local,
             contentDescription = resolvedMedia.name,
             modifier = modifier,
             contentScale = contentScale,

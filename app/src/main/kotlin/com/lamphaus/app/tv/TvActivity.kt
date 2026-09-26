@@ -64,6 +64,10 @@ class TvActivity : ComponentActivity() {
                 updateViewModel = updateViewModel,
             )
         }
+        // QA-08: once Compose draws, its root Surface covers the window with
+        // an opaque background, so the splash-coloured window background would
+        // only add a redundant full-screen pass to every frame.
+        window.decorView.post { window.setBackgroundDrawable(null) }
     }
 
     override fun onResume() {

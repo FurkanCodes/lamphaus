@@ -2,6 +2,10 @@ package com.lamphaus.app.tv
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -22,10 +26,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
-import coil3.Image
 import coil3.SingletonImageLoader
-import coil3.compose.ImagePainter
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
@@ -38,6 +43,7 @@ import com.lamphaus.app.ui.ArtworkResolution
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.app.ui.fixtureArtworkResource
+import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -45,6 +51,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 // QA-08: the ambient image is drawn at TvAmbientTokens.imageAlpha under
 // near-opaque scrims, so a quarter-resolution decode is visually identical to
@@ -58,7 +65,11 @@ private const val PALETTE_CACHE_CAPACITY = 32
 @Immutable
 internal data class TvContentAmbientState(
     val focusedMediaKey: String? = null,
-    val image: Image? = null,
+    /**
+     * Background, dimmed artwork and both scrims pre-composed into one opaque
+     * bitmap off the main thread (see [composeAmbient]).
+     */
+    val composite: ImageBitmap? = null,
     val accent: Color? = null,
     val accentContainer: Color? = null,
 )
@@ -107,6 +118,7 @@ internal fun rememberTvContentAmbient(focusedMedia: () -> MediaPreview?): TvCont
     val defaultAccentContainer by rememberUpdatedState(
         androidx.tv.material3.MaterialTheme.colorScheme.primaryContainer,
     )
+    val background by rememberUpdatedState(androidx.tv.material3.MaterialTheme.colorScheme.background)
     val ambient = remember { TvContentAmbient() }
 
     LaunchedEffect(ambient) {
@@ -117,15 +129,22 @@ internal fun rememberTvContentAmbient(focusedMedia: () -> MediaPreview?): TvCont
             .distinctUntilChanged { old, new -> old.first == new.first && old.second?.key == new.second?.key }
             .collectLatest { (focusedMediaKey, artwork) ->
                 delay(TvMotionTokens.heroUpdateDelayMillis)
-                if (focusedMediaKey == null || artwork == null) {
-                    ambient.state = TvContentAmbientState()
-                    return@collectLatest
-                }
-                val loaded = withContext(Dispatchers.IO) {
-                    loadAmbient(context, artwork, defaultAccent, defaultAccentContainer)
+                val loaded = if (focusedMediaKey != null && artwork != null) {
+                    withContext(Dispatchers.IO) {
+                        loadAmbient(context, artwork, background, defaultAccent, defaultAccentContainer)
+                    }
+                } else {
+                    null
                 }
                 ensureActive()
-                ambient.state = loaded?.copy(focusedMediaKey = focusedMediaKey) ?: TvContentAmbientState()
+                ambient.state = loaded?.copy(focusedMediaKey = focusedMediaKey)
+                    ?: withContext(Dispatchers.Default) {
+                        // No artwork: the same scrims over the plain background,
+                        // so every change stays a composite-to-composite fade.
+                        TvContentAmbientState(
+                            composite = composeAmbient(null, background, defaultAccentContainer),
+                        )
+                    }
             }
     }
 
@@ -143,53 +162,84 @@ internal fun TvContentAmbientBackground(
     val accentContainer = state.accentContainer
         ?: androidx.tv.material3.MaterialTheme.colorScheme.primaryContainer
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(background),
-    ) {
-        TvLayerlessCrossfade(
-            targetState = state.image,
-            reducedMotion = reducedMotion,
-            label = "ambient artwork",
-        ) { image ->
-            image?.let {
-                // Paint alpha instead of Modifier.alpha: the latter composites
-                // a full-screen offscreen layer on every frame (QA-08).
-                val painter = remember(it) { ImagePainter(it) }
-                Image(
-                    painter = painter,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                    alpha = TvAmbientTokens.imageAlpha,
-                )
-            }
+    // QA-08: on TV GPUs such as the Mali-G31 every full-screen layer costs
+    // milliseconds per frame. The root Surface already paints the background,
+    // and the loaded state is one opaque pre-composed bitmap, so a settled
+    // frame pays a single full-screen pass here instead of four blended ones.
+    TvLayerlessCrossfade(
+        targetState = state.composite,
+        reducedMotion = reducedMotion,
+        label = "ambient artwork",
+        modifier = modifier.fillMaxSize(),
+    ) { composite ->
+        if (composite != null) {
+            Image(
+                bitmap = composite,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            // Until the first composite is ready.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.horizontalGradient(colorStops = horizontalScrimStops(background, accentContainer)))
+                    .background(Brush.verticalGradient(colorStops = verticalScrimStops(background))),
+            )
         }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to background.copy(alpha = TvAmbientTokens.horizontalScrimLeftAlpha),
-                            0.52f to background.copy(alpha = TvAmbientTokens.horizontalScrimMiddleAlpha),
-                            1f to accentContainer.copy(alpha = TvAmbientTokens.horizontalScrimRightAlpha),
-                        ),
-                    ),
-                )
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to background.copy(alpha = TvAmbientTokens.verticalScrimTopAlpha),
-                            0.55f to Color.Transparent.copy(alpha = TvAmbientTokens.verticalScrimMiddleAlpha),
-                            1f to background.copy(alpha = TvAmbientTokens.verticalScrimBottomAlpha),
-                        ),
-                    ),
-                ),
-        )
     }
 }
+
+private fun horizontalScrimStops(background: Color, accentContainer: Color) = arrayOf(
+    0f to background.copy(alpha = TvAmbientTokens.horizontalScrimLeftAlpha),
+    0.52f to background.copy(alpha = TvAmbientTokens.horizontalScrimMiddleAlpha),
+    1f to accentContainer.copy(alpha = TvAmbientTokens.horizontalScrimRightAlpha),
+)
+
+private fun verticalScrimStops(background: Color) = arrayOf(
+    0f to background.copy(alpha = TvAmbientTokens.verticalScrimTopAlpha),
+    0.55f to Color.Transparent.copy(alpha = TvAmbientTokens.verticalScrimMiddleAlpha),
+    1f to background.copy(alpha = TvAmbientTokens.verticalScrimBottomAlpha),
+)
+
+/**
+ * Draws exactly what the ambient layers used to draw every frame (background,
+ * artwork centre-cropped at [TvAmbientTokens.imageAlpha], then the horizontal
+ * and vertical scrims) into one opaque bitmap. Runs off the main thread.
+ */
+internal fun composeAmbient(artwork: Bitmap?, background: Color, accentContainer: Color): ImageBitmap {
+    val width = DISPLAY_WIDTH
+    val height = DISPLAY_HEIGHT
+    val out = createBitmap(width, height)
+    val canvas = android.graphics.Canvas(out)
+    canvas.drawColor(background.toArgb())
+    if (artwork != null && artwork.width > 0 && artwork.height > 0) {
+        val scale = maxOf(width / artwork.width.toFloat(), height / artwork.height.toFloat())
+        val drawnWidth = artwork.width * scale
+        val drawnHeight = artwork.height * scale
+        val left = (width - drawnWidth) / 2f
+        val top = (height - drawnHeight) / 2f
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
+            alpha = (TvAmbientTokens.imageAlpha * 255).roundToInt()
+        }
+        canvas.drawBitmap(artwork, null, RectF(left, top, left + drawnWidth, top + drawnHeight), paint)
+    }
+    fun gradient(stops: Array<Pair<Float, Color>>, x1: Float, y1: Float) = Paint().apply {
+        shader = LinearGradient(
+            0f, 0f, x1, y1,
+            IntArray(stops.size) { stops[it].second.toArgb() },
+            FloatArray(stops.size) { stops[it].first },
+            Shader.TileMode.CLAMP,
+        )
+    }
+    canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gradient(horizontalScrimStops(background, accentContainer), width.toFloat(), 0f))
+    canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gradient(verticalScrimStops(background), 0f, height.toFloat()))
+    // Fully opaque: lets the GPU skip blending when it is drawn.
+    out.setHasAlpha(false)
+    return out.asImageBitmap()
+}
+
 private fun selectArtworkSource(context: Context, resolution: ArtworkResolution): AmbientArtworkSource? {
     val media = resolution.media
     media.backgroundUrl
@@ -212,6 +262,7 @@ private fun selectArtworkSource(context: Context, resolution: ArtworkResolution)
 private suspend fun loadAmbient(
     context: Context,
     artwork: AmbientArtworkSource,
+    background: Color,
     defaultAccent: Color,
     defaultAccentContainer: Color,
 ): TvContentAmbientState? {
@@ -244,9 +295,10 @@ private suspend fun loadAmbient(
         )
     }.getOrNull()?.also { paletteCache.put(artwork.key, it) }
 
+    val accentContainer = palette?.accentContainer ?: defaultAccentContainer
     return TvContentAmbientState(
-        image = displayResult.image,
+        composite = composeAmbient(displayResult.image.toBitmap(), background, accentContainer),
         accent = palette?.accent ?: defaultAccent,
-        accentContainer = palette?.accentContainer ?: defaultAccentContainer,
+        accentContainer = accentContainer,
     )
 }

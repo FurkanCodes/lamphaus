@@ -219,16 +219,22 @@ fun TvApp(
         val artworkResolver = remember(state.artworkOverrides) {
             ArtworkResolver(state.artworkOverrides.associateBy { it.mediaKey })
         }
-        CompositionLocalProvider(
-            LocalArtworkResolver provides artworkResolver,
-            LocalTvContentMenuEnvironment provides TvContentMenuEnvironment(
+        // QA-08: LocalTvContentMenuEnvironment is a static local, so a new
+        // instance recomposes every card. TvApp recomposes on every state
+        // emission; keep the environment stable unless completion changes.
+        val menuEnvironment = remember(completedVideoIds, viewModel) {
+            TvContentMenuEnvironment(
                 completedVideoIds = completedVideoIds,
                 onRequest = { target, returnFocus ->
                     menuReturnFocus = returnFocus
                     suppressMenuOpeningKey = true
                     viewModel.openContentMenu(target)
                 },
-            ),
+            )
+        }
+        CompositionLocalProvider(
+            LocalArtworkResolver provides artworkResolver,
+            LocalTvContentMenuEnvironment provides menuEnvironment,
         ) {
         LaunchedEffect(state.playbackRequest) {
             state.playbackRequest?.let {
@@ -1417,27 +1423,9 @@ private fun TvHero(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
-                            0.48f to MaterialTheme.colorScheme.background.copy(alpha = 0.58f),
-                            0.76f to Color.Transparent,
-                        ),
-                    ),
-                )
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.42f)),
-                    ),
-                )
-                .background(
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
-                            0.42f to Color.Transparent,
-                        ),
-                    ),
+                .tvHeroScrim(
+                    background = MaterialTheme.colorScheme.background,
+                    primary = MaterialTheme.colorScheme.primary,
                 ),
         )
         if (hasCarousel) {
