@@ -10,6 +10,7 @@ internal fun TvHeroArtwork(
     media: MediaPreview,
     userEnabled: Boolean,
     reducedMotion: Boolean,
+    active: Boolean,
     modifier: Modifier = Modifier,
 ) {
     KenBurnsArtwork(
@@ -17,5 +18,6 @@ internal fun TvHeroArtwork(
         enabled = userEnabled,
         reducedMotion = reducedMotion,
         modifier = modifier,
+        active = active,
     )
 }

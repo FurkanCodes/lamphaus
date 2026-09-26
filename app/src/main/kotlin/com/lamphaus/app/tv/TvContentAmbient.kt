@@ -3,12 +3,6 @@ package com.lamphaus.app.tv
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.LruCache
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -17,13 +11,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import com.lamphaus.app.ui.rememberReducedMotion
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -42,12 +38,20 @@ import com.lamphaus.app.ui.ArtworkResolution
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.app.ui.fixtureArtworkResource
+import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-private const val DISPLAY_WIDTH = 1920
-private const val DISPLAY_HEIGHT = 1080
+// QA-08: the ambient image is drawn at TvAmbientTokens.imageAlpha under
+// near-opaque scrims, so a quarter-resolution decode is visually identical to
+// a full 1920x1080 one while using a quarter of the memory (about 2 MB instead
+// of 8 MB per focus change) and leaving room in the image cache for posters.
+private const val DISPLAY_WIDTH = 960
+private const val DISPLAY_HEIGHT = 540
 private const val PALETTE_SAMPLE_SIZE = 96
 private const val PALETTE_CACHE_CAPACITY = 32
 
@@ -71,42 +75,69 @@ private data class TvAmbientPalette(
 
 private val paletteCache = LruCache<String, TvAmbientPalette>(PALETTE_CACHE_CAPACITY)
 
-internal val LocalTvContentAccent = compositionLocalOf<Color?> { null }
+/**
+ * Holds the ambient artwork and accent derived from the focused media.
+ *
+ * QA-08: the holder instance never changes, so providing it through a static
+ * composition local does not recompose the tree. Only code that reads
+ * [state] (the ambient background, the focused card, the focused hero)
+ * reacts when the accent changes after focus settles.
+ */
+@Stable
+internal class TvContentAmbient {
+    var state: TvContentAmbientState by mutableStateOf(TvContentAmbientState())
+        internal set
 
+    val accent: Color? get() = state.accent
+}
+
+internal val LocalTvContentAccent = staticCompositionLocalOf { TvContentAmbient() }
+
+/**
+ * [focusedMedia] is read inside a snapshot flow rather than in composition, so
+ * moving D-pad focus does not recompose the caller (QA-08). Timing is the
+ * approved hero delay (TV-MOT-01).
+ */
 @Composable
-internal fun rememberTvContentAmbient(media: MediaPreview?): TvContentAmbientState {
+internal fun rememberTvContentAmbient(focusedMedia: () -> MediaPreview?): TvContentAmbient {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val resolver = LocalArtworkResolver.current
-    val defaultAccent = androidx.tv.material3.MaterialTheme.colorScheme.primary
-    val defaultAccentContainer = androidx.tv.material3.MaterialTheme.colorScheme.primaryContainer
-    var state by remember { mutableStateOf(TvContentAmbientState()) }
-    val artwork = remember(media, resolver) {
-        media?.let { selectArtworkSource(context, resolver.resolve(it)) }
+    val resolver by rememberUpdatedState(LocalArtworkResolver.current)
+    val currentFocusedMedia by rememberUpdatedState(focusedMedia)
+    val defaultAccent by rememberUpdatedState(androidx.tv.material3.MaterialTheme.colorScheme.primary)
+    val defaultAccentContainer by rememberUpdatedState(
+        androidx.tv.material3.MaterialTheme.colorScheme.primaryContainer,
+    )
+    val ambient = remember { TvContentAmbient() }
+
+    LaunchedEffect(ambient) {
+        snapshotFlow {
+            val media = currentFocusedMedia()
+            media?.stableKey to media?.let { selectArtworkSource(context, resolver.resolve(it)) }
+        }
+            .distinctUntilChanged { old, new -> old.first == new.first && old.second?.key == new.second?.key }
+            .collectLatest { (focusedMediaKey, artwork) ->
+                delay(TvMotionTokens.heroUpdateDelayMillis)
+                if (focusedMediaKey == null || artwork == null) {
+                    ambient.state = TvContentAmbientState()
+                    return@collectLatest
+                }
+                val loaded = withContext(Dispatchers.IO) {
+                    loadAmbient(context, artwork, defaultAccent, defaultAccentContainer)
+                }
+                ensureActive()
+                ambient.state = loaded?.copy(focusedMediaKey = focusedMediaKey) ?: TvContentAmbientState()
+            }
     }
 
-    LaunchedEffect(media?.stableKey, artwork?.key) {
-        kotlinx.coroutines.delay(TvMotionTokens.heroUpdateDelayMillis)
-        val focusedMediaKey = media?.stableKey
-        if (focusedMediaKey == null || artwork == null) {
-            state = TvContentAmbientState()
-            return@LaunchedEffect
-        }
-
-        val loaded = withContext(Dispatchers.IO) {
-            loadAmbient(context, artwork, defaultAccent, defaultAccentContainer)
-        }
-        ensureActive()
-        state = loaded?.copy(focusedMediaKey = focusedMediaKey) ?: TvContentAmbientState()
-    }
-
-    return state
+    return ambient
 }
 
 @Composable
 internal fun TvContentAmbientBackground(
-    state: TvContentAmbientState,
+    ambient: TvContentAmbient,
     modifier: Modifier = Modifier,
 ) {
+    val state = ambient.state
     val reducedMotion = rememberReducedMotion()
     val background = androidx.tv.material3.MaterialTheme.colorScheme.background
     val accentContainer = state.accentContainer
@@ -117,26 +148,21 @@ internal fun TvContentAmbientBackground(
             .fillMaxSize()
             .background(background),
     ) {
-        AnimatedContent(
+        TvLayerlessCrossfade(
             targetState = state.image,
-            transitionSpec = {
-                if (reducedMotion) {
-                    fadeIn(snap()) togetherWith fadeOut(snap())
-                } else {
-                    fadeIn(tween(TvMotionTokens.heroTransitionDurationMillis)) togetherWith
-                        fadeOut(tween(TvMotionTokens.heroTransitionDurationMillis))
-                }
-            },
+            reducedMotion = reducedMotion,
             label = "ambient artwork",
         ) { image ->
             image?.let {
+                // Paint alpha instead of Modifier.alpha: the latter composites
+                // a full-screen offscreen layer on every frame (QA-08).
+                val painter = remember(it) { ImagePainter(it) }
                 Image(
-                    painter = ImagePainter(it),
+                    painter = painter,
                     contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(TvAmbientTokens.imageAlpha),
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
+                    alpha = TvAmbientTokens.imageAlpha,
                 )
             }
         }
@@ -190,25 +216,20 @@ private suspend fun loadAmbient(
     defaultAccentContainer: Color,
 ): TvContentAmbientState? {
     val imageLoader = SingletonImageLoader.get(context)
+    // One software decode serves both the display image and the palette
+    // sample, instead of decoding the source twice per focus change (QA-08).
     val displayResult = imageLoader.execute(
         ImageRequest.Builder(context)
             .data(artwork.data)
             .size(Size(DISPLAY_WIDTH, DISPLAY_HEIGHT))
+            .allowHardware(false)
+            .bitmapConfig(Bitmap.Config.ARGB_8888)
             .build(),
     )
     if (displayResult !is SuccessResult) return null
 
     val palette = paletteCache.get(artwork.key) ?: runCatching {
-        val sampleResult = imageLoader.execute(
-            ImageRequest.Builder(context)
-                .data(artwork.data)
-                .size(PALETTE_SAMPLE_SIZE, PALETTE_SAMPLE_SIZE)
-                .allowHardware(false)
-                .bitmapConfig(Bitmap.Config.ARGB_8888)
-                .build(),
-        )
-        if (sampleResult !is SuccessResult) return@runCatching null
-        val bitmap = sampleResult.image.toBitmap(PALETTE_SAMPLE_SIZE, PALETTE_SAMPLE_SIZE)
+        val bitmap = displayResult.image.toBitmap().scale(PALETTE_SAMPLE_SIZE, PALETTE_SAMPLE_SIZE)
         val seed = DynamicColorsOptions.Builder()
             .setContentBasedSource(bitmap)
             .build()

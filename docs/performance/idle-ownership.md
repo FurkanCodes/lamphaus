@@ -20,6 +20,7 @@ the background.
 | Subtitle fetch | `SidecarSubtitleLoader` | caller's coroutine | completion or cancellation | screen-scoped |
 | Preferences bridge (`Media3EngineFactory.deviceConfig`) | `AppContainer` | application scope `collect` | process death | intended: playback service needs it before any screen |
 | Artwork palette LRU + hero delay | `TvContentAmbient` | composition + `LaunchedEffect` | invisible/hero change | foreground only |
+| TV hero Ken Burns drift (24 s) | `KenBurnsArtwork` via `TvHeroArtwork` | `LaunchedEffect` keyed by media, motion policy and `active` | drift completes, focus enters the rows (holds frame), reduced motion, or hero leaves composition | foreground, hero/navigation focus only |
 | Periodic metadata sync | removed with `MetadataSyncWorker` (PERF-12) | — | — | no background sync is claimed |
 
 Guidelines preserved: durable progress writes coalesce to the 10 s pulse plus

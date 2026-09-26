@@ -39,6 +39,13 @@ internal fun shouldAnimateKenBurns(
     hasArtwork: Boolean,
 ): Boolean = userEnabled && !reducedMotion && hasArtwork
 
+/**
+ * Time left on the drift from [progress], so a paused pass resumes at the
+ * same speed and never restarts or jumps.
+ */
+internal fun kenBurnsRemainingMillis(progress: Float): Int =
+    ((1f - progress.coerceIn(0f, 1f)) * KenBurnsDefaults.durationMillis).toInt()
+
 @Composable
 internal fun rememberReducedMotion(): Boolean {
     val context = LocalContext.current
@@ -64,6 +71,7 @@ internal fun KenBurnsArtwork(
     enabled: Boolean,
     reducedMotion: Boolean,
     modifier: Modifier = Modifier,
+    active: Boolean = true,
 ) {
     val resolver = LocalArtworkResolver.current
     val resolvedMedia = remember(media, resolver) { resolver.resolve(media).media }
@@ -74,12 +82,21 @@ internal fun KenBurnsArtwork(
         !resolvedMedia.posterUrl.isNullOrBlank()
     val motionEnabled = shouldAnimateKenBurns(enabled, reducedMotion, hasArtwork)
 
-    LaunchedEffect(media.stableKey, motionEnabled) {
-        progress.snapTo(0f)
-        if (motionEnabled) {
+    // Every drift frame redraws the whole window. An inactive surface (for
+    // example the TV hero while focus is in the rows below) holds its current
+    // frame instead, so browsing never competes with a full-screen repaint
+    // (QA-08); becoming active resumes from the same position.
+    LaunchedEffect(progress, motionEnabled, active) {
+        if (!motionEnabled) {
+            progress.snapTo(0f)
+            return@LaunchedEffect
+        }
+        if (!active) return@LaunchedEffect
+        val remaining = kenBurnsRemainingMillis(progress.value)
+        if (remaining > 0) {
             progress.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(KenBurnsDefaults.durationMillis, easing = LinearEasing),
+                animationSpec = tween(remaining, easing = LinearEasing),
             )
         }
     }

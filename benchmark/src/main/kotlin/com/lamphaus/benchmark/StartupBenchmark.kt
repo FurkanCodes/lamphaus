@@ -2,6 +2,7 @@ package com.lamphaus.benchmark
 
 import android.content.ComponentName
 import android.content.Intent
+import android.os.SystemClock
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.ExperimentalMetricApi
 import androidx.benchmark.macro.FrameTimingMetric
@@ -121,6 +122,35 @@ class StartupBenchmark {
         }
     }
 
+    /**
+     * Browsing a row at reading pace. Each pause outlasts the 240 ms hero
+     * delay (TV-MOT-01), so every press settles and triggers the hero
+     * crossfade, ambient artwork load, and accent change that the plain
+     * D-pad journey above skips.
+     */
+    @Test
+    fun tvRowBrowseFrameTiming() = rule.measureRepeated(
+        packageName = PACKAGE_NAME,
+        metrics = listOf(FrameTimingMetric()),
+        compilationMode = CompilationMode.Partial(),
+        startupMode = StartupMode.WARM,
+        iterations = 10,
+        setupBlock = { requireBenchmarkFormFactor(leanback = true); pressHome() },
+    ) {
+        startTv()
+        device.requireFixtureHome()
+        device.pressDPadDown()
+        device.pressDPadDown()
+        // Alternate between neighbouring cards so every settle lands on
+        // artwork even in the short default fixture row.
+        repeat(6) {
+            device.pressDPadRight()
+            SystemClock.sleep(TV_SETTLE_MILLIS)
+            device.pressDPadLeft()
+            SystemClock.sleep(TV_SETTLE_MILLIS)
+        }
+    }
+
     @Test
     fun mobileHomeScrollFrameTiming() = rule.measureRepeated(
         packageName = PACKAGE_NAME,
@@ -223,5 +253,6 @@ class StartupBenchmark {
 
     private companion object {
         const val PACKAGE_NAME = "com.lamphaus.app.benchmark"
+        const val TV_SETTLE_MILLIS = 600L
     }
 }

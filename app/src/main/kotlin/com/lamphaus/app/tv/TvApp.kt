@@ -4,13 +4,7 @@ import android.os.SystemClock
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -72,6 +66,7 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.snapshotFlow
 
 import androidx.compose.runtime.getValue
@@ -86,6 +81,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusProperties
@@ -805,15 +801,19 @@ private fun TvSignedIn(
         pendingMediaKey = media.stableKey
         viewModel.loadDetail(media)
     }
-    val ambientMedia = when (destination) {
-        TvDestination.HOME,
-        TvDestination.DISCOVER,
-        TvDestination.LIBRARY,
-        TvDestination.SEARCH,
-        -> lastFocusedMedia
-        TvDestination.SETTINGS -> null
+    // Focus moves update lastFocusedMedia on every D-pad press. It is read
+    // only by the ambient's snapshot flow, never here in composition, so
+    // moving focus does not recompose this whole screen (QA-08).
+    val ambient = rememberTvContentAmbient {
+        when (destination) {
+            TvDestination.HOME,
+            TvDestination.DISCOVER,
+            TvDestination.LIBRARY,
+            TvDestination.SEARCH,
+            -> lastFocusedMedia
+            TvDestination.SETTINGS -> null
+        }
     }
-    val ambientState = rememberTvContentAmbient(ambientMedia)
 
     if (state.sourcePicker != null) {
         BackHandler { viewModel.closeSourcePicker() }
@@ -881,10 +881,10 @@ private fun TvSignedIn(
             focusDestination = destination
         }
     }
-    CompositionLocalProvider(LocalTvContentAccent provides ambientState.accent) {
+    CompositionLocalProvider(LocalTvContentAccent provides ambient) {
         Box(Modifier.fillMaxSize()) {
             if (destination != TvDestination.SETTINGS) {
-                TvContentAmbientBackground(state = ambientState)
+                TvContentAmbientBackground(ambient = ambient)
             }
             TvTopNavigation(
                 selectedDestination = destination,
@@ -1020,6 +1020,7 @@ private fun TvHome(
     onFocusRestored: () -> Unit,
 ) {
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
+    var contentHasFocus by remember { mutableStateOf(false) }
     val allMedia = state.allMedia
     // The carousel is a signature part of the Home screen, so it must never
     // disappear while the catalog loads progressively. The user's selection
@@ -1077,7 +1078,9 @@ private fun TvHome(
     }
     LazyColumn(
         state = listState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .onFocusChanged { contentHasFocus = it.hasFocus },
         contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
         verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.rowSpacing),
     ) {
@@ -1086,6 +1089,7 @@ private fun TvHome(
             item("hero") {
                 TvHero(
                     kenBurnsEnabled = state.kenBurnsEnabled,
+                    rowsHaveFocus = contentHasFocus,
                     media = media,
                     onMedia = onMedia,
                     onFocused = { focusedCandidate = media; onFocused(media) },
@@ -1185,10 +1189,12 @@ private fun TvHome(
     }
 }
 
+// QA-08: skeleton pulses run every frame while content loads. Reading the
+// animated value only while drawing keeps them out of recomposition and
+// layout; the pulse range and timing are unchanged (TV-CNT-02).
 @Composable
-private fun TvHomeCatalogLoadingSkeleton() {
-    val loadingDescription = stringResource(R.string.loading_more_rows)
-    val pulse by rememberInfiniteTransition(label = "home catalog loading").animateFloat(
+private fun rememberSkeletonPulse(label: String): State<Float> =
+    rememberInfiniteTransition(label = label).animateFloat(
         initialValue = 0.58f,
         targetValue = 0.78f,
         animationSpec = infiniteRepeatable(
@@ -1197,7 +1203,15 @@ private fun TvHomeCatalogLoadingSkeleton() {
         ),
         label = "skeleton pulse",
     )
-    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse)
+
+private fun Modifier.skeletonPulseBackground(color: Color, alpha: () -> Float): Modifier =
+    drawBehind { drawRect(color.copy(alpha = alpha())) }
+
+@Composable
+private fun TvHomeCatalogLoadingSkeleton() {
+    val loadingDescription = stringResource(R.string.loading_more_rows)
+    val pulse = rememberSkeletonPulse(label = "home catalog loading")
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant
 
     Column(
         modifier = Modifier
@@ -1219,9 +1233,9 @@ private fun TvHomeCatalogLoadingSkeleton() {
                         .width(220.dp)
                         .height(20.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(skeletonColor),
+                        .skeletonPulseBackground(skeletonColor) { pulse.value },
                 )
-                TvCatalogItemsLoadingSkeleton(skeletonColor, pulse)
+                TvCatalogItemsLoadingSkeleton(skeletonColor) { pulse.value }
             }
         }
     }
@@ -1230,7 +1244,7 @@ private fun TvHomeCatalogLoadingSkeleton() {
 @Composable
 private fun TvCatalogItemsLoadingSkeleton(
     skeletonColor: Color,
-    pulse: Float,
+    pulse: () -> Float,
 ) {
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
@@ -1251,7 +1265,7 @@ private fun TvCatalogItemsLoadingSkeleton(
                         .width(TvLayoutTokens.posterWidth)
                         .height(TvLayoutTokens.posterHeight)
                         .clip(TvShapeTokens.card)
-                        .background(skeletonColor),
+                        .skeletonPulseBackground(skeletonColor, pulse),
                 )
                 Spacer(Modifier.height(8.dp))
                 Box(
@@ -1259,7 +1273,7 @@ private fun TvCatalogItemsLoadingSkeleton(
                         .width(112.dp)
                         .height(14.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(skeletonColor.copy(alpha = pulse * 0.8f)),
+                        .skeletonPulseBackground(skeletonColor) { pulse() * 0.8f },
                 )
             }
         }
@@ -1306,21 +1320,14 @@ private fun TvContinueWatchingRow(
 
 @Composable
 private fun TvHeroLoadingSkeleton(modifier: Modifier = Modifier) {
-    val pulse by rememberInfiniteTransition(label = "hero loading").animateFloat(
-        initialValue = 0.58f,
-        targetValue = 0.78f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "skeleton pulse",
-    )
+    val pulse = rememberSkeletonPulse(label = "hero loading")
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(TvLayoutTokens.heroHeight)
             .clip(TvShapeTokens.hero)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse))
+            .skeletonPulseBackground(skeletonColor) { pulse.value }
             .focusable(),
     )
 }
@@ -1331,6 +1338,7 @@ private fun TvHero(
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
     kenBurnsEnabled: Boolean,
+    rowsHaveFocus: Boolean,
     carouselItems: List<MediaPreview>,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1338,7 +1346,8 @@ private fun TvHero(
 ) {
     var focused by remember { mutableStateOf(false) }
     val reducedMotion = rememberReducedMotion()
-    val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
+    val ambient = LocalTvContentAccent.current
+    val primary = MaterialTheme.colorScheme.primary
     val artworkResolver = LocalArtworkResolver.current
     val resolvedMedia = remember(media, artworkResolver) {
         artworkResolver.resolve(media).media
@@ -1361,7 +1370,8 @@ private fun TvHero(
             }
             .border(
                 width = if (focused) TvFocusTokens.outlineWidth else 0.dp,
-                color = if (focused) ambientAccent else Color.Transparent,
+                // Only the focused hero subscribes to accent changes (QA-08).
+                color = if (focused) ambient.accent ?: primary else Color.Transparent,
                 shape = TvShapeTokens.hero,
             )
             .clip(TvShapeTokens.hero)
@@ -1386,28 +1396,21 @@ private fun TvHero(
             .focusable()
             .semantics { contentDescription = heroDescription },
     ) {
-        AnimatedContent(
+        TvLayerlessCrossfade(
             targetState = media,
-            modifier = Modifier.fillMaxSize(),
-            transitionSpec = {
-                if (reducedMotion) {
-                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                } else {
-                    (
-                        fadeIn(tween(TvMotionTokens.heroTransitionDurationMillis)) +
-                            slideInHorizontally(tween(TvMotionTokens.heroTransitionDurationMillis)) { width -> width / 80 }
-                        ) togetherWith (
-                        fadeOut(tween(TvMotionTokens.heroTransitionDurationMillis)) +
-                            slideOutHorizontally(tween(TvMotionTokens.heroTransitionDurationMillis)) { width -> -width / 100 }
-                        )
-                }
-            },
+            reducedMotion = reducedMotion,
             label = "hero artwork",
+            modifier = Modifier.fillMaxSize(),
+            enterOffsetFraction = 1f / 80f,
+            exitOffsetFraction = -1f / 100f,
         ) { featuredMedia ->
             TvHeroArtwork(
                 media = featuredMedia,
                 userEnabled = kenBurnsEnabled,
                 reducedMotion = reducedMotion,
+                // Drift while the hero or the navigation above it has focus;
+                // hold the frame while the viewer browses rows (QA-08).
+                active = focused || !rowsHaveFocus,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -1644,18 +1647,10 @@ private fun TvCatalogRow(
             )
         }
         if (section.initialLoading && section.items.isEmpty()) {
-            val pulse by rememberInfiniteTransition(label = "catalog row loading").animateFloat(
-                initialValue = 0.58f,
-                targetValue = 0.78f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(900),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "skeleton pulse",
-            )
+            val pulse = rememberSkeletonPulse(label = "catalog row loading")
             TvCatalogItemsLoadingSkeleton(
-                skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse),
-                pulse = pulse,
+                skeletonColor = MaterialTheme.colorScheme.surfaceVariant,
+                pulse = { pulse.value },
             )
         } else if (section.items.isNotEmpty() || section.hasMore || section.loadMoreError != null) {
             LazyRow(
@@ -2050,7 +2045,7 @@ private fun TvCategoryResults(
 /** Preserves the final grid geometry while the first category page loads. */
 @Composable
 private fun TvCategoryResultsSkeleton(modifier: Modifier = Modifier) {
-    val pulse by rememberInfiniteTransition(label = "category results loading").animateFloat(
+    val pulse = rememberInfiniteTransition(label = "category results loading").animateFloat(
         initialValue = 0.58f,
         targetValue = 0.98f,
         animationSpec = infiniteRepeatable(
@@ -2075,7 +2070,7 @@ private fun TvCategoryResultsSkeleton(modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .size(width = TvLayoutTokens.posterWidth, height = TvLayoutTokens.posterHeight)
                     .clip(TvShapeTokens.card)
-                    .background(Color.White.copy(alpha = 0.04f + 0.05f * pulse)),
+                    .skeletonPulseBackground(Color.White) { 0.04f + 0.05f * pulse.value },
             )
         }
     }

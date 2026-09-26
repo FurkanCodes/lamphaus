@@ -61,6 +61,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -473,8 +474,11 @@ internal fun TvMediaCard(
     val effectivelyCompleted = completed ||
         (media.type == com.lamphaus.core.model.MediaType.MOVIE && media.id in menuEnvironment.completedVideoIds)
     val reducedMotion = rememberReducedMotion()
-    val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
-    val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
+    // QA-08: unfocused cards never read the accent, so the accent change
+    // after each focus move recomposes only the focused card; the halo reads
+    // it in the layer block, which skips recomposition entirely.
+    val ambient = LocalTvContentAccent.current
+    val primary = MaterialTheme.colorScheme.primary
     val ratingText = if (showRating) media.metadataPresentation().ratingText else null
     // The catalog rating wears the IMDb mark only when the addon exposed an
     // actual IMDb score; generic provider ratings keep the neutral star
@@ -534,12 +538,15 @@ internal fun TvMediaCard(
                     scaleY = scale
                     shadowElevation = 7.dp.toPx() * focusProgress
                     shape = TvShapeTokens.card
-                    ambientShadowColor = ambientHalo
-                    spotShadowColor = ambientHalo
+                    if (focusProgress > 0f) {
+                        val halo = (ambient.accent ?: primary).copy(alpha = TvFocusTokens.halo.alpha)
+                        ambientShadowColor = halo
+                        spotShadowColor = halo
+                    }
                 }
                 .border(
                     width = TvFocusTokens.outlineWidth,
-                    color = if (focused) ambientAccent else TvSurfaceTokens.subtleBorder,
+                    color = if (focused) ambient.accent ?: primary else TvSurfaceTokens.subtleBorder,
                     shape = TvShapeTokens.card,
                 )
                 .padding(if (focused) TvFocusTokens.outlineWidth else 0.5.dp)
@@ -633,8 +640,10 @@ internal fun TvMediaCard(
                     .fillMaxWidth()
                     .height(20.dp)
                     .padding(top = 4.dp)
-                    .alpha(labelAlpha)
                     .graphicsLayer {
+                        // ModulateAlpha: no offscreen buffer per label fade (QA-08).
+                        alpha = labelAlpha
+                        compositingStrategy = CompositingStrategy.ModulateAlpha
                         translationY = (1f - labelAlpha) * 6.dp.toPx()
                     },
                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
@@ -677,8 +686,11 @@ internal fun TvContinueWatchingCard(
         SelectHoldTracker(scope) { currentMenuRequest?.invoke(cardFocus) }
     }.takeIf { effectiveMenuRequest != null }
     val reducedMotion = rememberReducedMotion()
-    val ambientAccent = LocalTvContentAccent.current ?: MaterialTheme.colorScheme.primary
-    val ambientHalo = ambientAccent.copy(alpha = TvFocusTokens.halo.alpha)
+    // QA-08: unfocused cards never read the accent, so the accent change
+    // after each focus move recomposes only the focused card; the halo reads
+    // it in the layer block, which skips recomposition entirely.
+    val ambient = LocalTvContentAccent.current
+    val primary = MaterialTheme.colorScheme.primary
     val title = progress.episodeLabel ?: media.name
     val percent = (progress.fraction * 100).toInt()
     val cardDescription = stringResource(R.string.media_card_description_progress, title, percent)
@@ -718,12 +730,15 @@ internal fun TvContinueWatchingCard(
                     scaleY = scale
                     shadowElevation = 7.dp.toPx() * focusProgress
                     shape = TvShapeTokens.card
-                    ambientShadowColor = ambientHalo
-                    spotShadowColor = ambientHalo
+                    if (focusProgress > 0f) {
+                        val halo = (ambient.accent ?: primary).copy(alpha = TvFocusTokens.halo.alpha)
+                        ambientShadowColor = halo
+                        spotShadowColor = halo
+                    }
                 }
                 .border(
                     width = TvFocusTokens.outlineWidth,
-                    color = if (focused) ambientAccent else TvSurfaceTokens.subtleBorder,
+                    color = if (focused) ambient.accent ?: primary else TvSurfaceTokens.subtleBorder,
                     shape = TvShapeTokens.card,
                 )
                 .padding(if (focused) TvFocusTokens.outlineWidth else 0.5.dp)

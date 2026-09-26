@@ -26,4 +26,12 @@ class KenBurnsMotionTest {
         assertFalse(shouldAnimateKenBurns(userEnabled = true, reducedMotion = false, hasArtwork = false))
         assertTrue(shouldAnimateKenBurns(userEnabled = true, reducedMotion = false, hasArtwork = true))
     }
+
+    @Test
+    fun `paused drift resumes with the remaining duration`() {
+        assertEquals(KenBurnsDefaults.durationMillis, kenBurnsRemainingMillis(0f))
+        assertEquals(KenBurnsDefaults.durationMillis / 4, kenBurnsRemainingMillis(0.75f))
+        assertEquals(0, kenBurnsRemainingMillis(1f))
+        assertEquals(0, kenBurnsRemainingMillis(1.2f))
+    }
 }
