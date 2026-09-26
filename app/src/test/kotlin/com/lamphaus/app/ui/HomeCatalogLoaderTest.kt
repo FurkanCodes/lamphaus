@@ -217,6 +217,39 @@ class HomeCatalogLoaderTest {
         assertEquals(listOf("provider-0", "provider-1", "provider-2"), resolved.map(CatalogSection::providerId).sorted())
     }
 
+    @Test
+    fun `a slow catalog does not block the next window`() = runTest {
+        val providers = providers(8)
+        val slowGate = CompletableDeferred<ProviderResult<List<MediaPreview>>>()
+        val client = FakeProviderClient(
+            manifests = providers.associate { it.manifestUrl to manifest(it) },
+            catalogHandler = { providerId, _, _ ->
+                if (providerId == "provider-0") slowGate.await() else ProviderResult.Success(listOf(media(providerId)))
+            },
+        )
+        val loader = HomeCatalogLoader(client, providers, currentYear = 2026)
+        val prepared = mutableListOf<HomeCatalogWindow>()
+        val resolved = mutableListOf<String>()
+
+        val first = async { loader.loadNextWindow(false, prepared::add) { resolved += it.providerId } }
+        runCurrent()
+        val second = async { loader.loadNextWindow(false, prepared::add) { resolved += it.providerId } }
+        runCurrent()
+
+        assertEquals(2, prepared.size)
+        assertEquals(
+            (1 until 8).map { "provider-$it" }.toSet(),
+            resolved.toSet(),
+        )
+        assertTrue(second.isCompleted)
+        assertFalse(first.isCompleted)
+        assertTrue(client.maximumActiveCatalogs <= HOME_CATALOG_MAX_CONCURRENCY)
+
+        slowGate.complete(ProviderResult.Success(listOf(media("provider-0"))))
+        first.await()
+        assertTrue("provider-0" in resolved)
+    }
+
     private fun providers(count: Int): List<ProviderSubscription> =
         (0 until count).map { index -> provider("provider-$index", index) }
 

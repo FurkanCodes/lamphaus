@@ -208,16 +208,48 @@ class CatalogRefreshPolicyTest {
     }
 
     @Test
-    fun `home catalog prefetch starts within two rows when idle`() {
-        assertFalse(shouldPrefetchHomeCatalogBatch(6, 10, hasMore = true, loading = false, failed = false))
-        assertTrue(shouldPrefetchHomeCatalogBatch(7, 10, hasMore = true, loading = false, failed = false))
-        assertTrue(shouldPrefetchHomeCatalogBatch(9, 10, hasMore = true, loading = false, failed = false))
-        assertFalse(shouldPrefetchHomeCatalogBatch(null, 10, hasMore = true, loading = false, failed = false))
-        assertTrue(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = true, loading = false, failed = false))
-        assertFalse(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = true, loading = true, failed = false))
-        assertFalse(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = true, loading = false, failed = true))
-        assertFalse(shouldPrefetchHomeCatalogBatch(null, 0, hasMore = false, loading = false, failed = false))
+    fun `home catalog prefetch keeps about two screens of rows ahead`() {
+        // 20 revealed rows, none pending: fetch once fewer than 8 rows remain below.
+        assertFalse(shouldPrefetchHomeCatalogBatch(11, 20, pendingRows = 0, hasMore = true, failed = false))
+        assertTrue(shouldPrefetchHomeCatalogBatch(12, 20, pendingRows = 0, hasMore = true, failed = false))
+        // Pending rows count as rows ahead, so a window in flight is not duplicated.
+        assertFalse(shouldPrefetchHomeCatalogBatch(12, 20, pendingRows = 4, hasMore = true, failed = false))
+        assertTrue(shouldPrefetchHomeCatalogBatch(16, 20, pendingRows = 4, hasMore = true, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(null, 20, pendingRows = 0, hasMore = true, failed = false))
+        assertTrue(shouldPrefetchHomeCatalogBatch(null, 0, pendingRows = 0, hasMore = true, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(null, 0, pendingRows = 4, hasMore = true, failed = false))
+        assertFalse(shouldPrefetchHomeCatalogBatch(19, 20, pendingRows = 0, hasMore = true, failed = true))
+        assertFalse(shouldPrefetchHomeCatalogBatch(19, 20, pendingRows = 0, hasMore = false, failed = false))
     }
+
+    @Test
+    fun `home rows reveal only the settled prefix in order`() {
+        val pending = listOf(
+            PendingHomeRow("a", section("a", "p", items = listOf(media("1")))),
+            PendingHomeRow("b"),
+            PendingHomeRow("c", section("c", "p", items = listOf(media("3")))),
+        )
+
+        val reveal = revealSettledHomeRows(pending)
+
+        assertEquals(listOf("a"), reveal.revealed.map(CatalogSection::id))
+        assertEquals(listOf("b", "c"), reveal.remaining.map(PendingHomeRow::id))
+    }
+
+    @Test
+    fun `settled empty home rows are never shown while error rows are`() {
+        val pending = listOf(
+            PendingHomeRow("empty", section("empty", "p")),
+            PendingHomeRow("error", section("error", "p", error = "Catalog failed")),
+            PendingHomeRow("full", section("full", "p", items = listOf(media("1")))),
+        )
+
+        val reveal = revealSettledHomeRows(pending)
+
+        assertEquals(listOf("error", "full"), reveal.revealed.map(CatalogSection::id))
+        assertTrue(reveal.remaining.isEmpty())
+    }
+
     @Test
     fun `TV renders only non-terminal or non-empty home sections`() {
         listOf(

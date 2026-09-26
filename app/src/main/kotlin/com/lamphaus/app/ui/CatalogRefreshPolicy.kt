@@ -3,20 +3,58 @@ package com.lamphaus.app.ui
 import com.lamphaus.core.model.MediaPreview
 internal const val HOME_CATALOG_MAX_CONCURRENCY = 4
 internal const val HOME_CATALOG_WINDOW_SIZE = 4
-internal const val HOME_CATALOG_PREFETCH_DISTANCE = 2
-internal const val HOME_CATALOG_SCROLL_SETTLE_MILLIS = 240L
+/**
+ * QA-08: keep about two TV screens of rows ready or in flight below the last
+ * visible row, so steady D-pad scrolling rarely reaches the loading footer.
+ */
+internal const val HOME_CATALOG_PREFETCH_DISTANCE = 8
 
+/** Windows that may resolve at once; the loader's semaphore still bounds requests. */
+internal const val HOME_CATALOG_MAX_WINDOWS_IN_FLIGHT = 2
+
+/**
+ * [pendingRows] are prepared rows not yet revealed; they count as rows ahead
+ * because they will appear below the list as they settle.
+ */
 internal fun shouldPrefetchHomeCatalogBatch(
     lastVisibleIndex: Int?,
     totalListItems: Int,
+    pendingRows: Int,
     hasMore: Boolean,
-    loading: Boolean,
     failed: Boolean,
 ): Boolean {
-    if (!hasMore || loading || failed) return false
-    if (totalListItems <= 0) return true
-    return lastVisibleIndex != null &&
-        lastVisibleIndex >= totalListItems - 1 - HOME_CATALOG_PREFETCH_DISTANCE
+    if (!hasMore || failed) return false
+    if (totalListItems <= 0) return pendingRows == 0
+    if (lastVisibleIndex == null) return false
+    val rowsAhead = (totalListItems - 1 - lastVisibleIndex) + pendingRows
+    return rowsAhead < HOME_CATALOG_PREFETCH_DISTANCE
+}
+
+/** A prepared Home row that is not revealed yet; [resolved] is null while loading. */
+internal data class PendingHomeRow(
+    val id: String,
+    val resolved: CatalogSection? = null,
+)
+
+internal data class HomeRowReveal(
+    val revealed: List<CatalogSection>,
+    val remaining: List<PendingHomeRow>,
+)
+
+/**
+ * Reveals only the settled prefix of [pending], in order, so rows never
+ * appear above ones still loading and nothing already shown moves
+ * (TV-CNT-02). Rows that settle empty are dropped before they are ever shown;
+ * error rows stay attached to their provider (SHR-PROD-04).
+ */
+internal fun revealSettledHomeRows(pending: List<PendingHomeRow>): HomeRowReveal {
+    val settled = pending.takeWhile { it.resolved != null }
+    return HomeRowReveal(
+        revealed = settled.mapNotNull { row ->
+            row.resolved?.takeIf(CatalogSection::isRenderableHomeCatalogSection)
+        },
+        remaining = pending.drop(settled.size),
+    )
 }
 
 internal fun appendHomeCatalogBatch(

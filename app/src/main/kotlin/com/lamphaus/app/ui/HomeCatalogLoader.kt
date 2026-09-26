@@ -56,42 +56,55 @@ internal class HomeCatalogLoader(
     private val activeRequestCount = AtomicInteger(0)
     private var providerCursor = 0
     private var consumedTargetCount = 0
-    private var activeRequests: List<ActiveRequest> = emptyList()
+
+    /** Requests whose window failed unexpectedly; the next call retries only these. */
+    private val retryRequests = mutableListOf<ActiveRequest>()
 
     init {
         require(maxConcurrency > 0) { "maxConcurrency must be positive" }
         semaphore = Semaphore(maxConcurrency)
     }
 
+    /**
+     * Prepares the next window (or the failed requests awaiting retry) under
+     * [loadMutex], then resolves it outside the lock. Windows can therefore
+     * overlap: a slow catalog no longer blocks the next window from starting
+     * (QA-08), while [semaphore] still bounds total concurrent requests.
+     */
     suspend fun loadNextWindow(
         childFilterEnabled: Boolean,
         onPrepared: (HomeCatalogWindow) -> Unit,
         onResolved: (CatalogSection) -> Unit,
-    ): HomeCatalogWindow = loadMutex.withLock {
-        if (activeRequests.isNotEmpty()) {
-            val retryWindow = currentActiveWindow()
-            resolveActiveRequests(childFilterEnabled, onResolved)
-            return@withLock retryWindow
-        }
-
-        discoverTargetsForWindow()
-        val preparedTargets = buildList {
-            repeat(minOf(HOME_CATALOG_WINDOW_SIZE, pendingTargets.size)) {
-                add(pendingTargets.removeFirst())
+    ): HomeCatalogWindow {
+        val (window, requests) = loadMutex.withLock {
+            val retrying = synchronized(retryRequests) {
+                retryRequests.toList().also { retryRequests.clear() }
             }
+            if (retrying.isNotEmpty()) {
+                return@withLock HomeCatalogWindow(
+                    sections = retrying.map { it.target.section },
+                    consumedTargetCount = consumedTargetCount,
+                    hasMore = hasMoreTargets(),
+                ) to retrying
+            }
+
+            discoverTargetsForWindow()
+            val preparedTargets = buildList {
+                repeat(minOf(HOME_CATALOG_WINDOW_SIZE, pendingTargets.size)) {
+                    add(pendingTargets.removeFirst())
+                }
+            }
+            consumedTargetCount += preparedTargets.size
+            val prepared = HomeCatalogWindow(
+                sections = preparedTargets.map(Target::section),
+                consumedTargetCount = consumedTargetCount,
+                hasMore = hasMoreTargets(),
+            )
+            onPrepared(prepared)
+            prepared to preparedTargets.filterIsInstance<Target.Request>().map(::ActiveRequest)
         }
-        consumedTargetCount += preparedTargets.size
-        activeRequests = preparedTargets
-            .filterIsInstance<Target.Request>()
-            .map(::ActiveRequest)
-        val window = HomeCatalogWindow(
-            sections = preparedTargets.map(Target::section),
-            consumedTargetCount = consumedTargetCount,
-            hasMore = hasMoreTargets(),
-        )
-        onPrepared(window)
-        resolveActiveRequests(childFilterEnabled, onResolved)
-        window
+        resolveRequests(requests, childFilterEnabled, onResolved)
+        return window
     }
 
     private suspend fun discoverTargetsForWindow() {
@@ -205,11 +218,11 @@ internal class HomeCatalogLoader(
         return true
     }
 
-    private suspend fun resolveActiveRequests(
+    private suspend fun resolveRequests(
+        requests: List<ActiveRequest>,
         childFilterEnabled: Boolean,
         onResolved: (CatalogSection) -> Unit,
     ) {
-        val requests = activeRequests
         if (requests.isEmpty()) return
 
         var firstFailure: Throwable? = null
@@ -232,7 +245,9 @@ internal class HomeCatalogLoader(
             }
             firstFailure = failures.firstOrNull { it != null }
         } finally {
-            activeRequests = requests.filterNot(ActiveRequest::resolved)
+            val unresolved = requests.filterNot(ActiveRequest::resolved)
+            // Not suspending: this also runs while the window is cancelled.
+            if (unresolved.isNotEmpty()) synchronized(retryRequests) { retryRequests += unresolved }
         }
         firstFailure?.let { throw it }
     }
@@ -281,12 +296,6 @@ internal class HomeCatalogLoader(
             )
         }
     }
-
-    private fun currentActiveWindow() = HomeCatalogWindow(
-        sections = activeRequests.map { it.target.section },
-        consumedTargetCount = consumedTargetCount,
-        hasMore = hasMoreTargets(),
-    )
 
     private fun hasMoreTargets(): Boolean = pendingTargets.isNotEmpty() || providerCursor < providers.size
 

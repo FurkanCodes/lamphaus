@@ -104,7 +104,7 @@ import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.ui.sourcePresentation
-import com.lamphaus.app.ui.sourceItemKey
+import com.lamphaus.app.ui.sourceItemKeys
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -997,16 +997,19 @@ internal fun MobileSourcePickerScreen(
             picker.failures.values.forEach { error ->
                 Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
-            if (picker.visibleSources.isEmpty()) {
+            if (picker.loading) {
+                Text(stringResource(R.string.loading_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (picker.visibleSources.isEmpty()) {
                 Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
+                val sourceKeys = remember(picker.visibleSources) { sourceItemKeys(picker.visibleSources) }
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     itemsIndexed(
                         picker.visibleSources,
-                        key = { index, source -> sourceItemKey(source, index) },
+                        key = { index, _ -> sourceKeys[index] },
                     ) { _, source ->
                         val providerLabel = picker.providerLabels[source.providerId]
                         val presentation = remember(source, providerLabel) {

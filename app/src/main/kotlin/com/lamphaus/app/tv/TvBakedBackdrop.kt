@@ -38,27 +38,58 @@ import kotlinx.coroutines.withContext
 private const val BACKDROP_WIDTH = 1920
 private const val BACKDROP_HEIGHT = 1080
 
-private fun detailScrims(background: Color) = listOf(
-    ScrimLayer(
-        arrayOf(
-            0f to background.copy(alpha = 0.98f),
-            0.50f to background.copy(alpha = 0.82f),
-            0.78f to background.copy(alpha = 0.20f),
-        ),
-        horizontal = true,
-    ),
-    ScrimLayer(
-        arrayOf(
-            0f to Color.Transparent,
-            0.72f to Color.Transparent,
-            1f to background,
-        ),
-        horizontal = false,
-    ),
-)
+/** Full-screen artwork treatments; each supplies its legibility scrims. */
+internal enum class TvBackdropStyle {
+    DETAIL {
+        override fun scrims(background: Color) = listOf(
+            ScrimLayer(
+                arrayOf(
+                    0f to background.copy(alpha = 0.98f),
+                    0.50f to background.copy(alpha = 0.82f),
+                    0.78f to background.copy(alpha = 0.20f),
+                ),
+                horizontal = true,
+            ),
+            ScrimLayer(
+                arrayOf(
+                    0f to Color.Transparent,
+                    0.72f to Color.Transparent,
+                    1f to background,
+                ),
+                horizontal = false,
+            ),
+        )
+    },
+    SOURCES {
+        override fun scrims(background: Color) = listOf(
+            ScrimLayer(
+                arrayOf(
+                    0f to background.copy(alpha = 0.98f),
+                    0.34f to background.copy(alpha = 0.88f),
+                    0.58f to background.copy(alpha = 0.38f),
+                    0.76f to background.copy(alpha = 0.72f),
+                    1f to background.copy(alpha = 0.94f),
+                ),
+                horizontal = true,
+            ),
+            ScrimLayer(
+                arrayOf(
+                    0f to background.copy(alpha = 0.34f),
+                    0.64f to Color.Transparent,
+                    1f to background.copy(alpha = 0.90f),
+                ),
+                horizontal = false,
+            ),
+        )
+    },
+    ;
+
+    abstract fun scrims(background: Color): List<ScrimLayer>
+}
 
 /**
- * The details backdrop (artwork plus its two legibility scrims, SHR-PROD-01).
+ * A full-screen backdrop (artwork plus its legibility scrims, SHR-PROD-01),
+ * used by the details and source screens.
  *
  * QA-08: drawn live, the artwork and scrims were three full-screen layers on
  * every frame, and on a Mali-G31 TV the details screen spent about 50 ms of
@@ -67,14 +98,18 @@ private fun detailScrims(background: Color) = listOf(
  * identical image, so the swap is invisible.
  */
 @Composable
-internal fun TvDetailBackdrop(media: MediaPreview, modifier: Modifier = Modifier) {
+internal fun TvBakedBackdrop(
+    media: MediaPreview,
+    style: TvBackdropStyle,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val resolver = LocalArtworkResolver.current
     val background = MaterialTheme.colorScheme.background
     val source = remember(media, resolver) { selectArtworkSource(context, resolver.resolve(media)) }
-    var baked by remember(source?.key, background) { mutableStateOf<ImageBitmap?>(null) }
+    var baked by remember(source?.key, background, style) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(source?.key, background) {
+    LaunchedEffect(source?.key, background, style) {
         baked = withContext(Dispatchers.IO) {
             val artwork: Bitmap? = source?.let {
                 val result = SingletonImageLoader.get(context).execute(
@@ -95,7 +130,7 @@ internal fun TvDetailBackdrop(media: MediaPreview, modifier: Modifier = Modifier
                 height = BACKDROP_HEIGHT,
                 background = background,
                 imageAlpha = 1f,
-                scrims = detailScrims(background),
+                scrims = style.scrims(background),
                 placeholder = if (artwork == null) {
                     AppCompatResources.getDrawable(context, R.drawable.ic_lamphaus_foreground)
                 } else {
@@ -121,13 +156,19 @@ internal fun TvDetailBackdrop(media: MediaPreview, modifier: Modifier = Modifier
                 contentScale = ContentScale.Crop,
                 preferBackdrop = true,
             )
-            val scrims = detailScrims(background)
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Brush.horizontalGradient(colorStops = scrims[0].stops))
-                    .background(Brush.verticalGradient(colorStops = scrims[1].stops)),
-            )
+            style.scrims(background).forEach { scrim ->
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            if (scrim.horizontal) {
+                                Brush.horizontalGradient(colorStops = scrim.stops)
+                            } else {
+                                Brush.verticalGradient(colorStops = scrim.stops)
+                            },
+                        ),
+                )
+            }
         }
     }
 }

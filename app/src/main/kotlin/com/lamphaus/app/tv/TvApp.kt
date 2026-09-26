@@ -103,6 +103,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -152,12 +153,12 @@ import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
 import com.lamphaus.app.ui.sourcePresentation
-import com.lamphaus.app.ui.sourceItemKey
+import com.lamphaus.app.ui.sourceItemKeys
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
-import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
-import com.lamphaus.app.ui.continueWatchingItems
+import com.lamphaus.app.ui.continueWatchingItemsFromSections
+import com.lamphaus.app.ui.firstDistinctMedia
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.app.ui.isRenderableHomeCatalogSection
 import com.lamphaus.app.ui.menuActions
@@ -792,7 +793,7 @@ private fun TvSignedIn(
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
     var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination) }
     var pendingMediaKey by rememberSaveable { mutableStateOf<String?>(null) }
-    var lastFocusedMedia by remember { mutableStateOf(state.allMedia.firstOrNull()) }
+    var lastFocusedMedia by remember { mutableStateOf(firstDistinctMedia(state.sections, limit = 1).firstOrNull()) }
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val navFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val contentStates = rememberSaveableStateHolder()
@@ -1027,16 +1028,17 @@ private fun TvHome(
 ) {
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
     var contentHasFocus by remember { mutableStateOf(false) }
-    val allMedia = state.allMedia
     // The carousel is a signature part of the Home screen, so it must never
     // disappear while the catalog loads progressively. The user's selection
     // survives catalog updates; only the displayed value falls back to the
     // first item when that selection is no longer part of the catalog.
     var featuredSelection by remember { mutableStateOf<MediaPreview?>(null) }
-    val featured = featuredSelection ?: allMedia.firstOrNull()
-    val heroItems = remember(allMedia) { allMedia.distinctBy(MediaPreview::stableKey).take(5) }
-    val continueWatching = remember(state.progress, allMedia) {
-        continueWatchingItems(state.progress, allMedia)
+    // QA-08: never flatten every catalog title here; with 100+ addon rows
+    // that ran on each row load. Both lookups stop as early as they can.
+    val heroItems = remember(state.sections) { firstDistinctMedia(state.sections, limit = 5) }
+    val featured = featuredSelection ?: heroItems.firstOrNull()
+    val continueWatching = remember(state.progress, state.sections) {
+        continueWatchingItemsFromSections(state.progress, state.sections)
     }
     LaunchedEffect(focusedCandidate) {
         focusedCandidate?.let {
@@ -1054,18 +1056,20 @@ private fun TvHome(
         state.homeCatalogBatch.hasMore,
         state.homeCatalogBatch.loadingMore,
         state.homeCatalogBatch.loadMoreFailed,
+        state.homeCatalogBatch.pendingRowCount,
     ) {
         snapshotFlow {
             listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to
                 listState.layoutInfo.totalItemsCount
         }.distinctUntilChanged().collectLatest { (lastVisibleIndex, totalListItems) ->
-            delay(HOME_CATALOG_SCROLL_SETTLE_MILLIS)
+            // No settle delay: the ViewModel caps windows in flight, and a
+            // late request is what makes deep scrolling reach the footer.
             if (
                 shouldPrefetchHomeCatalogBatch(
                     lastVisibleIndex = lastVisibleIndex,
                     totalListItems = totalListItems,
+                    pendingRows = state.homeCatalogBatch.pendingRowCount,
                     hasMore = state.homeCatalogBatch.hasMore,
-                    loading = state.homeCatalogBatch.loadingMore,
                     failed = state.homeCatalogBatch.loadMoreFailed,
                 )
             ) {
@@ -2207,36 +2211,7 @@ private fun TvSourcePickerScreen(
     val filtersFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { filtersFocus.requestFocus() }
     Box(Modifier.fillMaxSize()) {
-        MediaArtwork(
-            media = picker.media,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            preferBackdrop = true,
-        )
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.98f),
-                            0.34f to MaterialTheme.colorScheme.background.copy(alpha = 0.88f),
-                            0.58f to MaterialTheme.colorScheme.background.copy(alpha = 0.38f),
-                            0.76f to MaterialTheme.colorScheme.background.copy(alpha = 0.72f),
-                            1f to MaterialTheme.colorScheme.background.copy(alpha = 0.94f),
-                        ),
-                    ),
-                )
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.34f),
-                            0.64f to Color.Transparent,
-                            1f to MaterialTheme.colorScheme.background.copy(alpha = 0.90f),
-                        ),
-                    ),
-                ),
-        )
+        TvBakedBackdrop(media = picker.media, style = TvBackdropStyle.SOURCES, modifier = Modifier.fillMaxSize())
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -2279,13 +2254,14 @@ private fun TvSourcePickerScreen(
                     TvEmptyMark()
                     Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
+                    val sourceKeys = remember(picker.visibleSources) { sourceItemKeys(picker.visibleSources) }
                     LazyColumn(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         itemsIndexed(
                             picker.visibleSources,
-                            key = { index, source -> sourceItemKey(source, index) },
+                            key = { index, _ -> sourceKeys[index] },
                         ) { _, source ->
                             val providerLabel = picker.providerLabels[source.providerId]
                             val presentation = remember(source, providerLabel) {
@@ -2354,6 +2330,22 @@ private fun TvSourcePickerScreen(
                                         }
                                     }
                                 }
+                            }
+                        }
+                        // Last item, so it appears and disappears without moving any
+                        // source the viewer is looking at.
+                        if (picker.pendingProviderCount > 0) {
+                            item("pending-providers") {
+                                Text(
+                                    pluralStringResource(
+                                        R.plurals.sources_still_loading,
+                                        picker.pendingProviderCount,
+                                        picker.pendingProviderCount,
+                                    ),
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
                             }
                         }
                     }
@@ -2567,7 +2559,7 @@ private fun TvDetailScreen(
         }
     }
     Box(Modifier.fillMaxSize()) {
-        TvDetailBackdrop(media = detail.preview, modifier = Modifier.fillMaxSize())
+        TvBakedBackdrop(media = detail.preview, style = TvBackdropStyle.DETAIL, modifier = Modifier.fillMaxSize())
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),

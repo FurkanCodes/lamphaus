@@ -42,9 +42,19 @@ hardware.
 | PERF-16 full-screen sweep: details backdrop baked (`SHR-PROD-01`, `QA-08`) | same TV, default fixture, 3 cold runs, `dumpsys gfxinfo`; series details open, episodes, actions, back | beta.13 → `feature/tv-smoother-scrolling` | janky %, frame median, GPU median | 69.8% janky; frame 98 ms; GPU 50 ms | 10.4% janky; frame 25 ms; GPU 12 ms | ~3.9× faster frames | artwork plus two scrims baked off-thread into one opaque 1920×1080 bitmap (`TvDetailBackdrop`, shared `bakeArtwork`); missing-art mark baked in the same place; on-device diffs 0.03/255 (no art) and 0.8/255 (art) | keep |
 | PERF-16 Settings pane settles (`TV-NAV-05`, `QA-08`) | same TV, default fixture, 3 cold runs, `dumpsys gfxinfo`; burst of 6× down + 6× up in one `input` call | same | frames >100 ms; time spent in them | 9–11 frames; 1.2–1.7 s | 2 frames; 0.21–0.24 s | ~7× less blocked time | the pane follows menu focus after `settingsPaneSettleMillis` (160 ms); Select and Right switch at once (Right then moves focus into the new pane). The trace showed 116 ms of lazy-row composition and `Text` measurement per pane | keep |
 | PERF-16 sweep, no further change needed | same TV, default fixture, 3 cold runs, `dumpsys gfxinfo` | same | janky % | search/browse 74.3%; player chrome 82.3% | search 7.8%; player 8.9% | fixed by PERF-15 | — | — |
+| PERF-17 Sources progressive + baked backdrop (`TV-FOC-01`, `SHR-PROD-04`, `QA-08`) | SEI Box R 4K Plus (Mali-G31, Android 14), stress fixture (20 add-ons, 120 rows, 150-1200 ms catalogs, 300 sources), 3 cold runs, `dumpsys gfxinfo` + timestamped screenshots; open a title, Play, scroll 30 sources | `7024767` (beta.14 code + fixture) → `feature/tv-large-catalogs` | time to first source row; janky %, frame P50/P90 while scrolling | first sources at 5.4-6.3 s (waited for the 5 s add-on); 51% janky, P50 57 ms, P90 73-77 ms | first sources ≤ 1.1 s (first screenshot); 7.2% janky, P50 20 ms, P90 23-24 ms | about 5× sooner, about 7× fewer janky frames | sources publish per add-on in add-on order; index-free keys; picker backdrop baked (`TvBakedBackdrop`); focused source held for 6 s while later add-ons arrived | keep |
+| PERF-17 Home large catalogs (`TV-CNT-02`, `QA-08`) | same TV; 40 brisk Down presses from the hero | same | janky %, frame P90, rows reached | 12.9-14.0% janky, P90 44 ms; about 44 rows loaded, footer never reached | 9.4-10.2% janky, P90 40 ms; about 40 rows loaded, footer never reached | modest at this latency | overlapping windows (a slow catalog no longer blocks the next window), prefetch about 8 rows ahead without a settle delay, ordered reveal (empty rows never shown), no whole-catalog flattening per update; at this fixture latency the old loader also kept up | keep |
+| PERF-17 first-profile seeding (`SHR-ARC-09`) | benchmark fixture | same | add-ons seeded on first launch | 1 of 20 (collectLatest cancelled the setup) | 20 of 20 | fixture correctness | `createInitialProfile` runs `NonCancellable` | keep |
 
 ## Tradeoffs recorded
 
+- PERF-17: Home rows reveal only as an in-order settled prefix (user
+  decision), so a very slow add-on still delays the rows after it. They are
+  already loaded when it answers, and the request starts about 6 rows
+  earlier than before. Inserting sources above the focused row was not
+  exercised on the TV, because fixture add-on 1 answers first; the unit
+  test and lazy-list key anchoring cover it. One run started before Home
+  had loaded and was discarded; three fresh runs replaced it.
 - PERF-16: Discover could not be measured; the default fixture has no
   Discover content. Settings sections still cost about 150 ms to build once
   focus rests; row-level work there was judged not worth the churn for a

@@ -41,17 +41,50 @@ internal fun resolveSource(source: StreamCandidate, allowDebugLocalhost: Boolean
     return SourceResolution.Unsupported("This source needs a compatible external player.")
 }
 
-internal fun sourceItemKey(source: StreamCandidate, index: Int): String = listOf(
-    index,
-    source.providerId,
-    source.url,
-    source.externalUrl,
-    source.infoHash,
-    source.fileIndex,
-    source.ytId,
-    source.nzbUrl,
-    source.archiveFiles.firstOrNull()?.url,
-).joinToString(":")
+/**
+ * Stable, unique list keys for [sources]. Keys do not depend on list position,
+ * so when a slower add-on's sources arrive above the viewport the lazy list
+ * keeps the focused and first visible rows in place (TV-FOC-01). True
+ * duplicates within one add-on get an occurrence suffix; that order is fixed
+ * by the add-on, so the suffix is stable too.
+ */
+internal fun sourceItemKeys(sources: List<StreamCandidate>): List<String> {
+    val occurrences = HashMap<String, Int>()
+    return sources.map { source ->
+        val identity = listOf(
+            source.providerId,
+            source.url,
+            source.externalUrl,
+            source.infoHash,
+            source.fileIndex,
+            source.ytId,
+            source.nzbUrl,
+            source.archiveFiles.firstOrNull()?.url,
+            source.name,
+            source.title,
+        ).joinToString(":")
+        val occurrence = occurrences.merge(identity, 1, Int::plus)!!
+        "$identity#$occurrence"
+    }
+}
+
+/** How one add-on answered a source request. */
+internal sealed interface SourceProviderOutcome {
+    data class Streams(val streams: List<StreamCandidate>) : SourceProviderOutcome
+    data class Failed(val message: String, val supportsStreams: Boolean) : SourceProviderOutcome
+    data object Unsupported : SourceProviderOutcome
+}
+
+/**
+ * Sources from the add-ons that have answered so far, in add-on order, so
+ * the final list equals the order shown when every add-on had answered.
+ */
+internal fun mergeSourcesInProviderOrder(
+    providerOrder: List<String>,
+    outcomes: Map<String, SourceProviderOutcome>,
+): List<StreamCandidate> = providerOrder.flatMap { id ->
+    (outcomes[id] as? SourceProviderOutcome.Streams)?.streams.orEmpty()
+}
 
 internal fun isSafeExternalUri(value: String): Boolean {
     val scheme = runCatching { URI(value).scheme?.lowercase() }.getOrNull() ?: return false

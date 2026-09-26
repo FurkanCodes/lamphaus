@@ -135,7 +135,12 @@ class AppViewModel(
     val state: StateFlow<AppUiState> = mutableState.asStateFlow()
     private val catalogRefreshGate = CatalogRefreshGate()
     private var refreshJob: Job? = null
-    private var homeCatalogBatchJob: Job? = null
+    // Home windows may overlap (HOME_CATALOG_MAX_WINDOWS_IN_FLIGHT). Rows from
+    // appended windows wait in homePendingRows and are revealed in order once
+    // settled (revealSettledHomeRows). All three are touched on Main only.
+    private val homeCatalogWindowJobs = mutableListOf<Job>()
+    private var homeWindowsInFlight = 0
+    private var homePendingRows: List<PendingHomeRow> = emptyList()
     private var homeCatalogGeneration = 0L
     private var homeCatalogLoader: HomeCatalogLoader? = null
     private var homeFirstUsableRowMarked = false
@@ -1561,60 +1566,68 @@ class AppViewModel(
                     showMessage("Install a stream add-on to play this title.")
                     return@launch
                 }
-                val resolvedProviders = supervisorScope {
-                    enabledProviders.map { subscription ->
-                        async {
-                            val manifest = container.providerClient.manifest(subscription.manifestUrl)
-                            subscription to (manifest as? ProviderResult.Success)?.value
-                        }
-                    }.awaitAll()
-                }
-                val manifestFailures = resolvedProviders
-                    .filter { (_, manifest) -> manifest == null }
-                    .associate { (provider, _) -> provider.id to "${provider.displayName} is unavailable." }
-                val streamProviders = resolvedProviders.filter { (_, manifest) ->
-                    manifest?.let { container.providerAggregator.supports(it, "stream", media.rawType, videoId) } == true
-                }
-                if (streamProviders.isEmpty()) {
-                    mutableState.update {
-                        it.copy(
-                            refreshing = false,
-                            sourcePicker = it.sourcePicker?.copy(loading = false, failures = manifestFailures),
+                // Each add-on's sources appear as soon as it answers, merged in
+                // add-on order; the slowest add-on no longer gates the list.
+                val providerOrder = enabledProviders.map(ProviderSubscription::id)
+                val labels = enabledProviders.associate { it.id to it.displayName }
+                val outcomes = mutableMapOf<String, SourceProviderOutcome>()
+                fun publishSources() {
+                    val sources = mergeSourcesInProviderOrder(providerOrder, outcomes)
+                    val pending = providerOrder.count { it !in outcomes }
+                    val failures = outcomes.mapNotNull { (id, outcome) ->
+                        (outcome as? SourceProviderOutcome.Failed)?.let { id to it.message }
+                    }.toMap()
+                    mutableState.update { current ->
+                        current.copy(
+                            refreshing = pending > 0,
+                            sourcePicker = current.sourcePicker?.copy(
+                                sources = sources,
+                                providerLabels = labels,
+                                failures = failures,
+                                pendingProviderCount = pending,
+                                loading = pending > 0 && sources.isEmpty(),
+                            ),
                         )
                     }
-                    showMessage("No installed add-on supports sources for this title.")
-                    return@launch
                 }
-                val streamResults = supervisorScope {
-                    streamProviders.map { (subscription, _) ->
-                        async {
-                            subscription to container.providerClient.streams(
-                                subscription.manifestUrl,
-                                subscription.id,
-                                media.rawType,
-                                videoId,
-                            )
+                publishSources()
+                supervisorScope {
+                    enabledProviders.forEach { subscription ->
+                        launch {
+                            val manifest = container.providerClient.manifest(subscription.manifestUrl)
+                            val outcome = when {
+                                manifest !is ProviderResult.Success -> SourceProviderOutcome.Failed(
+                                    "${subscription.displayName} is unavailable.",
+                                    supportsStreams = false,
+                                )
+                                !container.providerAggregator.supports(manifest.value, "stream", media.rawType, videoId) ->
+                                    SourceProviderOutcome.Unsupported
+                                else -> when (
+                                    val result = container.providerClient.streams(
+                                        subscription.manifestUrl,
+                                        subscription.id,
+                                        media.rawType,
+                                        videoId,
+                                    )
+                                ) {
+                                    is ProviderResult.Success -> SourceProviderOutcome.Streams(result.value)
+                                    is ProviderResult.Failure -> SourceProviderOutcome.Failed(
+                                        result.safeMessage,
+                                        supportsStreams = true,
+                                    )
+                                }
+                            }
+                            outcomes[subscription.id] = outcome
+                            publishSources()
                         }
-                    }.awaitAll()
+                    }
                 }
-                val streams = streamResults.flatMap { (_, result) -> (result as? ProviderResult.Success)?.value.orEmpty() }
-                val labels = streamProviders.associate { (provider, _) -> provider.id to provider.displayName }
-                val failures = manifestFailures + streamResults.mapNotNull { (provider, result) ->
-                    (result as? ProviderResult.Failure)?.let { provider.id to it.safeMessage }
-                }.toMap()
-                mutableState.update {
-                    it.copy(
-                        refreshing = false,
-                        sourcePicker = SourcePickerState(
-                            media = media,
-                            episode = episode,
-                            startFromBeginning = startFromBeginning,
-                            sources = streams,
-                            providerLabels = labels,
-                            failures = failures,
-                            loading = false,
-                        ),
-                    )
+                val anySupported = outcomes.values.any { outcome ->
+                    outcome is SourceProviderOutcome.Streams ||
+                        (outcome is SourceProviderOutcome.Failed && outcome.supportsStreams)
+                }
+                if (!anySupported) {
+                    showMessage("No installed add-on supports sources for this title.")
                 }
             }
         }
@@ -1998,8 +2011,7 @@ class AppViewModel(
             homeLog("refresh skipped: account signed out")
             refreshJob?.cancel()
             refreshJob = null
-            homeCatalogBatchJob?.cancel()
-            homeCatalogBatchJob = null
+            cancelHomeCatalogWindows()
             homeCatalogGeneration++
             homeCatalogLoader = null
             catalogRefreshGate.reset()
@@ -2030,7 +2042,7 @@ class AppViewModel(
         }
 
         refreshJob?.cancel()
-        homeCatalogBatchJob?.cancel()
+        cancelHomeCatalogWindows()
         homeCatalogGeneration++
         homeFirstUsableRowMarked = false
         val generation = homeCatalogGeneration
@@ -2087,6 +2099,7 @@ class AppViewModel(
                 )
             }
             homeLog("initial Home window requested generation=$generation")
+            homeWindowsInFlight++
             try {
                 val window = requestHomeCatalogWindow(
                     loader = loader,
@@ -2103,6 +2116,8 @@ class AppViewModel(
                 throw error
             } catch (error: Throwable) {
                 markHomeCatalogFailure("initial Home window failed", generation, error)
+            } finally {
+                endHomeCatalogWindow(generation)
             }
         }
     }
@@ -2113,12 +2128,12 @@ class AppViewModel(
         val loader = homeCatalogLoader
         if (
             !batchState.hasMore ||
-            batchState.loadingMore ||
             batchState.loadMoreFailed ||
-            loader == null
+            loader == null ||
+            homeWindowsInFlight >= HOME_CATALOG_MAX_WINDOWS_IN_FLIGHT
         ) {
             homeLog(
-                "window load ignored hasMore=${batchState.hasMore} loading=${batchState.loadingMore} " +
+                "window load ignored hasMore=${batchState.hasMore} inFlight=$homeWindowsInFlight " +
                     "failed=${batchState.loadMoreFailed} loader=${loader != null}",
             )
             return
@@ -2127,17 +2142,12 @@ class AppViewModel(
         val childFilterEnabled = current.activeProfile?.let { profile ->
             profile.kind == ProfileKind.CHILD && profile.hideUnrated
         } == true
-        mutableState.update {
-            if (it.homeCatalogBatch != batchState) {
-                it
-            } else {
-                it.copy(homeCatalogBatch = batchState.copy(loadingMore = true))
-            }
-        }
+        homeWindowsInFlight++
+        mutableState.update { it.copy(homeCatalogBatch = it.homeCatalogBatch.copy(loadingMore = true)) }
         homeLog(
             "Home window load started generation=$generation consumed=${batchState.consumedTargetCount}",
         )
-        homeCatalogBatchJob = viewModelScope.launch {
+        launchHomeCatalogWindow(generation) {
             try {
                 val window = requestHomeCatalogWindow(
                     loader = loader,
@@ -2162,7 +2172,7 @@ class AppViewModel(
         val current = state.value
         val batchState = current.homeCatalogBatch
         val loader = homeCatalogLoader
-        if (batchState.loadingMore || !batchState.loadMoreFailed || loader == null) return
+        if (!batchState.loadMoreFailed || loader == null) return
 
         val generation = homeCatalogGeneration
         val childFilterEnabled = current.activeProfile?.let { profile ->
@@ -2180,7 +2190,8 @@ class AppViewModel(
         homeLog(
             "Home window retry started generation=$generation consumed=${batchState.consumedTargetCount}",
         )
-        homeCatalogBatchJob = viewModelScope.launch {
+        homeWindowsInFlight++
+        launchHomeCatalogWindow(generation) {
             try {
                 val window = requestHomeCatalogWindow(
                     loader = loader,
@@ -2210,12 +2221,21 @@ class AppViewModel(
             childFilterEnabled = childFilterEnabled,
             onPrepared = prepared@{ window ->
                 if (generation != homeCatalogGeneration) return@prepared
-                mutableState.update { current ->
-                    val sections = if (append) {
-                        appendHomeCatalogBatch(current.sections, window.sections)
-                    } else {
-                        mergeCatalogRefresh(current.sections, window.sections)
+                if (append) {
+                    // Appended rows stay pending until they settle in order, so
+                    // no skeleton row appears and later vanishes (TV-CNT-02).
+                    homePendingRows = homePendingRows + window.sections.map { section ->
+                        PendingHomeRow(section.id, section.takeUnless(CatalogSection::initialLoading))
                     }
+                    publishSettledHomeRows(window)
+                    homeLog(
+                        "Home window prepared append=true sections=${window.sections.size} " +
+                            "consumed=${window.consumedTargetCount} pending=${homePendingRows.size}",
+                    )
+                    return@prepared
+                }
+                mutableState.update { current ->
+                    val sections = mergeCatalogRefresh(current.sections, window.sections)
                     current.copy(
                         sections = sections,
                         homeCatalogBatch = current.homeCatalogBatch.copy(
@@ -2234,7 +2254,12 @@ class AppViewModel(
             },
             onResolved = resolved@{ section ->
                 if (generation != homeCatalogGeneration) return@resolved
-                mutableState.update { current ->
+                if (homePendingRows.any { it.id == section.id }) {
+                    homePendingRows = homePendingRows.map { row ->
+                        if (row.id == section.id) row.copy(resolved = section) else row
+                    }
+                    publishSettledHomeRows(window = null)
+                } else mutableState.update { current ->
                     val index = current.sections.indexOfFirst { it.id == section.id }
                     if (index < 0) return@update current
                     val currentSection = current.sections[index]
@@ -2258,17 +2283,78 @@ class AppViewModel(
     ) {
         if (generation != homeCatalogGeneration) return
         mutableState.update {
+            val batch = it.homeCatalogBatch
+            // Windows overlap, so only the furthest-reaching one decides hasMore.
+            val newest = window.consumedTargetCount >= batch.consumedTargetCount
             it.copy(
-                homeCatalogBatch = it.homeCatalogBatch.copy(
-                    consumedTargetCount = window.consumedTargetCount,
-                    hasMore = window.hasMore,
-                    loadingMore = false,
+                homeCatalogBatch = batch.copy(
+                    consumedTargetCount = maxOf(batch.consumedTargetCount, window.consumedTargetCount),
+                    hasMore = if (newest) window.hasMore else batch.hasMore,
                     loadMoreFailed = false,
                 ),
                 initialContentLoading = false,
-                refreshing = false,
             )
         }
+    }
+
+    /** Appends the settled prefix of pending rows and publishes pending/loading state. */
+    private fun publishSettledHomeRows(window: HomeCatalogWindow?) {
+        val reveal = revealSettledHomeRows(homePendingRows)
+        homePendingRows = reveal.remaining
+        mutableState.update { current ->
+            val batch = current.homeCatalogBatch
+            current.copy(
+                sections = if (reveal.revealed.isEmpty()) {
+                    current.sections
+                } else {
+                    appendHomeCatalogBatch(current.sections, reveal.revealed)
+                },
+                homeCatalogBatch = batch.copy(
+                    consumedTargetCount = window?.let { maxOf(batch.consumedTargetCount, it.consumedTargetCount) }
+                        ?: batch.consumedTargetCount,
+                    hasMore = window?.takeIf { it.consumedTargetCount >= batch.consumedTargetCount }?.hasMore
+                        ?: batch.hasMore,
+                    loadingMore = homeWindowsInFlight > 0 || homePendingRows.isNotEmpty(),
+                    pendingRowCount = homePendingRows.size,
+                ),
+                initialContentLoading = false,
+            )
+        }
+    }
+
+    private fun launchHomeCatalogWindow(generation: Long, block: suspend () -> Unit) {
+        lateinit var job: Job
+        job = viewModelScope.launch {
+            try {
+                block()
+            } finally {
+                homeCatalogWindowJobs.remove(job)
+                endHomeCatalogWindow(generation)
+            }
+        }
+        homeCatalogWindowJobs += job
+    }
+
+    /** Called when any Home window ends, successfully or not. */
+    private fun endHomeCatalogWindow(generation: Long) {
+        if (generation != homeCatalogGeneration) return
+        homeWindowsInFlight = (homeWindowsInFlight - 1).coerceAtLeast(0)
+        mutableState.update {
+            it.copy(
+                homeCatalogBatch = it.homeCatalogBatch.copy(
+                    loadingMore = homeWindowsInFlight > 0 || homePendingRows.isNotEmpty(),
+                    pendingRowCount = homePendingRows.size,
+                ),
+                refreshing = if (homeWindowsInFlight == 0) false else it.refreshing,
+            )
+        }
+    }
+
+    private fun cancelHomeCatalogWindows() {
+        homeCatalogWindowJobs.toList().forEach(Job::cancel)
+        homeCatalogWindowJobs.clear()
+        homeWindowsInFlight = 0
+        homePendingRows = emptyList()
     }
 
     private fun markHomeCatalogFailure(
@@ -2280,12 +2366,8 @@ class AppViewModel(
         if (generation != homeCatalogGeneration) return
         mutableState.update {
             it.copy(
-                homeCatalogBatch = it.homeCatalogBatch.copy(
-                    loadingMore = false,
-                    loadMoreFailed = true,
-                ),
+                homeCatalogBatch = it.homeCatalogBatch.copy(loadMoreFailed = true),
                 initialContentLoading = false,
-                refreshing = false,
             )
         }
     }

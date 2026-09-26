@@ -95,12 +95,15 @@ data class SourcePickerState(
     val failures: Map<String, String> = emptyMap(),
     val selectedProviderId: String? = null,
     val loading: Boolean = true,
+    /** Add-ons that have not answered yet; their sources are appended in add-on order. */
+    val pendingProviderCount: Int = 0,
 ) {
-    val providerIds: List<String>
-        get() = sources.map(StreamCandidate::providerId).distinct()
+    // Computed once per state (QA-08): with hundreds of sources the getters
+    // re-filtered on every read during composition.
+    val providerIds: List<String> = sources.map(StreamCandidate::providerId).distinct()
 
-    val visibleSources: List<StreamCandidate>
-        get() = selectedProviderId?.let { id -> sources.filter { it.providerId == id } } ?: sources
+    val visibleSources: List<StreamCandidate> =
+        selectedProviderId?.let { id -> sources.filter { it.providerId == id } } ?: sources
 
     fun selectProvider(providerId: String?) = copy(selectedProviderId = providerId)
 }
@@ -168,8 +171,11 @@ fun ContentMenuTarget.menuActions(): List<ContentMenuAction> = buildList {
 data class HomeCatalogBatchState(
     val consumedTargetCount: Int = 0,
     val hasMore: Boolean = false,
+    /** A window is in flight or prepared rows are still waiting to be revealed. */
     val loadingMore: Boolean = false,
     val loadMoreFailed: Boolean = false,
+    /** Prepared rows not yet revealed (see [revealSettledHomeRows]). */
+    val pendingRowCount: Int = 0,
 )
 
 /** Minimum watch time before an entry qualifies for Continue Watching. */
@@ -188,8 +194,55 @@ internal fun WatchProgress.isResumable(): Boolean =
 internal fun continueWatchingItems(
     progress: List<WatchProgress>,
     catalogMedia: List<MediaPreview>,
+): List<Pair<MediaPreview, WatchProgress>> =
+    continueWatchingItems(progress, catalogMedia.associateBy(MediaPreview::stableKey))
+
+/**
+ * Same result as [continueWatchingItems] over every catalog title, without
+ * flattening the catalog. QA-08: with 100+ addon rows that flattening ran on
+ * the main thread for every row that loaded. Only titles with resumable
+ * progress are looked up, and the last duplicate wins as in `associateBy`.
+ */
+internal fun continueWatchingItemsFromSections(
+    progress: List<WatchProgress>,
+    sections: List<CatalogSection>,
 ): List<Pair<MediaPreview, WatchProgress>> {
-    val mediaByKey = catalogMedia.associateBy(MediaPreview::stableKey)
+    val wantedKeys = progress.asSequence().filter(WatchProgress::isResumable).mapTo(HashSet()) { it.mediaKey }
+    val mediaByKey = HashMap<String, MediaPreview>()
+    if (wantedKeys.isNotEmpty()) {
+        // Compare ids first; stableKey allocates, so build it only for candidates.
+        val wantedIds = wantedKeys.mapTo(HashSet()) { it.substringAfter(':') }
+        for (section in sections) {
+            for (media in section.items) {
+                if (media.id in wantedIds) {
+                    val key = media.stableKey
+                    if (key in wantedKeys) mediaByKey[key] = media
+                }
+            }
+        }
+    }
+    return continueWatchingItems(progress, mediaByKey)
+}
+
+/** The first [limit] distinct titles in catalog order, stopping as soon as they are found. */
+internal fun firstDistinctMedia(sections: List<CatalogSection>, limit: Int): List<MediaPreview> {
+    val seen = HashSet<String>()
+    val result = ArrayList<MediaPreview>(limit)
+    for (section in sections) {
+        for (media in section.items) {
+            if (seen.add(media.stableKey)) {
+                result += media
+                if (result.size == limit) return result
+            }
+        }
+    }
+    return result
+}
+
+private fun continueWatchingItems(
+    progress: List<WatchProgress>,
+    mediaByKey: Map<String, MediaPreview>,
+): List<Pair<MediaPreview, WatchProgress>> {
     return progress
         .asSequence()
         .filter(WatchProgress::isResumable)

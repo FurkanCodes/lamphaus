@@ -229,6 +229,10 @@
     <string name="all_sources">All sources</string>
     <string name="no_sources">No sources are currently available.</string>
     <string name="loading_sources">Loading sources…</string>
+    <plurals name="sources_still_loading">
+        <item quantity="one">Still loading %d add-on…</item>
+        <item quantity="other">Still loading %d add-ons…</item>
+    </plurals>
     <string name="loading_library">Lighting your library…</string>
     <string name="source_type_direct">Direct</string>
     <string name="source_type_peer">P2P</string>

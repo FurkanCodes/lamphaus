@@ -64,7 +64,39 @@ class SourceResolverTest {
     fun `duplicate looking sources still receive stable unique list keys`() {
         val source = candidate(url = "https://cdn.example/video.mp4")
 
-        assertNotEquals(sourceItemKey(source, 0), sourceItemKey(source, 1))
+        val keys = sourceItemKeys(listOf(source, source))
+        assertNotEquals(keys[0], keys[1])
+    }
+
+    @Test
+    fun `source keys do not change when an earlier add-on's sources arrive`() {
+        val later = candidate(url = "https://cdn.example/later.mp4")
+        val earlier = candidate(url = "https://cdn.example/earlier.mp4").copy(providerId = "first")
+
+        val before = sourceItemKeys(listOf(later))
+        val after = sourceItemKeys(listOf(earlier, later))
+
+        assertEquals(before.single(), after[1])
+    }
+
+    @Test
+    fun `progressive sources merge in add-on order whatever the arrival order`() {
+        val a = candidate(url = "https://a.example/1.mp4").copy(providerId = "a")
+        val b = candidate(url = "https://b.example/1.mp4").copy(providerId = "b")
+        val order = listOf("a", "b", "c")
+
+        val onlyB = mergeSourcesInProviderOrder(order, mapOf("b" to SourceProviderOutcome.Streams(listOf(b))))
+        val both = mergeSourcesInProviderOrder(
+            order,
+            mapOf(
+                "b" to SourceProviderOutcome.Streams(listOf(b)),
+                "c" to SourceProviderOutcome.Failed("down", supportsStreams = true),
+                "a" to SourceProviderOutcome.Streams(listOf(a)),
+            ),
+        )
+
+        assertEquals(listOf(b), onlyB)
+        assertEquals(listOf(a, b), both)
     }
 
     private fun candidate(

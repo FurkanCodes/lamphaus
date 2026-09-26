@@ -98,7 +98,6 @@ import kotlin.math.roundToInt
 import kotlin.math.absoluteValue
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.CatalogSection
-import com.lamphaus.app.ui.HOME_CATALOG_SCROLL_SETTLE_MILLIS
 import com.lamphaus.app.ui.continueWatchingItems
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.core.model.MediaPreview
@@ -173,18 +172,20 @@ internal fun MobileHomeScreen(
         state.homeCatalogBatch.hasMore,
         state.homeCatalogBatch.loadingMore,
         state.homeCatalogBatch.loadMoreFailed,
+        state.homeCatalogBatch.pendingRowCount,
     ) {
         snapshotFlow {
             listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to
                 listState.layoutInfo.totalItemsCount
         }.distinctUntilChanged().collectLatest { (lastVisibleIndex, totalListItems) ->
-            delay(HOME_CATALOG_SCROLL_SETTLE_MILLIS)
+            // No settle delay: the ViewModel caps windows in flight, and a
+            // late request is what makes deep scrolling reach the footer.
             if (
                 shouldPrefetchHomeCatalogBatch(
                     lastVisibleIndex = lastVisibleIndex,
                     totalListItems = totalListItems,
+                    pendingRows = state.homeCatalogBatch.pendingRowCount,
                     hasMore = state.homeCatalogBatch.hasMore,
-                    loading = state.homeCatalogBatch.loadingMore,
                     failed = state.homeCatalogBatch.loadMoreFailed,
                 )
             ) {

@@ -52,6 +52,26 @@ class ContinueWatchingItemsTest {
         assertEquals(listOf(first, second), rows)
     }
 
+    @Test
+    fun `section lookup matches the flattened catalog lookup`() {
+        val movie = media("tt0111161", MediaType.MOVIE)
+        val series = media("tt1196946", MediaType.SERIES)
+        val renamed = series.copy(name = "Later duplicate")
+        val sections = listOf(
+            CatalogSection("one", "p", "One", "P", items = listOf(movie, series)),
+            CatalogSection("two", "p", "Two", "P", items = listOf(renamed)),
+        )
+        val rows = listOf(progress(series, "tt1196946:1:1", 200), progress(movie, "tt0111161", 100))
+        val flattened = sections.flatMap(CatalogSection::items).distinctBy(MediaPreview::stableKey)
+
+        assertEquals(
+            continueWatchingItems(rows, sections.flatMap(CatalogSection::items)),
+            continueWatchingItemsFromSections(rows, sections),
+        )
+        assertEquals(flattened.take(5), firstDistinctMedia(sections, limit = 5))
+        assertEquals(listOf(movie), firstDistinctMedia(sections, limit = 1))
+    }
+
     private fun media(id: String, type: MediaType) = MediaPreview(
         id = id,
         type = type,
