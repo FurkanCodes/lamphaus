@@ -2,7 +2,9 @@ package com.lamphaus.core.player
 
 import androidx.media3.common.Format
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.DecoderReuseEvaluation
+import androidx.media3.common.util.Util
+import androidx.media3.exoplayer.DecoderCounters
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 
 /** Live engine numbers for the player's Info panel. Never carries source details (SHR-PROD-06). */
@@ -10,8 +12,13 @@ data class PlaybackStats(
     val videoFormat: Format?,
     val videoDecoder: String?,
     val audioFormat: Format?,
-    /** Null while the audio bitstream passes straight to the output route. */
+    /** The last audio decoder initialized for this item, if any. */
     val audioDecoder: String?,
+    /**
+     * What the audio output actually receives: true for a bitstream sent to
+     * the receiver, false for decoded PCM, null before the output opens.
+     */
+    val audioPassthrough: Boolean?,
     val bufferedMillis: Long,
     val bandwidthBitsPerSecond: Long,
     val droppedFrames: Int,
@@ -33,14 +40,20 @@ internal class PlaybackStatsCollector : AnalyticsListener {
         videoDecoder = decoderName
     }
 
-    override fun onAudioInputFormatChanged(
+    @Volatile var audioPassthrough: Boolean? = null
+
+    // Decoder renderers (FFmpeg) report the input format after initializing,
+    // so the output is read from the AudioTrack itself, not event order.
+    override fun onAudioTrackInitialized(
         eventTime: AnalyticsListener.EventTime,
-        format: Format,
-        decoderReuseEvaluation: DecoderReuseEvaluation?,
+        audioTrackConfig: AudioSink.AudioTrackConfig,
     ) {
-        // A new format may bypass decoding (passthrough); the next
-        // initialization event, if any, names the decoder.
-        if (decoderReuseEvaluation == null) audioDecoder = null
+        audioPassthrough = !Util.isEncodingLinearPcm(audioTrackConfig.encoding)
+    }
+
+    override fun onAudioDisabled(eventTime: AnalyticsListener.EventTime, decoderCounters: DecoderCounters) {
+        audioDecoder = null
+        audioPassthrough = null
     }
 
     override fun onAudioDecoderInitialized(

@@ -2250,12 +2250,14 @@ private fun PlayerStreamInfoPanel(
             current.videoFormat?.let { add(stringResource(R.string.player_stats_video) to it.videoSummary()) }
             current.audioFormat?.let { format ->
                 add(stringResource(R.string.player_stats_audio) to format.audioSummary())
-                add(
-                    stringResource(R.string.player_stats_output) to (
-                        current.audioDecoder?.let { stringResource(R.string.player_stats_decoded, it) }
-                            ?: stringResource(R.string.player_stats_passthrough)
-                        ),
-                )
+                val decoder = current.audioDecoder
+                val output = when {
+                    current.audioPassthrough == true -> stringResource(R.string.player_stats_passthrough)
+                    decoder != null -> stringResource(R.string.player_stats_decoded, decoder)
+                    current.audioPassthrough == false -> stringResource(R.string.player_stats_decoded_on_device)
+                    else -> null
+                }
+                output?.let { add(stringResource(R.string.player_stats_output) to it) }
             }
             add(stringResource(R.string.player_stats_buffer) to
                 stringResource(R.string.player_stats_buffer_value, current.bufferedMillis / 1_000f))

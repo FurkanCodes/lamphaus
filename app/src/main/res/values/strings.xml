@@ -347,6 +347,7 @@
     <string name="player_stats_output">Audio output</string>
     <string name="player_stats_passthrough">Passthrough to the receiver</string>
     <string name="player_stats_decoded">Decoded by %1$s</string>
+    <string name="player_stats_decoded_on_device">Decoded on this device</string>
     <string name="player_stats_buffer">Buffer</string>
     <string name="player_stats_buffer_value">%1$.1f s ahead</string>
     <string name="player_stats_network">Network</string>
