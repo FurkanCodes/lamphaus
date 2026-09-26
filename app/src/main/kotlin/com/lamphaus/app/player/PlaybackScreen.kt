@@ -2247,22 +2247,43 @@ private fun PlayerStreamInfoPanel(
     }
     val rows = buildList {
         stats?.let { current ->
-            current.videoFormat?.let { add(stringResource(R.string.player_stats_video) to it.videoSummary()) }
-            current.audioFormat?.let { format ->
-                add(stringResource(R.string.player_stats_audio) to format.audioSummary())
-                add(
-                    stringResource(R.string.player_stats_output) to (
-                        current.audioDecoder?.let { stringResource(R.string.player_stats_decoded, it) }
-                            ?: stringResource(R.string.player_stats_passthrough)
-                        ),
-                )
+            current.videoFormat?.let { format ->
+                add(stringResource(R.string.player_stats_video) to StreamStatsFormat.video(
+                    width = format.width,
+                    height = format.height,
+                    fps = format.frameRate.takeIf { it > 0f } ?: current.measuredFrameRate,
+                    codec = format.sampleMimeType?.let { friendlyCodecName(it) },
+                    hdr = format.playbackHdrType(),
+                    bitrate = format.bitrate,
+                ))
             }
+            current.videoDecoder?.let {
+                add(stringResource(R.string.player_stats_video_decoder) to StreamStatsFormat.decoder(it))
+            }
+            current.audioFormat?.let { format ->
+                add(stringResource(R.string.player_stats_audio) to StreamStatsFormat.audio(
+                    codec = format.sampleMimeType?.let { friendlyCodecName(it, atmos = "atmos" in format.label.orEmpty().lowercase()) },
+                    channels = channelLayout(format.channelCount),
+                    sampleRate = format.sampleRate,
+                    bitrate = format.bitrate,
+                ))
+            }
+            val decoder = current.audioDecoder
+            val outputFormat = StreamStatsFormat.output(
+                current.audioPassthrough, current.audioOutputEncoding, current.audioOutputChannels,
+            )
+            val output = when {
+                current.audioPassthrough == true ->
+                    stringResource(R.string.player_stats_passthrough, outputFormat.orEmpty())
+                decoder != null ->
+                    stringResource(R.string.player_stats_decoded, StreamStatsFormat.decoder(decoder), outputFormat.orEmpty())
+                current.audioPassthrough == false ->
+                    stringResource(R.string.player_stats_decoded_on_device, outputFormat.orEmpty())
+                else -> null
+            }
+            output?.let { add(stringResource(R.string.player_stats_output) to it) }
             add(stringResource(R.string.player_stats_buffer) to
                 stringResource(R.string.player_stats_buffer_value, current.bufferedMillis / 1_000f))
-            if (current.bandwidthBitsPerSecond > 0) {
-                add(stringResource(R.string.player_stats_network) to
-                    stringResource(R.string.player_stats_network_value, current.bandwidthBitsPerSecond / 1_000_000f))
-            }
             add(stringResource(R.string.player_stats_dropped) to current.droppedFrames.toString())
         }
         streamInfo?.let { add(stringResource(R.string.player_stats_display) to it) }
@@ -2272,31 +2293,23 @@ private fun PlayerStreamInfoPanel(
             Text(stringResource(R.string.player_info_empty),
                 style = MaterialTheme.typography.bodyLarge, color = PlayerOnSurfaceMuted)
         }
-        rows.forEach { (label, value) ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(label, style = MaterialTheme.typography.bodyMedium, color = PlayerOnSurfaceMuted,
-                    modifier = Modifier.widthIn(min = 120.dp))
-                Text(value, style = MaterialTheme.typography.bodyMedium, color = PlayerOnSurface)
+        // Rows scroll on their own so Done always stays on screen (TV-LAY-01).
+        Column(
+            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            rows.forEach { (label, value) ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(label, style = MaterialTheme.typography.bodyMedium, color = PlayerOnSurfaceMuted,
+                        modifier = Modifier.width(128.dp))
+                    Text(value, style = MaterialTheme.typography.bodyMedium, color = PlayerOnSurface,
+                        modifier = Modifier.weight(1f))
+                }
             }
         }
         PlayerTextButton(stringResource(R.string.player_done), onClose, Modifier.focusRequester(closeFocus))
     }
 }
-
-private fun Format.videoSummary(): String = listOfNotNull(
-    "${width}×${height}".takeIf { width > 0 && height > 0 },
-    frameRate.takeIf { it > 0f }?.let { "%.3f fps".format(it).replace(Regex("\\.?0+ fps$"), " fps") },
-    sampleMimeType?.let { friendlyCodecName(it) },
-    playbackHdrType()?.name?.replace('_', ' '),
-    bitrate.takeIf { it > 0 }?.let { "%.1f Mbps".format(it / 1_000_000f) },
-).joinToString(" · ")
-
-private fun Format.audioSummary(): String = listOfNotNull(
-    sampleMimeType?.let { friendlyCodecName(it) },
-    channelLayout(channelCount),
-    sampleRate.takeIf { it > 0 }?.let { "${it / 1_000.0} kHz" },
-    bitrate.takeIf { it > 0 }?.let { "${it / 1_000} kbps" },
-).joinToString(" · ")
 
 @Composable
 private fun PlayerTimingEditor(

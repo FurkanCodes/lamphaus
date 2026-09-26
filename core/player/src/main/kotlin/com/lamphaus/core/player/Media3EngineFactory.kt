@@ -286,8 +286,11 @@ object Media3EngineFactory {
             videoDecoder = collector?.videoDecoder,
             audioFormat = player.audioFormat,
             audioDecoder = collector?.audioDecoder,
+            audioPassthrough = collector?.audioPassthrough,
+            audioOutputEncoding = collector?.audioOutputEncoding,
+            audioOutputChannels = collector?.audioOutputChannels ?: 0,
+            measuredFrameRate = videoCadenceEstimator.frameRate,
             bufferedMillis = player.totalBufferedDuration,
-            bandwidthBitsPerSecond = collector?.bandwidthBitsPerSecond ?: 0,
             droppedFrames = player.videoDecoderCounters?.droppedBufferCount ?: 0,
         )
     }
