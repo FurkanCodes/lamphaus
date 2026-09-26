@@ -808,9 +808,7 @@ internal fun PlaybackScreen(
         }
 
         if (!loadingSurfaceVisible && !inPictureInPicture && isTelevision && panel == PlayerPanel.SUBTITLES) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.72f)))
-            PlayerLiveSubtitleOverlay(liveSubtitleCues, subtitleStyle)
-        } else if (!loadingSurfaceVisible && !inPictureInPicture && (controlsVisible || panel != null || shownError != null)) {
+            // Same dark scrim as the other panels; the live preview stays on top.
             Box(
                 Modifier.fillMaxSize().background(
                     Brush.verticalGradient(
@@ -819,6 +817,30 @@ internal fun PlaybackScreen(
                         0.55f to Color.Transparent,
                         1f to PlayerBackground.copy(alpha = 0.92f),
                     ),
+                ),
+            )
+            PlayerLiveSubtitleOverlay(liveSubtitleCues, subtitleStyle)
+        } else if (!loadingSurfaceVisible && !inPictureInPicture && (controlsVisible || panel != null || shownError != null)) {
+            Box(
+                Modifier.fillMaxSize().background(
+                    if (isTelevision && panel == null) {
+                        // Top and bottom scrims so the chrome reads over bright scenes (PLY-IMM-03).
+                        // Panels keep the original darker scrim below.
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.70f),
+                            0.16f to Color.Transparent,
+                            0.42f to Color.Transparent,
+                            0.62f to Color.Black.copy(alpha = 0.60f),
+                            1f to Color.Black.copy(alpha = 0.90f),
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.45f),
+                            0.22f to Color.Transparent,
+                            0.55f to Color.Transparent,
+                            1f to PlayerBackground.copy(alpha = 0.92f),
+                        )
+                    },
                 ),
             )
         }
@@ -1196,25 +1218,14 @@ internal fun PlayerActionButton(
         return
     }
     var focused by remember { mutableStateOf(false) }
-    val reportFocus = LocalPlayerFocusLabel.current
+    // Circular and borderless; focus fills the circle with the approved pale
+    // container and dark content (TV-TOK-02 playback exception).
     Box(
         modifier = modifier
             .size(containerSize)
-            .onFocusChanged { focused = it.isFocused; if (it.isFocused) reportFocus?.invoke(label) }
-            .clip(RoundedCornerShape(4.dp))
-            .background(
-                when {
-                    focused -> PlayerFocused
-                    active -> PlayerPrimary.copy(alpha = 0.18f)
-                    primary -> PlayerControlContainer.copy(alpha = 0.16f)
-                    else -> PlayerControlContainer
-                },
-            )
-            .border(
-                if (focused) 3.dp else 0.dp,
-                if (focused) PlayerPrimary else Color.Transparent,
-                RoundedCornerShape(4.dp),
-            )
+            .onFocusChanged { focused = it.isFocused }
+            .clip(CircleShape)
+            .background(if (focused) PlayerFocused else Color.Transparent)
             .clickable(onClick = onClick)
             .semantics {
                 role = Role.Button
@@ -1233,14 +1244,15 @@ internal fun PlayerActionButton(
             },
             modifier = Modifier.size(visualSize),
         )
-        if (active && !focused && !primary) {
+        // Active state is a shape as well as a color (MOB-A11Y-08).
+        if (active) {
             Box(
                 Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 10.dp, end = 10.dp)
-                    .size(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(PlayerPrimary),
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 6.dp)
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(if (focused) PlayerFocusedContent else PlayerPrimary),
             )
         }
     }
@@ -1274,55 +1286,16 @@ internal fun PlayerSettingButton(
         }
         return
     }
-    var focused by remember { mutableStateOf(false) }
-    val reportFocus = LocalPlayerFocusLabel.current
-    Row(
-        modifier = modifier
-            .heightIn(min = 48.dp)
-            .onFocusChanged { focused = it.isFocused; if (it.isFocused) reportFocus?.invoke(label) }
-            .clip(RoundedCornerShape(4.dp))
-            .background(
-                when {
-                    focused -> PlayerFocused
-                    active -> PlayerPrimary.copy(alpha = 0.18f)
-                    else -> PlayerControlContainer
-                },
-            )
-            .border(
-                if (focused) 3.dp else 0.dp,
-                if (focused) PlayerPrimary else Color.Transparent,
-                RoundedCornerShape(4.dp),
-            )
-            .clickable(onClick = onClick)
-            .semantics {
-                role = Role.Button
-                contentDescription = label
-                selected = active
-            }
-            .size(PlayerChromeTokens.TvControlContainer),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-    ) {
-        // Icon-only at rest; the focused label appears beside the row (PLY-CHR-05).
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = when {
-                focused -> PlayerFocusedContent
-                active -> PlayerPrimary
-                else -> PlayerOnSurface
-            },
-            modifier = Modifier.size(28.dp),
-        )
-        if (active && !focused) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(PlayerPrimary),
-            )
-        }
-    }
+    // Icon-only at rest; the focused label appears beside the row (PLY-CHR-05).
+    PlayerActionButton(
+        icon = icon,
+        label = label,
+        modifier = modifier,
+        visualSize = PlayerChromeTokens.TvControlGlyph,
+        active = active,
+        containerSize = PlayerChromeTokens.TvControlContainer,
+        onClick = onClick,
+    )
 }
 
 @kotlin.OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -1384,7 +1357,7 @@ internal fun PlayerProgress(
     val buffered = if (durationMillis > 0) bufferedPositionMillis.toFloat() / durationMillis else 0f
     Canvas(
         modifier
-            .height(48.dp)
+            .height(24.dp)
             .onFocusChanged { focused = it.isFocused }
             .semantics {
                 contentDescription = seekDescription
@@ -1420,11 +1393,15 @@ internal fun PlayerProgress(
             },
     ) {
         val centerY = size.height / 2
-        val barHeight = if (focused) 6.dp.toPx() else 4.dp.toPx()
-        val radius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
+        // A thick rounded bar that grows while focused; no knob.
+        val barHeight = if (focused) 12.dp.toPx() else 8.dp.toPx()
+        val radius = androidx.compose.ui.geometry.CornerRadius(barHeight / 2)
         val origin = androidx.compose.ui.geometry.Offset(0f, centerY - barHeight / 2)
-        drawRoundRect(PlayerTrack, origin, androidx.compose.ui.geometry.Size(size.width, barHeight), radius)
-        drawRoundRect(PlayerBuffered, origin, androidx.compose.ui.geometry.Size(size.width * buffered.coerceIn(0f, 1f), barHeight), radius)
+        drawRoundRect(
+            Color.White.copy(alpha = if (focused) 0.45f else 0.30f),
+            origin, androidx.compose.ui.geometry.Size(size.width, barHeight), radius,
+        )
+        drawRoundRect(PlayerPrimary.copy(alpha = 0.35f), origin, androidx.compose.ui.geometry.Size(size.width * buffered.coerceIn(0f, 1f), barHeight), radius)
         drawRoundRect(PlayerPrimary, origin, androidx.compose.ui.geometry.Size(size.width * played.coerceIn(0f, 1f), barHeight), radius)
         if (durationMillis > 0) {
             segments.forEach { segment ->
@@ -1439,26 +1416,6 @@ internal fun PlayerProgress(
                     )
                 }
             }
-        }
-        val knobX = size.width * played.coerceIn(0f, 1f)
-        if (focused) {
-            drawCircle(
-                color = Color.White.copy(alpha = 0.24f),
-                radius = 12.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(knobX, centerY),
-            )
-        }
-        drawCircle(
-            color = if (focused) PlayerFocused else PlayerPrimary,
-            radius = if (focused) 8.dp.toPx() else 6.dp.toPx(),
-            center = androidx.compose.ui.geometry.Offset(knobX, centerY),
-        )
-        if (focused) {
-            drawCircle(
-                color = PlayerPrimary,
-                radius = 3.dp.toPx(),
-                center = androidx.compose.ui.geometry.Offset(knobX, centerY),
-            )
         }
     }
 }
@@ -1525,7 +1482,7 @@ private fun PlayerSettingsPanel(
         isTelevision,
         onClose,
         tvWidth = if (panel == PlayerPanel.SUBTITLES) 844.dp else 724.dp,
-        tvScrim = !(isTelevision && panel == PlayerPanel.SUBTITLES),
+        tvScrim = true,
     ) {
         when (panel) {
             PlayerPanel.AUDIO -> {
@@ -2882,7 +2839,7 @@ private fun Player.clearTrackOverride(trackType: Int, disabled: Boolean) {
 private fun Player.hasOverride(trackType: Int): Boolean =
     trackSelectionParameters.overrides.values.any { it.type == trackType }
 
-private fun Long.asPlaybackTime(): String {
+internal fun Long.asPlaybackTime(): String {
     val totalSeconds = coerceAtLeast(0) / 1_000
     val hours = totalSeconds / 3_600
     val minutes = (totalSeconds % 3_600) / 60

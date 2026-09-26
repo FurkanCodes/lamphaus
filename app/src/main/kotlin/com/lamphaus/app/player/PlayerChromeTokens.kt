@@ -10,8 +10,8 @@ import androidx.compose.ui.unit.dp
 internal object PlayerChromeTokens {
     val ControlContainer = 48.dp
     val ControlGlyph = 24.dp
-    val TvControlContainer = 56.dp
-    val TvControlGlyph = 32.dp
+    val TvControlContainer = 52.dp
+    val TvControlGlyph = 28.dp
     val ControlGap = 8.dp
     val AutoHideMillis = 4_000L
 

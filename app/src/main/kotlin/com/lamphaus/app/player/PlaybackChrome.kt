@@ -30,9 +30,6 @@ import androidx.media3.common.C
 
 internal val LocalPlayerTelevision = staticCompositionLocalOf { false }
 
-/** Reports the label of the control that currently owns TV focus (PLY-CHR-05). */
-internal val LocalPlayerFocusLabel = staticCompositionLocalOf<((String) -> Unit)?> { null }
-
 @Composable
 internal fun PlaybackTheme(isTelevision: Boolean, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalPlayerTelevision provides isTelevision) {
@@ -111,33 +108,35 @@ internal fun PlayerControls(
     }
     BoxWithConstraints(Modifier.fillMaxSize().onPreviewKeyEvent { onInteraction(); false }) {
         if (isTelevision) {
-            // TV-LAY-01: scale to the available window while retaining overscan-safe margins.
-            // Icon-only at rest: the focused control's label fades in beside the
-            // row so recognition never depends on the glyph alone (PLY-CHR-05).
-            var focusedLabel by remember { mutableStateOf<String?>(null) }
+            // TV-LAY-01 overscan-safe margins. Title, timeline, then one row of
+            // borderless icon controls with the time at its end; no visible labels
+            // (PLY-CHR-05), accessible names only.
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .padding(horizontal = 58.dp, vertical = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                PlayerTitle(request, true)
+                PlayerTvTitle(request)
+                Spacer(Modifier.height(16.dp))
                 PlayerProgress(
                     snapshot.positionMillis, snapshot.bufferedPositionMillis, snapshot.durationMillis,
                     Modifier.fillMaxWidth(), onSeekTo, onInteraction, segments,
                 )
-                CompositionLocalProvider(LocalPlayerFocusLabel provides { focusedLabel = it }) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PlayerActionButton(playIcon, playLabel, Modifier.focusRequester(playFocus),
-                        visualSize = 32.dp, containerSize = 56.dp, primary = true, onClick = toggle)
-                    PlayerActionButton(Icons.Rounded.Replay10, stringResource(R.string.player_rewind)) {
-                        onSeekBack(); onInteraction()
-                    }
-                    PlayerActionButton(Icons.Rounded.Forward10, stringResource(R.string.player_forward)) {
-                        onSeekForward(); onInteraction()
-                    }
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PlayerActionButton(
+                        playIcon, playLabel, Modifier.focusRequester(playFocus),
+                        visualSize = PlayerChromeTokens.TvControlGlyph,
+                        containerSize = PlayerChromeTokens.TvControlContainer,
+                        onClick = toggle,
+                    )
                     if (canPlayNext) PlayerActionButton(Icons.Rounded.SkipNext,
-                        stringResource(R.string.player_next_episode)) {
+                        stringResource(R.string.player_next_episode),
+                        visualSize = PlayerChromeTokens.TvControlGlyph,
+                        containerSize = PlayerChromeTokens.TvControlContainer) {
                         if (!nextEpisodeLoading) onNextEpisode()
                         onInteraction()
                     }
@@ -145,23 +144,11 @@ internal fun PlayerControls(
                         subtitlesActive, Modifier.focusRequester(subtitlesFocus)) { onPanel(PlayerPanel.SUBTITLES) }
                     PlayerSettingButton(Icons.AutoMirrored.Rounded.VolumeUp, stringResource(R.string.player_audio),
                         false, Modifier.focusRequester(audioFocus)) { onPanel(PlayerPanel.AUDIO) }
-                    PlayerActionButton(Icons.Rounded.MoreHoriz, stringResource(R.string.player_more),
-                        Modifier.focusRequester(moreFocus)) { onPanel(PlayerPanel.MORE) }
+                    PlayerSettingButton(Icons.Rounded.MoreHoriz, stringResource(R.string.player_more),
+                        false, Modifier.focusRequester(moreFocus)) { onPanel(PlayerPanel.MORE) }
                     Spacer(Modifier.weight(1f))
-                    Column(horizontalAlignment = Alignment.End) {
-                        PlayerTime(snapshot.positionMillis)
-                        PlayerRemaining(snapshot.positionMillis, snapshot.durationMillis)
-                    }
+                    PlayerTvTime(snapshot.positionMillis, snapshot.durationMillis)
                 }
-                }
-                Text(
-                    text = focusedLabel.orEmpty(),
-                    color = PlayerOnSurfaceMuted,
-                    fontFamily = PlayerFont,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    modifier = Modifier.heightIn(min = 18.dp),
-                )
             }
         } else {
             val compactHeight = maxHeight < 480.dp
