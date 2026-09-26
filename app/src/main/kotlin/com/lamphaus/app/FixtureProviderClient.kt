@@ -95,7 +95,7 @@ class FixtureProviderClient(
             MediaDetail(
                 preview = media,
                 runtimeMinutes = if (media.rawType == "movie") 104 else null,
-                episodes = if (media.rawType == "series") PreviewMedia.episodes else emptyList(),
+                episodes = if (media.rawType == "series") fixtureEpisodes() else emptyList(),
             ),
         )
     }
@@ -165,6 +165,11 @@ class FixtureProviderClient(
         private val STRESS_CATALOG_IDS = listOf("featured", "trending", "fresh")
 
         internal const val STRESS_ID_PREFIX = "fixture:stress:"
+
+        /** Fixture episodes carry local artwork so episode cards render like real ones. */
+        internal fun fixtureEpisodes() = PreviewMedia.episodes.map { episode ->
+            episode.copy(thumbnailUrl = "android.resource://${BuildConfig.APPLICATION_ID}/${R.drawable.poster_glass}")
+        }
 
         fun stressProviderId(index: Int): String = "$PROVIDER_ID-$index"
 

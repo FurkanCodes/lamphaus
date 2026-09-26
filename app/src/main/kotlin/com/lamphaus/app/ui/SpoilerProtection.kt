@@ -47,6 +47,8 @@ internal fun SpoilerBlurLayer(
     veilColor: Color,
     semanticLabel: String,
     modifier: Modifier = Modifier,
+    /** Veil strength over the blurred artwork on Android 12+; below 12 the veil is opaque. */
+    veilOpacity: Float = 0.72f,
     veilContent: @Composable BoxScope.() -> Unit,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -75,7 +77,7 @@ internal fun SpoilerBlurLayer(
                     .fillMaxSize()
                     .alpha(veilAlpha)
                     .background(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) veilColor.copy(alpha = veilColor.alpha * 0.72f)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) veilColor.copy(alpha = veilColor.alpha * veilOpacity)
                         else veilColor,
                     )
                     .semantics { contentDescription = semanticLabel },

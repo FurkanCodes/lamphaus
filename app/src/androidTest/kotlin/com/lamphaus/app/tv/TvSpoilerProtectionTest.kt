@@ -43,16 +43,24 @@ class TvSpoilerProtectionTest {
                         contentColor = MaterialTheme.colorScheme.onBackground,
                     ),
                 ) {
-                    TvEpisodeCard(
-                        media = media,
-                        episode = episode,
-                        watched = false,
-                        progress = null,
-                        spoilerProtection = SpoilerProtectionSettings(),
-                        fallbackArtworkUrl = null,
-                        onClick = { playCount++ },
-                        modifier = Modifier.focusRequester(requester).testTag("episode"),
-                    )
+                    androidx.compose.foundation.layout.Column {
+                        TvEpisodeCard(
+                            media = media,
+                            episode = episode,
+                            watched = false,
+                            progress = null,
+                            spoilerProtection = SpoilerProtectionSettings(),
+                            onClick = { playCount++ },
+                            modifier = Modifier.focusRequester(requester).testTag("episode"),
+                        )
+                        // The synopsis now lives below the row, not on the card.
+                        TvEpisodeDetailLine(
+                            episode = episode,
+                            watched = false,
+                            progress = null,
+                            synopsisHidden = true,
+                        )
+                    }
                 }
             }
         }
@@ -69,6 +77,23 @@ class TvSpoilerProtectionTest {
         }
         compose.waitForIdle()
         assertEquals(1, playCount)
+    }
+
+    @Test
+    fun unprotectedEpisodeShowsItsSynopsisBelowTheRow() {
+        compose.setContent {
+            LamphausTvTheme {
+                TvEpisodeDetailLine(
+                    episode = episode,
+                    watched = false,
+                    progress = null,
+                    synopsisHidden = false,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Secret overview").assertIsDisplayed()
+        compose.onAllNodesWithText("Synopsis hidden").assertCountEquals(0)
     }
 
     private companion object {

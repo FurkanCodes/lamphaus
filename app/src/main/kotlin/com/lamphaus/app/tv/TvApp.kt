@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 
 import androidx.compose.foundation.lazy.LazyRow
@@ -157,6 +158,8 @@ import com.lamphaus.app.ui.sourceItemKeys
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.shouldBlur
+import com.lamphaus.app.ui.nextUpEpisode
+import com.lamphaus.app.ui.NextUpKind
 import com.lamphaus.app.ui.continueWatchingItemsFromSections
 import com.lamphaus.app.ui.firstDistinctMedia
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
@@ -2548,9 +2551,16 @@ private fun TvDetailScreen(
         .sorted()
         .toList()
     val showSeasonChips = detail.preview.type == MediaType.SERIES && seasonNumbers.size > 1
-    var selectedSeason by remember(detail.preview.stableKey, seasonNumbers) {
-        mutableStateOf(seasonNumbers.firstOrNull())
+    // Open on the episode to play next: its season, scrolled to it, and the
+    // Play action resumes or starts it (SHR-PROD-02).
+    val nextUp = remember(detail.episodes, progress, watchedEpisodeIds) {
+        nextUpEpisode(detail.episodes, progress, watchedEpisodeIds)
     }
+    val nextUpSeason = nextUp?.episode?.season?.takeIf { it in seasonNumbers }
+    var selectedSeason by remember(detail.preview.stableKey, seasonNumbers) {
+        mutableStateOf(nextUpSeason ?: seasonNumbers.firstOrNull())
+    }
+    var focusedEpisode by remember(detail.preview.stableKey) { mutableStateOf<Episode?>(null) }
     val visibleEpisodes = if (showSeasonChips && selectedSeason != null) {
         detail.episodes.filter { it.season == selectedSeason }
     } else {
@@ -2558,7 +2568,7 @@ private fun TvDetailScreen(
     }
     LaunchedEffect(detail.preview.stableKey, seasonNumbers) {
         if (selectedSeason == null || selectedSeason !in seasonNumbers) {
-            selectedSeason = seasonNumbers.firstOrNull()
+            selectedSeason = nextUpSeason ?: seasonNumbers.firstOrNull()
         }
     }
     Box(Modifier.fillMaxSize()) {
@@ -2616,13 +2626,25 @@ private fun TvDetailScreen(
                         modifier = Modifier.padding(top = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        val nextUpLabel = nextUp?.episode?.numberParts()?.let { number ->
+                            if (number.season != null && number.episode != null) {
+                                stringResource(R.string.episode_format, number.season, number.episode)
+                            } else {
+                                null
+                            }
+                        }
                         TvAction(
-                            label = stringResource(R.string.play),
+                            label = when {
+                                nextUp == null || nextUpLabel == null -> stringResource(R.string.play)
+                                nextUp.kind == NextUpKind.RESUME -> stringResource(R.string.resume_episode_format, nextUpLabel)
+                                else -> stringResource(R.string.play_episode_format, nextUpLabel)
+                            },
                             icon = Icons.Outlined.PlayArrow,
                             modifier = Modifier
                                 .focusRequester(playFocus)
                                 .onFocusChanged { if (it.isFocused) lastActionFocus = playFocus },
-                            onClick = { onPlay(null) },
+                            // A series plays its next episode, never the series id.
+                            onClick = { onPlay(nextUp?.episode) },
                         )
                         TvAction(
                             label = stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library),
@@ -2673,7 +2695,12 @@ private fun TvDetailScreen(
                     }
                 }
                 item("episodes") {
+                    val nextUpIndex = visibleEpisodes.indexOfFirst { it.id == nextUp?.episode?.id }
+                    val episodeRowState = remember(selectedSeason) {
+                        LazyListState(firstVisibleItemIndex = nextUpIndex.coerceAtLeast(0))
+                    }
                     LazyRow(
+                        state = episodeRowState,
                         contentPadding = PaddingValues(
                             start = TvLayoutTokens.screenHorizontalPadding,
                             end = TvLayoutTokens.screenHorizontalPadding,
@@ -2687,10 +2714,28 @@ private fun TvDetailScreen(
                                 watched = episode.id in watchedEpisodeIds,
                                 progress = progress.firstOrNull { it.videoId == episode.id },
                                 spoilerProtection = spoilerProtection,
-                                fallbackArtworkUrl = detail.preview.backgroundUrl ?: detail.preview.posterUrl,
+                                nextUpKind = nextUp?.kind?.takeIf { episode.id == nextUp.episode.id },
+                                onFocused = { focusedEpisode = episode },
                                 onClick = { onPlay(episode) },
                             )
                         }
+                    }
+                }
+                (focusedEpisode ?: nextUp?.episode)?.let { shown ->
+                    item("episode-detail") {
+                        val shownWatched = shown.id in watchedEpisodeIds
+                        TvEpisodeDetailLine(
+                            episode = shown,
+                            watched = shownWatched,
+                            progress = progress.firstOrNull { it.videoId == shown.id },
+                            synopsisHidden = shown.id != nextUp?.episode?.id &&
+                                spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, shownWatched),
+                            modifier = Modifier.padding(
+                                start = TvLayoutTokens.screenHorizontalPadding,
+                                end = TvLayoutTokens.screenHorizontalPadding,
+                                top = 20.dp,
+                            ),
+                        )
                     }
                 }
             }
@@ -3031,188 +3076,6 @@ private fun TvArtworkProviderMessages(results: List<ArtworkProviderResult>) {
 }
 
 
-@Composable
-internal fun TvEpisodeCard(
-    media: MediaPreview,
-    episode: Episode,
-    watched: Boolean,
-    progress: WatchProgress?,
-    spoilerProtection: SpoilerProtectionSettings,
-    fallbackArtworkUrl: String?,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val scope = rememberCoroutineScope()
-    val cardFocus = remember { FocusRequester() }
-    val menuRequest = LocalTvContentMenuEnvironment.current.onRequest
-    val currentMenuRequest by rememberUpdatedState(menuRequest)
-    val menuTarget = remember(media, episode, progress) {
-        ContentMenuTarget(
-            media = media,
-            progress = progress,
-            episode = episode,
-            origin = ContentMenuOrigin.EPISODE,
-        )
-    }
-    val holdTracker = remember(scope, cardFocus, menuTarget) {
-        SelectHoldTracker(scope) { currentMenuRequest?.invoke(menuTarget, cardFocus) }
-    }.takeIf { menuRequest != null }
-    val artworkUrl = episode.thumbnailUrl ?: fallbackArtworkUrl
-    val number = episode.numberParts()
-    val artworkHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched)
-    val synopsisHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched)
-    val hiddenAny = artworkHidden || synopsisHidden
-    val watchedDescription = if (watched) stringResource(R.string.watched) else ""
-    TvFocusableSurface(
-        onClick = onClick,
-        modifier = Modifier
-            .then(modifier)
-            .tvSelectHoldMenu(holdTracker)
-            .focusRequester(cardFocus)
-            .width(TvLayoutTokens.landscapeCardWidth)
-            .height(TvLayoutTokens.landscapeCardHeight)
-            .semantics {
-                stateDescription = watchedDescription
-            },
-        containerColor = TvSurfaceTokens.elevated,
-        focusedContainerColor = Color.Transparent,
-    ) { focused ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(TvSurfaceTokens.elevated),
-        ) {
-            if (!artworkUrl.isNullOrBlank() || artworkHidden) {
-                SpoilerBlurLayer(
-                    hidden = artworkHidden,
-                    veilColor = TvSurfaceTokens.elevated,
-                    semanticLabel = stringResource(R.string.spoiler_hidden),
-                    modifier = Modifier.fillMaxSize(),
-                    veilContent = { TvSpoilerBadge() },
-                    content = {
-                        if (!artworkUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = artworkUrl,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                            )
-                        }
-                    },
-                )
-            }
-            SelectionCheckmark(
-                selected = watched,
-                selectedContainerColor = if (focused) {
-                    TvFocusTokens.focusedContainer
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                selectedContentColor = if (focused) {
-                    TvFocusTokens.focusedContent
-                } else {
-                    MaterialTheme.colorScheme.onPrimary
-                },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(10.dp),
-            )
-            val footerColor = if (focused) TvFocusTokens.focusedContainer else TvSurfaceTokens.elevated
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                footerColor.copy(alpha = if (focused) 0.52f else 0.90f),
-                                footerColor.copy(alpha = if (focused) 0.68f else 1f),
-                            ),
-                        ),
-                    )
-                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                if (number.isPresent) {
-                    when {
-                        number.season != null && number.episode != null ->
-                            Text(
-                                stringResource(R.string.episode_format, number.season, number.episode),
-                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        number.season != null ->
-                            Text(
-                                stringResource(R.string.season_format, number.season),
-                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        number.episode != null ->
-                            Text(
-                                stringResource(R.string.episode_number_format, number.episode),
-                                color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                    }
-                }
-                Text(
-                    episode.title,
-                    color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (hiddenAny) {
-                    AnimatedVisibility(visible = focused) {
-                        Text(
-                            text = stringResource(
-                                if (synopsisHidden) R.string.synopsis_hidden else R.string.spoiler_hidden,
-                            ),
-                            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                        )
-                    }
-                } else {
-                    episode.overview
-                        ?.takeIf(String::isNotBlank)
-                        ?.let { overview ->
-                            AnimatedVisibility(visible = focused) {
-                                Text(
-                                    text = overview,
-                                    color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvSpoilerBadge() {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        TvIcon(
-            icon = Icons.Outlined.Visibility,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(R.string.spoiler_hidden),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium,
-        )
-    }
-}
 
 private enum class TvSettingsSection(
     @StringRes val labelRes: Int,
@@ -3959,15 +3822,18 @@ private fun TvSettingsToggleRow(
             .heightIn(min = 72.dp)
             .semantics { toggleableState = ToggleableState(checked) },
     ) { focused ->
+        // A setting that depends on a switched-off parent reads as disabled
+        // (dimmed text and switch), not just unfocusable.
+        val dim = if (enabled) 1f else 0.38f
         val primaryColor = if (focused) {
             TvFocusTokens.focusedContent
         } else {
-            MaterialTheme.colorScheme.onBackground
+            MaterialTheme.colorScheme.onBackground.copy(alpha = dim)
         }
         val secondaryColor = if (focused) {
             TvFocusTokens.focusedContent.copy(alpha = 0.76f)
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = dim)
         }
         Row(
             modifier = Modifier
@@ -3989,6 +3855,7 @@ private fun TvSettingsToggleRow(
             Switch(
                 checked = checked,
                 onCheckedChange = null,
+                enabled = enabled,
                 modifier = Modifier.clearAndSetSemantics {},
             )
         }

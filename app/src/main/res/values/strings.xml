@@ -258,6 +258,12 @@
     <string name="profile">Profile</string>
     <string name="resume">Resume</string>
     <string name="resume_episode_format">Resume %1$s</string>
+    <string name="play_episode_format">Play %1$s</string>
+    <string name="up_next">Up next</string>
+    <plurals name="episode_minutes_left">
+        <item quantity="one">%d min left</item>
+        <item quantity="other">%d min left</item>
+    </plurals>
 
     <!-- Detail enrichment (TV-CNT-01 section order; SHR-PROD-07 localized copy) -->
     <string name="similar_title">More like this</string>

@@ -1028,7 +1028,7 @@ class AppViewModel(
             if (media.id.startsWith("fixture:")) {
                 mutableState.update {
                     it.copy(
-                        selectedDetail = MediaDetail(media, runtimeMinutes = 52, episodes = if (media.type.name == "SERIES") PreviewMedia.episodes else emptyList()),
+                        selectedDetail = MediaDetail(media, runtimeMinutes = 52, episodes = if (media.type.name == "SERIES") FixtureProviderClient.fixtureEpisodes() else emptyList()),
                         refreshing = false,
                     )
                 }
