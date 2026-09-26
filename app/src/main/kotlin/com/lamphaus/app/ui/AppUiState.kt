@@ -178,6 +178,13 @@ data class HomeCatalogBatchState(
     val pendingRowCount: Int = 0,
 )
 
+/**
+ * The viewer's explicit choice wins; otherwise background artwork is on,
+ * except on devices Android classifies as low-memory, where it starts off.
+ */
+internal fun effectiveBackgroundArtwork(choice: Boolean?, lowRamDevice: Boolean): Boolean =
+    choice ?: !lowRamDevice
+
 /** Minimum watch time before an entry qualifies for Continue Watching. */
 internal const val CONTINUE_WATCHING_MIN_POSITION_MILLIS = 30_000L
 
@@ -292,6 +299,8 @@ data class AppUiState(
     val dynamicColor: Boolean = true,
     val kenBurnsEnabled: Boolean = true,
     val localOnlyArtworkKeys: Boolean = false,
+    /** Effective TV background artwork choice (see [effectiveBackgroundArtwork]). */
+    val backgroundArtworkEnabled: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playbackSettings: PlaybackSettings = PlaybackSettings(),
@@ -326,6 +335,7 @@ data class AppUiState(
         dynamicColor = dynamicColor,
         kenBurnsEnabled = kenBurnsEnabled,
         localOnlyArtworkKeys = localOnlyArtworkKeys,
+        backgroundArtworkEnabled = backgroundArtworkEnabled,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,

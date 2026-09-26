@@ -91,6 +91,11 @@ class AppContainer(context: Context) {
         )?.takeIf { it.length >= 8 }
 
     val preferences = UserPreferences(context)
+
+    /** Android's own low-memory classification, used for lighter TV defaults. */
+    val isLowRamDevice: Boolean =
+        (applicationContext.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
+            ?.isLowRamDevice == true
     val skipRepository = IntroDbSkipRepository()
 
     /**

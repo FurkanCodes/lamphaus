@@ -35,6 +35,12 @@ data class UserSettings(
     val dynamicColor: Boolean = true,
     val kenBurnsEnabled: Boolean = true,
     val localOnlyArtworkKeys: Boolean = false,
+    /**
+     * Device-local TV choice for the dimmed artwork behind browsing screens.
+     * Null means automatic (off on low-memory devices); not synced, because
+     * the right answer depends on each TV.
+     */
+    val backgroundArtwork: Boolean? = null,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playback: PlaybackSettings = PlaybackSettings(),
@@ -68,6 +74,7 @@ class UserPreferences(private val context: Context) {
             dynamicColor = values[DYNAMIC_COLOR] ?: true,
             kenBurnsEnabled = values[KEN_BURNS_ENABLED] ?: true,
             localOnlyArtworkKeys = values[LOCAL_ONLY_ARTWORK_KEYS] ?: false,
+            backgroundArtwork = values[BACKGROUND_ARTWORK],
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -139,6 +146,13 @@ class UserPreferences(private val context: Context) {
     suspend fun setLocalOnlyArtworkKeys(enabled: Boolean) {
         context.dataStore.edit {
             it[LOCAL_ONLY_ARTWORK_KEYS] = enabled
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setBackgroundArtwork(enabled: Boolean) {
+        context.dataStore.edit {
+            it[BACKGROUND_ARTWORK] = enabled
         }
     }
 
@@ -230,6 +244,7 @@ class UserPreferences(private val context: Context) {
         val KEN_BURNS_ENABLED = booleanPreferencesKey("ken_burns_enabled")
         val CRASH_REPORTS = booleanPreferencesKey("crash_reports")
         val LOCAL_ONLY_ARTWORK_KEYS = booleanPreferencesKey("local_only_artwork_keys")
+        val BACKGROUND_ARTWORK = booleanPreferencesKey("background_artwork")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")
         val SPOILER_BLUR_EPISODE_ARTWORK = booleanPreferencesKey("spoiler_blur_episode_artwork")

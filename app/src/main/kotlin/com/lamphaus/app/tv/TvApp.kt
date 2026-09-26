@@ -811,13 +811,16 @@ private fun TvSignedIn(
     // Focus moves update lastFocusedMedia on every D-pad press. It is read
     // only by the ambient's snapshot flow, never here in composition, so
     // moving focus does not recompose this whole screen (QA-08).
+    // With background artwork off, nothing is loaded or drawn behind the
+    // browsing screens, and focus uses the standard accent (QA-08).
+    val backgroundArtwork = state.backgroundArtworkEnabled
     val ambient = rememberTvContentAmbient {
         when (destination) {
             TvDestination.HOME,
             TvDestination.DISCOVER,
             TvDestination.LIBRARY,
             TvDestination.SEARCH,
-            -> lastFocusedMedia
+            -> lastFocusedMedia.takeIf { backgroundArtwork }
             TvDestination.SETTINGS -> null
         }
     }
@@ -890,7 +893,7 @@ private fun TvSignedIn(
     }
     CompositionLocalProvider(LocalTvContentAccent provides ambient) {
         Box(Modifier.fillMaxSize()) {
-            if (destination != TvDestination.SETTINGS) {
+            if (backgroundArtwork && destination != TvDestination.SETTINGS) {
                 TvContentAmbientBackground(ambient = ambient)
             }
             TvTopNavigation(
@@ -3556,6 +3559,14 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 description = stringResource(R.string.ken_burns_effect_description),
                 checked = state.kenBurnsEnabled,
                 onCheckedChange = viewModel::setKenBurnsEnabled,
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.background_artwork),
+                description = stringResource(R.string.background_artwork_description),
+                checked = state.backgroundArtworkEnabled,
+                onCheckedChange = viewModel::setBackgroundArtworkEnabled,
             )
         }
     }

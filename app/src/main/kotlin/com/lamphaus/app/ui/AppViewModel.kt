@@ -183,6 +183,7 @@ class AppViewModel(
                     dynamicColor = settings.dynamicColor,
                     kenBurnsEnabled = settings.kenBurnsEnabled,
                     localOnlyArtworkKeys = settings.localOnlyArtworkKeys,
+                    backgroundArtwork = settings.backgroundArtwork,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
                     playbackSettings = settings.playback,
@@ -236,6 +237,10 @@ class AppViewModel(
                         dynamicColor = snapshot.dynamicColor,
                         kenBurnsEnabled = snapshot.kenBurnsEnabled,
                         localOnlyArtworkKeys = snapshot.localOnlyArtworkKeys,
+                        backgroundArtworkEnabled = effectiveBackgroundArtwork(
+                            snapshot.backgroundArtwork,
+                            container.isLowRamDevice,
+                        ),
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
                         playbackSettings = snapshot.playbackSettings,
@@ -1863,6 +1868,10 @@ class AppViewModel(
         pushSyncedSettings()
     }
 
+    fun setBackgroundArtworkEnabled(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setBackgroundArtwork(enabled)
+    }
+
     fun setKenBurnsEnabled(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setKenBurnsEnabled(enabled)
         pushSyncedSettings()
@@ -2684,6 +2693,7 @@ class AppViewModel(
         val dynamicColor: Boolean,
         val kenBurnsEnabled: Boolean,
         val localOnlyArtworkKeys: Boolean,
+        val backgroundArtwork: Boolean?,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
         val playbackSettings: PlaybackSettings,

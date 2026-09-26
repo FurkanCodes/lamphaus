@@ -54,6 +54,8 @@
     <string name="appearance">Appearance</string>
     <string name="ken_burns_effect">Animate TV hero artwork</string>
     <string name="ken_burns_effect_description">Slowly pan and zoom featured artwork on your TVs.</string>
+    <string name="background_artwork">Background artwork</string>
+    <string name="background_artwork_description">Shows the selected title\'s artwork dimly behind browsing screens on this TV. Turn off for a plainer, lighter look.</string>
     <string name="spoiler_protection">Spoiler protection</string>
     <string name="playback">Playback</string>
     <string name="player_subtitle_languages">Language</string>
