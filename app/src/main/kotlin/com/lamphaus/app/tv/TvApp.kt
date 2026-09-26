@@ -2567,34 +2567,7 @@ private fun TvDetailScreen(
         }
     }
     Box(Modifier.fillMaxSize()) {
-        MediaArtwork(
-            media = detail.preview,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            preferBackdrop = true,
-        )
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0f to MaterialTheme.colorScheme.background.copy(alpha = 0.98f),
-                            0.50f to MaterialTheme.colorScheme.background.copy(alpha = 0.82f),
-                            0.78f to MaterialTheme.colorScheme.background.copy(alpha = 0.20f),
-                        ),
-                    ),
-                )
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to Color.Transparent,
-                            0.72f to Color.Transparent,
-                            1f to MaterialTheme.colorScheme.background,
-                        ),
-                    ),
-                ),
-        )
+        TvDetailBackdrop(media = detail.preview, modifier = Modifier.fillMaxSize())
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
@@ -3267,13 +3240,48 @@ private fun TvSettings(
     updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
 ) {
     var section by rememberSaveable { mutableStateOf(TvSettingsSection.PROFILES) }
+    // QA-08: building a pane costs 100-175 ms on low-end TV CPUs, so the pane
+    // follows menu focus once it settles instead of on every move. Selecting
+    // or moving right into the pane switches at once.
+    var shownSection by rememberSaveable { mutableStateOf(section) }
+    var moveIntoPane by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(section) {
+        if (shownSection != section) {
+            delay(TvMotionTokens.settingsPaneSettleMillis)
+            shownSection = section
+        }
+    }
+    LaunchedEffect(moveIntoPane) {
+        if (moveIntoPane) {
+            // Let the newly shown pane compose before focus searches it.
+            withFrameNanos { }
+            withFrameNanos { }
+            focusManager.moveFocus(FocusDirection.Right)
+            moveIntoPane = false
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
     ) {
         Column(
-            modifier = Modifier.width(TvLayoutTokens.settingsMenuWidth),
+            modifier = Modifier
+                .width(TvLayoutTokens.settingsMenuWidth)
+                .onPreviewKeyEvent { event ->
+                    if (
+                        event.type == KeyEventType.KeyDown &&
+                        event.key == Key.DirectionRight &&
+                        shownSection != section
+                    ) {
+                        shownSection = section
+                        moveIntoPane = true
+                        true
+                    } else {
+                        false
+                    }
+                },
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             TvSettingsSection.entries.forEach { item ->
@@ -3296,13 +3304,16 @@ private fun TvSettings(
                             },
                         ),
                     onFocused = { section = item },
-                    onClick = { section = item },
+                    onClick = {
+                        section = item
+                        shownSection = item
+                    },
                 )
             }
         }
         Spacer(Modifier.width(72.dp))
         Box(Modifier.width(TvLayoutTokens.settingsContentWidth).fillMaxHeight()) {
-            when (section) {
+            when (shownSection) {
                 TvSettingsSection.PROFILES -> TvProfilesSettings(state, viewModel)
                 TvSettingsSection.SOURCES -> TvSourcesSettings(state, viewModel)
                 TvSettingsSection.INTEGRATIONS -> TvIntegrationsSettings(state, viewModel)

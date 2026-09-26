@@ -2,10 +2,6 @@ package com.lamphaus.app.tv
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.Shader
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -28,7 +24,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
@@ -43,7 +38,6 @@ import com.lamphaus.app.ui.ArtworkResolution
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.app.ui.fixtureArtworkResource
-import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -51,7 +45,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
 
 // QA-08: the ambient image is drawn at TvAmbientTokens.imageAlpha under
 // near-opaque scrims, so a quarter-resolution decode is visually identical to
@@ -74,7 +67,7 @@ internal data class TvContentAmbientState(
     val accentContainer: Color? = null,
 )
 
-private data class AmbientArtworkSource(
+internal data class AmbientArtworkSource(
     val key: String,
     val data: Any,
 )
@@ -203,44 +196,21 @@ private fun verticalScrimStops(background: Color) = arrayOf(
     1f to background.copy(alpha = TvAmbientTokens.verticalScrimBottomAlpha),
 )
 
-/**
- * Draws exactly what the ambient layers used to draw every frame (background,
- * artwork centre-cropped at [TvAmbientTokens.imageAlpha], then the horizontal
- * and vertical scrims) into one opaque bitmap. Runs off the main thread.
- */
-internal fun composeAmbient(artwork: Bitmap?, background: Color, accentContainer: Color): ImageBitmap {
-    val width = DISPLAY_WIDTH
-    val height = DISPLAY_HEIGHT
-    val out = createBitmap(width, height)
-    val canvas = android.graphics.Canvas(out)
-    canvas.drawColor(background.toArgb())
-    if (artwork != null && artwork.width > 0 && artwork.height > 0) {
-        val scale = maxOf(width / artwork.width.toFloat(), height / artwork.height.toFloat())
-        val drawnWidth = artwork.width * scale
-        val drawnHeight = artwork.height * scale
-        val left = (width - drawnWidth) / 2f
-        val top = (height - drawnHeight) / 2f
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply {
-            alpha = (TvAmbientTokens.imageAlpha * 255).roundToInt()
-        }
-        canvas.drawBitmap(artwork, null, RectF(left, top, left + drawnWidth, top + drawnHeight), paint)
-    }
-    fun gradient(stops: Array<Pair<Float, Color>>, x1: Float, y1: Float) = Paint().apply {
-        shader = LinearGradient(
-            0f, 0f, x1, y1,
-            IntArray(stops.size) { stops[it].second.toArgb() },
-            FloatArray(stops.size) { stops[it].first },
-            Shader.TileMode.CLAMP,
-        )
-    }
-    canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gradient(horizontalScrimStops(background, accentContainer), width.toFloat(), 0f))
-    canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), gradient(verticalScrimStops(background), 0f, height.toFloat()))
-    // Fully opaque: lets the GPU skip blending when it is drawn.
-    out.setHasAlpha(false)
-    return out.asImageBitmap()
-}
+/** The ambient stack (TvAmbientTokens) baked by [bakeArtwork] at 960x540. */
+internal fun composeAmbient(artwork: Bitmap?, background: Color, accentContainer: Color): ImageBitmap =
+    bakeArtwork(
+        artwork = artwork,
+        width = DISPLAY_WIDTH,
+        height = DISPLAY_HEIGHT,
+        background = background,
+        imageAlpha = TvAmbientTokens.imageAlpha,
+        scrims = listOf(
+            ScrimLayer(horizontalScrimStops(background, accentContainer), horizontal = true),
+            ScrimLayer(verticalScrimStops(background), horizontal = false),
+        ),
+    ).asImageBitmap()
 
-private fun selectArtworkSource(context: Context, resolution: ArtworkResolution): AmbientArtworkSource? {
+internal fun selectArtworkSource(context: Context, resolution: ArtworkResolution): AmbientArtworkSource? {
     val media = resolution.media
     media.backgroundUrl
         ?.takeIf(String::isNotBlank)

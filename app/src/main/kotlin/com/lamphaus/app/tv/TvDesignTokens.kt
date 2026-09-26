@@ -65,6 +65,11 @@ internal object TvMotionTokens {
     const val heroTransitionDurationMillis = 220
     const val heroUpdateDelayMillis = 240L
     const val confirmationPulseDurationMillis = 110
+    /**
+     * QA-08: the Settings content pane follows menu focus only after it rests
+     * this long, so passing through sections does not build every pane.
+     */
+    const val settingsPaneSettleMillis = 160L
     const val startupSweepDurationMillis = 480
     const val focusedArtworkScale = 1.02f
 }

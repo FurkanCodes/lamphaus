@@ -39,9 +39,17 @@ hardware.
 | PERF-15 TV ambient pre-composed (`TV-CLR-01`, `TV-MOT-01`, `QA-08`) | SEI Robotics Box R 4K Plus (Amlogic sc2, Mali-G31, Android 14, 32-bit, UI 1920×1080 @ 59.94 Hz), `benchmarkRelease`, `dumpsys gfxinfo` + `framestats`, 3 cold runs; default fixture, row browse settling on each card | beta.13 `8fff389` → `feature/tv-smoother-scrolling` | janky %, frame median, GPU median | 58–72% janky; frame 88–92 ms; GPU 45–48 ms (whole screen ≥4× overdraw) | 8.1–8.8% janky; frame 20 ms; GPU 10–12 ms (background 1× overdraw) | ~4.4× faster frames | window background dropped after first frame, redundant ambient `Box` background removed, background + dimmed art + both scrims baked off-thread into one opaque 960×540 bitmap (`composeAmbient`) | keep |
 | PERF-15 TV hero scrims baked (`SHR-PROD-01`, `QA-08`) | same TV; stress fixture, brisk vertical D-pad (0.35 s) | same | janky %, frame P50/P90, GPU P90 | 81–82% janky; P50 105–121 ms, P90 150 ms; GPU P90 ~95 ms | 8.1–8.7% janky; P50 22–30 ms, P90 65–69 ms; GPU P90 20–21 ms | P90 frame −55% | three hero gradient passes replaced by one half-resolution baked scrim (`tvHeroScrim`); on-device hero screenshot diff mean 0.5/255, P99 2/255 | keep |
 | PERF-15 diagnostics (not kept) | same TV, vertical journey | same | as above | — | ambient crossfade snapped, focus halo shadow removed, fixture art via Coil: no measurable change | none | real-TV A/B; fixture art via Coil kept anyway (removes a 22 ms UI-thread PNG decode seen in the emulator trace) | halo and crossfade unchanged |
+| PERF-16 full-screen sweep: details backdrop baked (`SHR-PROD-01`, `QA-08`) | same TV, default fixture, 3 cold runs, `dumpsys gfxinfo`; series details open, episodes, actions, back | beta.13 → `feature/tv-smoother-scrolling` | janky %, frame median, GPU median | 69.8% janky; frame 98 ms; GPU 50 ms | 10.4% janky; frame 25 ms; GPU 12 ms | ~3.9× faster frames | artwork plus two scrims baked off-thread into one opaque 1920×1080 bitmap (`TvDetailBackdrop`, shared `bakeArtwork`); missing-art mark baked in the same place; on-device diffs 0.03/255 (no art) and 0.8/255 (art) | keep |
+| PERF-16 Settings pane settles (`TV-NAV-05`, `QA-08`) | same TV, default fixture, 3 cold runs, `dumpsys gfxinfo`; burst of 6× down + 6× up in one `input` call | same | frames >100 ms; time spent in them | 9–11 frames; 1.2–1.7 s | 2 frames; 0.21–0.24 s | ~7× less blocked time | the pane follows menu focus after `settingsPaneSettleMillis` (160 ms); Select and Right switch at once (Right then moves focus into the new pane). The trace showed 116 ms of lazy-row composition and `Text` measurement per pane | keep |
+| PERF-16 sweep, no further change needed | same TV, default fixture, 3 cold runs, `dumpsys gfxinfo` | same | janky % | search/browse 74.3%; player chrome 82.3% | search 7.8%; player 8.9% | fixed by PERF-15 | — | — |
 
 ## Tradeoffs recorded
 
+- PERF-16: Discover could not be measured; the default fixture has no
+  Discover content. Settings sections still cost about 150 ms to build once
+  focus rests; row-level work there was judged not worth the churn for a
+  rarely used screen. Direct `perfetto -a <pkg>` tracing works on the SEI
+  Box even though Macrobenchmark's does not.
 - PERF-15: pivot scrolling needed no change. Compose foundation 1.11.3
   already applies `PivotBringIntoViewSpec` on leanback devices. The
   Macrobenchmark frame metric cannot run on the SEI Box (its firmware
