@@ -3578,7 +3578,7 @@ private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
             Text(stringResource(R.string.profiles), style = MaterialTheme.typography.headlineSmall)
         }
         items(state.profiles, key = { it.id }) { profile ->
-            val requester = rowFocus.getOrPut(profile.id) { FocusRequester() }
+            val requester = remember(profile.id) { FocusRequester().also { rowFocus[profile.id] = it } }
             // Switching profiles lives in the navigation avatar; here a row
             // edits that profile's avatar.
             TvSettingsRow(
