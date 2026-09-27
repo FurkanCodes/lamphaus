@@ -61,7 +61,7 @@ class MobilePlaybackNextEpisodeTest {
                 } else {
                     emptyList()
                 },
-                nextEpisodeLoading = false,
+                nextEpisodeProgress = NextEpisodeProgress.Idle,
                 nextEpisodeMessage = null,
                 spoilerProtection = SpoilerProtectionSettings(),
                 nextEpisodeDismissed = false,
@@ -90,17 +90,17 @@ class MobilePlaybackNextEpisodeTest {
         }
 
         // Without ending data and without duration the card stays hidden.
-        compose.onNodeWithText("Up next").assertDoesNotExist()
+        compose.onNodeWithText("Next episode").assertDoesNotExist()
 
         endingDataAvailable = true
         compose.waitForIdle()
-        compose.onNodeWithText("Up next").assertIsDisplayed()
+        compose.onNodeWithText("Next episode").assertIsDisplayed()
 
         Espresso.pressBack()
         compose.waitForIdle()
 
         assertEquals(1, dismissed)
         assertEquals(0, exits)
-        compose.onNodeWithText("Up next").assertDoesNotExist()
+        compose.onNodeWithText("Next episode").assertDoesNotExist()
     }
 }
