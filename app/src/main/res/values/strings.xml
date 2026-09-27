@@ -292,6 +292,7 @@
 
     <string name="integrations_description">Connect the services that power artwork, cast, and ratings. Keys are stored server-side and never shown again.</string>
     <string name="integration_provider_retired">This provider is no longer available. You can remove its saved key.</string>
+    <string name="all_categories">All</string>
 
     <!-- Settings → Integrations -->
     <string name="integrations">Integrations</string>

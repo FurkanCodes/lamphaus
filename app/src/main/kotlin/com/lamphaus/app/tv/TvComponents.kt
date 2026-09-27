@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
@@ -117,6 +118,7 @@ internal enum class TvDestination(
     HOME(R.string.home, Icons.Filled.Home),
     MOVIES(R.string.movies, Icons.Filled.Movie, catalogType = "movie"),
     SERIES(R.string.series, Icons.Filled.Tv, catalogType = "series"),
+    DISCOVER(R.string.discover, Icons.Filled.Explore),
     LIBRARY(R.string.library, Icons.Filled.VideoLibrary),
     SEARCH(R.string.search, Icons.Filled.Search, showLabel = false),
     SETTINGS(R.string.settings, Icons.Filled.Settings, showLabel = false),
@@ -124,7 +126,7 @@ internal enum class TvDestination(
 
     companion object {
         /** TV-NAV-01: the centred tabs; the avatar sits at the start and Settings at the end. */
-        val centerTabs = listOf(SEARCH, HOME, MOVIES, SERIES, LIBRARY)
+        val centerTabs = listOf(SEARCH, HOME, MOVIES, SERIES, DISCOVER, LIBRARY)
     }
 }
 

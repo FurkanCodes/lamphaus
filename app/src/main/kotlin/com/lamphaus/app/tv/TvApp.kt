@@ -166,7 +166,6 @@ import com.lamphaus.app.ui.NextUpKind
 import com.lamphaus.app.ui.continueWatchingItemsFromSections
 import com.lamphaus.app.ui.firstDistinctMedia
 import com.lamphaus.app.ui.homeSectionsOfType
-import com.lamphaus.app.ui.browseGenresOfType
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.app.ui.isRenderableHomeCatalogSection
 import com.lamphaus.app.ui.menuActions
@@ -850,6 +849,7 @@ private fun TvSignedIn(
             TvDestination.HOME,
             TvDestination.MOVIES,
             TvDestination.SERIES,
+            TvDestination.DISCOVER,
             TvDestination.LIBRARY,
             TvDestination.SEARCH,
             -> lastFocusedMedia.takeIf { backgroundArtwork }
@@ -931,14 +931,9 @@ private fun TvSignedIn(
         }
     }
     // Home, Movies and Series share one layout (TV-CNT-01); only the catalog
-    // type and the genre strip differ.
+    // type differs.
     @Composable
-    fun SignedInHome(
-        catalogType: String?,
-        genres: List<String> = emptyList(),
-        returnGenre: String? = null,
-        onGenre: (String) -> Unit = {},
-    ) {
+    fun SignedInHome(catalogType: String?) {
         TvHome(
             state = state,
             onMedia = openMedia,
@@ -957,9 +952,6 @@ private fun TvSignedIn(
             onFocusRestored = { pendingMediaKey = null },
             spotlight = state.tvHomeLayout == TvHomeLayout.SPOTLIGHT,
             catalogType = catalogType,
-            genres = genres,
-            returnGenre = returnGenre,
-            onGenre = onGenre,
         )
     }
 
@@ -1026,24 +1018,22 @@ private fun TvSignedIn(
 
                     TvDestination.MOVIES,
                     TvDestination.SERIES,
-                    -> {
-                        val catalogType = checkNotNull(destination.catalogType)
-                        TvTypedHome(
-                            catalogType = catalogType,
-                            state = state,
-                            onPrepareGenres = viewModel::prepareDiscover,
-                            onBrowseGenre = { viewModel.browseGenre(catalogType, it) },
-                            onLoadMoreGenre = viewModel::loadMoreBrowse,
-                            onRetryGenre = viewModel::retryBrowse,
-                            onMedia = openMedia,
-                            onFocused = { lastFocusedMedia = it },
-                            initialFocusRequester = contentFocus.getValue(destination),
-                            restoreMediaKey = pendingMediaKey,
-                            onFocusRestored = { pendingMediaKey = null },
-                        ) { genres, returnGenre, onGenre ->
-                            SignedInHome(catalogType, genres, returnGenre, onGenre)
-                        }
-                    }
+                    -> SignedInHome(catalogType = destination.catalogType)
+
+                    TvDestination.DISCOVER -> TvDiscover(
+                        state = state,
+                        onPrepare = viewModel::prepareDiscover,
+                        onBrowseCatalog = viewModel::selectBrowseCatalog,
+                        onBrowseGenre = viewModel::selectBrowseGenre,
+                        onClearGenre = viewModel::clearBrowseGenre,
+                        onLoadMore = viewModel::loadMoreBrowse,
+                        onRetry = viewModel::retryBrowse,
+                        onMedia = openMedia,
+                        onFocused = { lastFocusedMedia = it },
+                        initialFocusRequester = contentFocus.getValue(TvDestination.DISCOVER),
+                        restoreMediaKey = pendingMediaKey,
+                        onFocusRestored = { pendingMediaKey = null },
+                    )
 
                     TvDestination.SEARCH -> TvSearch(
                         initialSearch = initialSearch.orEmpty(),
@@ -1115,9 +1105,6 @@ private fun TvHome(
     onFocusRestored: () -> Unit,
     spotlight: Boolean = false,
     catalogType: String? = null,
-    genres: List<String> = emptyList(),
-    returnGenre: String? = null,
-    onGenre: (String) -> Unit = {},
 ) {
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
     var contentHasFocus by remember { mutableStateOf(false) }
@@ -1188,8 +1175,6 @@ private fun TvHome(
     val homeLoading = state.initialContentLoading ||
         state.homeCatalogBatch.loadingMore ||
         sections.any(CatalogSection::initialLoading)
-    // In Spotlight the genre strip is the first row, so it takes the entry focus.
-    val genreStripLeads = spotlight && genres.isNotEmpty()
     SpotlightColumnScrolling(enabled = spotlight) {
         LazyColumn(
             state = listState,
@@ -1204,7 +1189,7 @@ private fun TvHome(
             if (spotlight) {
                 // TV-CNT-03: no hero. While nothing has loaded yet, a placeholder
                 // row keeps a focus target under the navigation (TV-CNT-02).
-                if (heroItems.isEmpty() && continueWatching.isEmpty() && homeLoading && !genreStripLeads) {
+                if (heroItems.isEmpty() && continueWatching.isEmpty() && homeLoading) {
                     item("spotlight-loading") {
                         TvSpotlightLoadingRow(Modifier.focusRequester(initialFocusRequester))
                     }
@@ -1239,16 +1224,6 @@ private fun TvHome(
                     )
                 }
             }
-            if (genres.isNotEmpty()) {
-                item("genres") {
-                    TvGenreStrip(
-                        genres = genres,
-                        returnGenre = returnGenre,
-                        entryFocusRequester = initialFocusRequester.takeIf { genreStripLeads },
-                        onGenre = onGenre,
-                    )
-                }
-            }
             if (continueWatching.isNotEmpty() && spotlight) {
                 item("continue-watching") {
                     TvSpotlightContinueWatchingRow(
@@ -1258,7 +1233,7 @@ private fun TvHome(
                         onFocused = onFocused,
                         restoreMediaKey = restoreMediaKey,
                         onFocusRestored = onFocusRestored,
-                        firstItemFocusRequester = initialFocusRequester.takeUnless { genreStripLeads },
+                        firstItemFocusRequester = initialFocusRequester,
                     )
                 }
             } else if (continueWatching.isNotEmpty()) {
@@ -1311,9 +1286,7 @@ private fun TvHome(
             }
             items(visibleHomeSections, key = CatalogSection::id) { section ->
                 if (spotlight) {
-                    val leadsHome = !genreStripLeads &&
-                        continueWatching.isEmpty() &&
-                        section.id == visibleHomeSections.first().id
+                    val leadsHome = continueWatching.isEmpty() && section.id == visibleHomeSections.first().id
                     TvSpotlightRow(
                         section = section,
                         contentHasFocus = contentHasFocus,
@@ -1489,126 +1462,6 @@ private fun TvContinueWatchingRow(
             }
         }
     }
-}
-
-/**
- * Movies/Series genre chips (the former Discover categories). Select opens that
- * genre's results; returning from them puts focus back on [returnGenre]
- * (TV-NAV-07).
- */
-@Composable
-private fun TvGenreStrip(
-    genres: List<String>,
-    returnGenre: String?,
-    entryFocusRequester: FocusRequester?,
-    onGenre: (String) -> Unit,
-) {
-    val returnIndex = genres.indexOf(returnGenre)
-    val row = rememberTvRowFocus(returnIndex.coerceAtLeast(0))
-    val returnFocus = remember { FocusRequester() }
-    LaunchedEffect(returnGenre) {
-        if (returnIndex >= 0) {
-            withFrameNanos { }
-            runCatching { returnFocus.requestFocus() }
-        }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
-        Text(
-            text = stringResource(R.string.genres),
-            modifier = Modifier
-                .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
-                .semantics { heading() },
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        LazyRow(
-            modifier = Modifier.tvRowFocus(row),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = TvLayoutTokens.screenHorizontalPadding),
-        ) {
-            itemsIndexed(genres, key = { _, genre -> genre }) { index, genre ->
-                TvFilterChip(
-                    label = genre,
-                    selected = false,
-                    onClick = { onGenre(genre) },
-                    modifier = Modifier
-                        .then(
-                            if (index == 0 && entryFocusRequester != null) {
-                                Modifier.focusRequester(entryFocusRequester)
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .then(if (index == returnIndex) Modifier.focusRequester(returnFocus) else Modifier)
-                        .tvRowItem(row, index),
-                )
-            }
-        }
-    }
-}
-
-/**
- * Movies and Series (TV-NAV-01, TV-CNT-01): the Home layout filtered to one
- * catalog type, plus a genre strip whose results open as a layer that Back
- * closes (TV-NAV-02).
- */
-@Composable
-private fun TvTypedHome(
-    catalogType: String,
-    state: AppUiState,
-    onPrepareGenres: () -> Unit,
-    onBrowseGenre: (String) -> Unit,
-    onLoadMoreGenre: () -> Unit,
-    onRetryGenre: () -> Unit,
-    onMedia: (MediaPreview) -> Unit,
-    onFocused: (MediaPreview) -> Unit,
-    initialFocusRequester: FocusRequester,
-    restoreMediaKey: String?,
-    onFocusRestored: () -> Unit,
-    home: @Composable (genres: List<String>, returnGenre: String?, onGenre: (String) -> Unit) -> Unit,
-) {
-    LaunchedEffect(Unit) { onPrepareGenres() }
-    var openGenre by rememberSaveable { mutableStateOf<String?>(null) }
-    var returnGenre by rememberSaveable { mutableStateOf<String?>(null) }
-    val genres = remember(state.browse.targets, catalogType) {
-        browseGenresOfType(state.browse.targets, catalogType)
-    }
-    BackHandler(enabled = openGenre != null) {
-        returnGenre = openGenre
-        openGenre = null
-    }
-    val genre = openGenre
-    if (genre == null) {
-        home(genres, returnGenre) { selected ->
-            onBrowseGenre(selected)
-            openGenre = selected
-        }
-        return
-    }
-    val result = state.browse.result?.takeIf { state.browse.selectedGenre == genre }
-    // Down from the navigation enters the results at their first title.
-    val resultsFocus = initialFocusRequester
-    val hasItems = result?.items?.isNotEmpty() == true
-    // The chip that opened the results has left the screen; hand focus to the
-    // first result as soon as there is one (TV-FOC-01).
-    LaunchedEffect(hasItems) {
-        if (hasItems) {
-            withFrameNanos { }
-            runCatching { resultsFocus.requestFocus() }
-        }
-    }
-    TvCategoryResults(
-        genreLabel = genre,
-        result = result,
-        loading = state.browse.loading || result == null,
-        onMedia = onMedia,
-        onFocused = onFocused,
-        initialFocusRequester = resultsFocus,
-        restoreMediaKey = restoreMediaKey,
-        onFocusRestored = onFocusRestored,
-        onLoadMore = onLoadMoreGenre,
-        onRetry = onRetryGenre,
-    )
 }
 
 @Composable
@@ -2056,6 +1909,198 @@ private fun TvMediaGrid(
         }
     }
 }
+
+/** Deterministic muted instrument-blue gradient per category id (SHR-PROD-03). */
+private fun categoryGradient(id: String): Brush {
+    val seed = id.fold(0) { acc, char -> acc * 31 + char.code }
+    val index = Math.floorMod(seed, categoryGradientStarts.size)
+    return Brush.linearGradient(listOf(categoryGradientStarts[index], categoryGradientEnds[index]))
+}
+
+@Composable
+private fun TvDiscover(
+    state: AppUiState,
+    onPrepare: () -> Unit,
+    onBrowseCatalog: (String) -> Unit,
+    onBrowseGenre: (String?) -> Unit,
+    onClearGenre: () -> Unit,
+    onLoadMore: () -> Unit,
+    onRetry: () -> Unit,
+    onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
+    initialFocusRequester: FocusRequester,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
+    LaunchedEffect(Unit) { onPrepare() }
+    val browse = state.browse
+    val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
+    val activeGenre = browse.selectedGenre
+    var showResults by rememberSaveable { mutableStateOf(false) }
+    // Back reverses the latest layer: results → overview → destination (TV-NAV-02).
+    BackHandler(enabled = showResults) {
+        showResults = false
+        if (activeGenre != null) onClearGenre()
+    }
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            text = stringResource(R.string.discover),
+            modifier = Modifier
+                .padding(
+                    start = TvLayoutTokens.screenHorizontalPadding,
+                    end = TvLayoutTokens.screenHorizontalPadding,
+                    bottom = 16.dp,
+                )
+                .semantics { heading() },
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        if (browse.targets.isEmpty()) {
+            Column(
+                modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TvEmptyMark()
+                Text(
+                    stringResource(R.string.install_first_addon),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            return@Column
+        }
+        // Down from the navigation lands on the top-most control, the
+        // selected catalog chip (TV-NAV-05); the grid below may be empty.
+        val selectedIndex = browse.targets.indexOfFirst { it.id == browse.selectedCatalogId }.coerceAtLeast(0)
+        val chipRow = rememberTvRowFocus(selectedIndex)
+        LazyRow(
+            modifier = Modifier.tvRowFocus(chipRow),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(start = TvLayoutTokens.screenHorizontalPadding),
+        ) {
+            itemsIndexed(browse.targets, key = { _, target -> target.id }) { index, target ->
+                TvFilterChip(
+                    label = target.catalog.name,
+                    selected = browse.selectedCatalogId == target.id,
+                    onClick = { onBrowseCatalog(target.id) },
+                    modifier = (if (index == selectedIndex) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                        .tvRowItem(chipRow, index),
+                )
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        if (showResults) {
+            TvCategoryResults(
+                genreLabel = activeGenre ?: stringResource(R.string.all_categories),
+                result = browse.result,
+                loading = browse.loading,
+                onMedia = onMedia,
+                onFocused = onFocused,
+                initialFocusRequester = remember { FocusRequester() },
+                restoreMediaKey = restoreMediaKey,
+                onFocusRestored = onFocusRestored,
+                onLoadMore = onLoadMore,
+                onRetry = onRetry,
+            )
+        } else {
+            val genres = selectedTarget?.genres.orEmpty()
+            if (genres.isEmpty()) {
+                Column(
+                    modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TvEmptyMark()
+                    Text(
+                        stringResource(R.string.nothing_here),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(
+                        start = TvLayoutTokens.screenHorizontalPadding,
+                        end = TvLayoutTokens.screenHorizontalPadding,
+                        bottom = TvLayoutTokens.bottomListPadding,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    item(key = "all") {
+                        TvCategoryTile(
+                            label = stringResource(R.string.all_categories),
+                            gradient = categoryGradient("all"),
+                            onClick = {
+                                onBrowseGenre(null)
+                                showResults = true
+                            },
+                        )
+                    }
+                    items(genres, key = { it }) { genre ->
+                        TvCategoryTile(
+                            label = genre,
+                            gradient = categoryGradient(genre),
+                            onClick = {
+                                onBrowseGenre(genre)
+                                showResults = true
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvCategoryTile(
+    label: String,
+    gradient: Brush,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TvFocusableSurface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(196f / 110f),
+        containerColor = Color.Transparent,
+        focusedContainerColor = Color.Transparent,
+    ) { _ ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(TvShapeTokens.card)
+                .background(gradient)
+                .padding(20.dp),
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private val categoryGradientStarts = listOf(
+    Color(0xFF1E2023),
+    Color(0xFF232733),
+    Color(0xFF20272A),
+    Color(0xFF262331),
+    Color(0xFF1F262E),
+)
+private val categoryGradientEnds = listOf(
+    Color(0xFF354964),
+    Color(0xFF2F3B52),
+    Color(0xFF31424D),
+    Color(0xFF3A3450),
+    Color(0xFF2E3A4A),
+)
 
 /** Five-column poster grid; the header keeps a stable height while results refresh (TV-CNT-02). */
 @Composable

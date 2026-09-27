@@ -45,7 +45,7 @@ class TvNavigationBehaviorTest {
     val compose = createComposeRule()
 
     @Test
-    fun centerTabsLeadWithSearchAndIncludeMoviesAndSeries() {
+    fun centerTabsLeadWithSearchAndIncludeMoviesSeriesAndDiscover() {
         // TV-NAV-01: avatar at the start, these tabs centred, Settings at the end.
         assertEquals(
             listOf(
@@ -53,6 +53,7 @@ class TvNavigationBehaviorTest {
                 TvDestination.HOME,
                 TvDestination.MOVIES,
                 TvDestination.SERIES,
+                TvDestination.DISCOVER,
                 TvDestination.LIBRARY,
             ),
             TvDestination.centerTabs,

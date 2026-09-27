@@ -690,14 +690,6 @@ class AppViewModel(
         ensureBrowseTargets()
     }
 
-    /** TV Movies/Series genre strip: browse [genre] in the first available catalog of [type] offering it. */
-    fun browseGenre(type: String, genre: String) {
-        val target = state.value.browse.targets.firstOrNull {
-            it.unavailableReason == null && it.catalog.type.equals(type, ignoreCase = true) && genre in it.genres
-        } ?: return
-        selectBrowseTarget(target, genre)
-    }
-
     /** Back from category results: drop the genre filter without reloading. */
     fun clearBrowseGenre() {
         mutableState.update { it.copy(browse = it.browse.copy(selectedGenre = null)) }
