@@ -121,6 +121,13 @@ class PlayerActivity : ComponentActivity() {
     private var firstFrameDeferred: CompletableDeferred<Boolean>? = null
     private var displayMatchDeferred: CompletableDeferred<Boolean>? = null
     private var displayModeSwitchInFlight = false
+
+    /**
+     * Set while the next episode replaces the previous one: a late "ended"
+     * from the previous item must not fail the new item's startup or reset the
+     * display, so it is ignored until the new item reports buffering or ready.
+     */
+    private var awaitingNextItem = false
     private var deviceConfigJob: Job? = null
     private var attachedPlayerView: android.view.View? = null
     private var audioRouteFingerprint: String? = null
@@ -297,6 +304,13 @@ class PlayerActivity : ComponentActivity() {
                         }
 
                         override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (awaitingNextItem) {
+                                if (playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_READY) {
+                                    awaitingNextItem = false
+                                } else if (playbackState == Player.STATE_ENDED) {
+                                    return
+                                }
+                            }
                             if (playbackState == Player.STATE_READY) {
                                 playerReadyDeferred?.complete(true)
                             }
@@ -304,14 +318,18 @@ class PlayerActivity : ComponentActivity() {
                                 playerReadyDeferred?.complete(false)
                                 firstFrameDeferred?.complete(false)
                                 displayModeSwitchInFlight = false
-                                displayModeController?.restore()
+                                // During the next-episode hand-off the output stays matched.
+                                if (nextEpisodeProgressState.value == NextEpisodeProgress.Idle) {
+                                    displayModeController?.restore()
+                                }
                                 saveProgress(final = true, naturalEnd = true)
                             }
                         }
 
                         override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                            // The only transition is the next-episode switch; keep the output mode.
                             displayModeSwitchInFlight = false
-                            displayModeController?.restore()
+                            displayModeController?.resetForNextItem()
                         }
 
                         override fun onEvents(player: Player, events: Player.Events) {
@@ -672,8 +690,20 @@ class PlayerActivity : ComponentActivity() {
         nextEpisodeDismissedVideoId.value = null
         matchedDisplayModeState.value = null
         loadSegments(next, playbackSettingsState.value)
-        displayModeController?.restore()
+        // Keep the matched output; the next item is evaluated fresh.
+        displayMatchDeferred?.cancel()
+        displayMatchDeferred = null
+        displayModeSwitchInFlight = false
+        displayModeController?.resetForNextItem()
+        startupJob?.cancel()
+        startupErrorJob?.cancel()
+        playerReadyDeferred = null
+        firstFrameDeferred = null
         controller?.apply {
+            awaitingNextItem = true
+            // Stop first so no ready/ended/error state of the previous item can
+            // be read as the new item's.
+            stop()
             setMediaItem(next.toMediaItem(), next.startPositionMillis)
             prepareAndStartPlayback(this, next)
         }
