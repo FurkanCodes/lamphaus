@@ -53,7 +53,7 @@ class MobileSpoilerProtectionTest {
         compose.setContent {
             LamphausMobileTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    EpisodeRow(
+                    EpisodeCard(
                         episode = SpoilerProtectionTestFixtures.episode,
                         media = SpoilerProtectionTestFixtures.media,
                         watched = false,
@@ -66,12 +66,12 @@ class MobileSpoilerProtectionTest {
             }
         }
 
-        compose.onAllNodesWithText("Secret overview").assertCountEquals(0)
-        compose.onNodeWithText("Synopsis hidden").assertIsDisplayed()
+        // A hidden synopsis leaves no text at all, not even a placeholder.
+        compose.onAllNodesWithText("Secret overview", substring = true).assertCountEquals(0)
         compose.onAllNodesWithText("Reveal spoilers").assertCountEquals(0)
         // Spoiler protection hides artwork and synopsis but must not block
         // the row's play action.
-        compose.onNodeWithText("Secret episode")
+        compose.onNodeWithText("Secret episode", substring = true)
             .assertHasClickAction()
             .performClick()
 

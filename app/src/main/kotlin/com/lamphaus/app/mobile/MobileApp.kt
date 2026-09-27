@@ -573,17 +573,22 @@ private fun MobileSignedInApp(
             val detailProgress = state.progress.lastOrNull {
                 it.mediaKey == state.selectedDetail.preview.stableKey && it.isResumable()
             }
+            val detailInLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey }
             MobileDetailScreen(
                 detail = state.selectedDetail,
-                expanded = widthSizeClass == WindowWidthSizeClass.Expanded,
-                inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
+                enrichment = state.detailEnrichment,
+                inLibrary = detailInLibrary,
                 watchedEpisodeIds = watchedEpisodeIds,
                 spoilerProtection = state.spoilerProtection,
                 onBack = viewModel::clearDetail,
                 resumeProgress = detailProgress,
                 onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
-                onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
+                onLibrary = {
+                    val preview = state.selectedDetail.preview
+                    if (detailInLibrary) viewModel.removeFromLibrary(preview.stableKey) else viewModel.addToLibrary(preview)
+                },
                 onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
+                onOpenMedia = viewModel::loadDetail,
                 progress = state.progress,
                 onOpenMenu = viewModel::openContentMenu,
             )
@@ -983,8 +988,15 @@ private fun SearchScreen(
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = navBarClearancePadding()), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 items(state.searchSections, key = CatalogSection::id) { section ->
+                    // Search rows are titled by what they hold, as on TV:
+                    // every search catalog is named after its feed ("Popular").
+                    val typeTitle = when (section.baseQuery.type.lowercase()) {
+                        "movie" -> stringResource(R.string.movies)
+                        "series" -> stringResource(R.string.series)
+                        else -> section.baseQuery.type.replaceFirstChar(Char::uppercase)
+                    }
                     CatalogRow(
-                        section,
+                        section.copy(title = typeTitle),
                         onMedia,
                         "search:${section.id}",
                         onCatalogLoadMore,
