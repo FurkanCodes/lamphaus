@@ -2312,8 +2312,18 @@ private fun TvSourcePickerScreen(
                     Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     val sourceKeys = remember(picker.visibleSources) { sourceItemKeys(picker.visibleSources) }
+                    // Every filter opens its list at the first source; a fresh state per
+                    // provider stops the keyed list from jumping to the old anchor.
+                    val listState = remember(picker.selectedProviderId) { LazyListState() }
+                    var listFocused by remember { mutableStateOf(false) }
+                    // Slower providers can add sources above the first one; until the
+                    // viewer enters the list, keep it pinned to the top.
+                    LaunchedEffect(sourceKeys.firstOrNull()) {
+                        if (!listFocused) listState.scrollToItem(0)
+                    }
                     LazyColumn(
-                        modifier = Modifier.weight(1f),
+                        state = listState,
+                        modifier = Modifier.weight(1f).onFocusChanged { listFocused = it.hasFocus },
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         itemsIndexed(
