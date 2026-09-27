@@ -1,11 +1,12 @@
 package com.lamphaus.app.tv
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -63,14 +64,18 @@ internal fun TvProfileSwitcher(
     }
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
+        // An opaque full-screen surface: over the translucent default scrim
+        // the page's posters showed through the title and the action, making
+        // them unreadable (TV-FND-01, TV-CLR-01).
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = TvLayoutTokens.screenHorizontalPadding, vertical = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(32.dp),
+            verticalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterVertically),
         ) {
             Text(
                 text = stringResource(R.string.who_is_watching),
@@ -110,7 +115,9 @@ private fun TvProfileSwitcherTile(
         modifier = modifier
             .width(SwitcherTileWidth)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(role = Role.Button, onClick = onClick)
+            // The avatar carries the focus treatment; the default highlight
+            // drew a second grey box behind the tile (TV-FOC-01).
+            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
             .focusable()
             .semantics(mergeDescendants = true) { selected = active },
         horizontalAlignment = Alignment.CenterHorizontally,
