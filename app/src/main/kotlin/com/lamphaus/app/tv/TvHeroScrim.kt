@@ -18,8 +18,12 @@ import kotlin.math.roundToInt
  * theme colours and size, so they are rendered once (at half resolution; they
  * are smooth gradients) and drawn in a single pass. Order and stops match the
  * previous `.background` chain exactly.
+ *
+ * [tint] is the focused artwork's accent. It is read inside the cache block,
+ * so a new accent rebuilds this bitmap once without recomposing the hero.
  */
-internal fun Modifier.tvHeroScrim(background: Color, primary: Color): Modifier = drawWithCache {
+internal fun Modifier.tvHeroScrim(background: Color, tint: () -> Color): Modifier = drawWithCache {
+    val tintColor = tint()
     val width = (size.width / 2f).roundToInt().coerceAtLeast(1)
     val height = (size.height / 2f).roundToInt().coerceAtLeast(1)
     val bitmap = createBitmap(width, height)
@@ -34,7 +38,7 @@ internal fun Modifier.tvHeroScrim(background: Color, primary: Color): Modifier =
             horizontal = true,
         ),
         ScrimLayer(arrayOf(0f to Color.Transparent, 1f to background.copy(alpha = 0.42f)), horizontal = false),
-        ScrimLayer(arrayOf(0f to primary.copy(alpha = 0.10f), 0.42f to Color.Transparent), horizontal = true),
+        ScrimLayer(arrayOf(0f to tintColor.copy(alpha = 0.10f), 0.42f to Color.Transparent), horizontal = true),
     ).forEach { canvas.drawScrim(it, width, height) }
     val scrim = bitmap.asImageBitmap()
     val destination = IntSize(size.width.roundToInt(), size.height.roundToInt())
