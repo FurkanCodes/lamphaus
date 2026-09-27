@@ -93,6 +93,9 @@ class PlayerActivity : ComponentActivity() {
     private val segmentsState = mutableStateOf<List<PlaybackSegment>>(emptyList())
     /** The mode frame-rate matching settled on; announced once per item (Nuvio). */
     private val matchedDisplayModeState = mutableStateOf<DisplayModeCandidate?>(null)
+    private val playerSourcesState = mutableStateOf(PlayerSourcesState())
+    private var playerSourcesJob: Job? = null
+    private var playerSourcesVideoId: String? = null
     private val nextEpisodeProgressState = mutableStateOf<NextEpisodeProgress>(NextEpisodeProgress.Idle)
     private val nextEpisodeMessageState = mutableStateOf<String?>(null)
     private val spoilerProtectionState = mutableStateOf(SpoilerProtectionSettings())
@@ -236,6 +239,9 @@ class PlayerActivity : ComponentActivity() {
                     segments = segmentsState.value,
                     nextEpisodeProgress = nextEpisodeProgressState.value,
                     matchedDisplayMode = matchedDisplayModeState.value,
+                    sources = playerSourcesState.value,
+                    onLoadSources = ::loadPlayerSources,
+                    onSelectSource = ::selectPlayerSource,
                     nextEpisodeMessage = nextEpisodeMessageState.value,
                     spoilerProtection = spoilerProtectionState.value,
                     nextEpisodeDismissed =
@@ -547,13 +553,12 @@ class PlayerActivity : ComponentActivity() {
 
     private class NextCandidate(val stream: StreamCandidate, val url: String, val providerName: String?)
 
-    private suspend fun resolveNextPlayback(current: PlaybackRequest): NextPlayback? {
-        val media = current.preview ?: return null
-        val next = current.nextEpisode ?: return null
+    /** Enabled add-ons in their order, each with its manifest (null when unreachable). */
+    private suspend fun resolvedPlaybackProviders(): List<ResolvedPlaybackProvider> {
         val providers = container.libraryRepository.providers().first()
             .filter(ProviderSubscription::enabled)
             .sortedBy(ProviderSubscription::sortOrder)
-        val resolvedProviders = supervisorScope {
+        return supervisorScope {
             providers.map { subscription ->
                 async {
                     val manifest = container.providerClient.manifest(subscription.manifestUrl)
@@ -564,6 +569,92 @@ class PlayerActivity : ComponentActivity() {
                 }
             }.awaitAll()
         }
+    }
+
+    /**
+     * Sources for the title playing now, published per add-on in add-on order
+     * (embedded episode streams first) so the panel fills in progressively.
+     */
+    private fun loadPlayerSources() {
+        val current = request ?: return
+        val media = current.preview ?: return
+        if (playerSourcesVideoId == current.videoId &&
+            (playerSourcesJob?.isActive == true || playerSourcesState.value.options.isNotEmpty())
+        ) {
+            return
+        }
+        playerSourcesJob?.cancel()
+        playerSourcesVideoId = current.videoId
+        playerSourcesState.value = PlayerSourcesState(loading = true)
+        playerSourcesJob = lifecycleScope.launch {
+            fun playable(streams: List<StreamCandidate>, providerName: String?) = streams.mapNotNull { source ->
+                val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal
+                resolution?.let { PlayerSourceOption(source, it.url, providerName) }
+            }
+            try {
+                val embedded = playable(current.episode?.streams.orEmpty(), null)
+                val providers = resolvedPlaybackProviders().filter { provider ->
+                    val manifest = provider.manifest ?: return@filter false
+                    container.providerAggregator.supports(manifest, "stream", media.rawType, current.videoId)
+                }
+                val perProvider = arrayOfNulls<List<PlayerSourceOption>>(providers.size)
+                var pending = providers.size
+                fun publish() {
+                    val options = (embedded + perProvider.filterNotNull().flatten()).distinctBy(PlayerSourceOption::key)
+                    playerSourcesState.value = PlayerSourcesState(
+                        loading = pending > 0 && options.isEmpty(),
+                        options = options,
+                        pendingProviders = pending,
+                    )
+                }
+                publish()
+                supervisorScope {
+                    providers.forEachIndexed { index, provider ->
+                        launch {
+                            val streams = (container.providerClient.streams(
+                                provider.subscription.manifestUrl,
+                                provider.subscription.id,
+                                media.rawType,
+                                current.videoId,
+                            ) as? ProviderResult.Success)?.value.orEmpty()
+                            perProvider[index] = playable(streams, provider.subscription.displayName)
+                            pending--
+                            publish()
+                        }
+                    }
+                }
+                playerSourcesState.value = playerSourcesState.value.copy(loading = false, pendingProviders = 0)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                playerSourcesState.value = playerSourcesState.value.copy(loading = false, pendingProviders = 0, failed = true)
+            }
+        }
+    }
+
+    /** Continues the same title on another source, at the current position, in this session. */
+    private fun selectPlayerSource(option: PlayerSourceOption) {
+        val current = request ?: return
+        val position = controller?.currentPosition?.coerceAtLeast(0L) ?: current.startPositionMillis
+        val source = option.stream
+        val next = current.copy(
+            source = PlaybackSource(
+                uri = option.url,
+                mimeType = source.mimeType ?: option.url.inferMimeType(),
+                headers = source.headers,
+                subtitles = (source.subtitles + current.source.subtitles).distinctBy { "${it.language}|${it.url}|${it.id}" },
+            ),
+            startPositionMillis = position,
+            sourceProviderId = source.providerId,
+            sourceBingeGroup = source.bingeGroup,
+        )
+        switchPlayback(current, next)
+    }
+
+    private suspend fun resolveNextPlayback(current: PlaybackRequest): NextPlayback? {
+        val media = current.preview ?: return null
+        val next = current.nextEpisode ?: return null
+        val resolvedProviders = resolvedPlaybackProviders()
         fun playable(streams: List<StreamCandidate>, providerName: String?) = streams.mapNotNull { source ->
             val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal
             resolution?.let { NextCandidate(source, it.url, providerName) }
