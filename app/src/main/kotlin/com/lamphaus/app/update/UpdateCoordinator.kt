@@ -375,8 +375,8 @@ class UpdateCoordinator(
             UpdatePhase.Downloading, UpdatePhase.Waiting, UpdatePhase.Verifying, UpdatePhase.Ready,
             UpdatePhase.PermissionRequired, UpdatePhase.Installing,
         )
-        const val AUTO_COOLDOWN_MILLIS = 15 * 60_000L
-        const val FOREGROUND_GAP_MILLIS = 30 * 60_000L
+        const val AUTO_COOLDOWN_MILLIS = 5 * 60_000L
+        const val FOREGROUND_GAP_MILLIS = 10 * 60_000L
         const val REMINDER_MILLIS = 24 * 60 * 60_000L
         const val REMINDER_MAX_SKEW_MILLIS = 25 * 60 * 60_000L
         const val BACKOFF_BASE_MILLIS = 60_000L
