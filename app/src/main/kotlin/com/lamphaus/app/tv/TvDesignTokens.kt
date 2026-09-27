@@ -58,8 +58,6 @@ internal object TvSurfaceTokens {
     val card = Color(0xFF292A2D)
     val selectedFilter = Color(0xFF354964)
     val subtleBorder = Color.White.copy(alpha = 0.10f)
-    val ratingScrim = Color.Black.copy(alpha = 0.62f)
-    val ratingBorder = Color.White.copy(alpha = 0.16f)
 }
 
 internal object TvMotionTokens {

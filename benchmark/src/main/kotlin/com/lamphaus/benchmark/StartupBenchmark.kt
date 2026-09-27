@@ -151,6 +151,44 @@ class StartupBenchmark {
         }
     }
 
+    /**
+     * PERF-21: moving along the top navigation into Discover and Library,
+     * where each page's first composition happens inside the key press, then
+     * a short walk through each poster grid. Real-TV numbers come from
+     * `scripts/perf/tv_page_jank.py` (this metric records nothing on the SEI Box).
+     */
+    @Test
+    fun tvDiscoverLibraryFrameTiming() = rule.measureRepeated(
+        packageName = PACKAGE_NAME,
+        metrics = listOf(FrameTimingMetric()),
+        compilationMode = CompilationMode.Partial(),
+        startupMode = StartupMode.WARM,
+        iterations = 10,
+        setupBlock = { requireBenchmarkFormFactor(leanback = true); pressHome() },
+    ) {
+        startTv()
+        device.requireFixtureHome()
+        device.pressDPadUp()
+        SystemClock.sleep(TV_SETTLE_MILLIS)
+        // Home → Movies → Series → Discover; tabs follow focus.
+        repeat(3) {
+            device.pressDPadRight()
+            SystemClock.sleep(TV_SETTLE_MILLIS)
+        }
+        repeat(3) {
+            device.pressDPadDown()
+            SystemClock.sleep(TV_SETTLE_MILLIS)
+        }
+        repeat(3) { device.pressDPadUp() }
+        device.waitForIdle()
+        device.pressDPadRight() // Library
+        SystemClock.sleep(TV_SETTLE_MILLIS)
+        repeat(2) {
+            device.pressDPadDown()
+            SystemClock.sleep(TV_SETTLE_MILLIS)
+        }
+    }
+
     @Test
     fun mobileHomeScrollFrameTiming() = rule.measureRepeated(
         packageName = PACKAGE_NAME,

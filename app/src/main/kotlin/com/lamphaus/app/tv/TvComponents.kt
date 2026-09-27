@@ -519,7 +519,6 @@ internal fun TvMediaCard(
     revealLabelOnFocus: Boolean = false,
     compactLandscape: Boolean = false,
     watchProgress: Float? = null,
-    showRating: Boolean = false,
     onMenuRequest: ((FocusRequester) -> Unit)? = null,
     completed: Boolean = false,
 ) {
@@ -545,18 +544,9 @@ internal fun TvMediaCard(
     // it in the layer block, which skips recomposition entirely.
     val ambient = LocalTvContentAccent.current
     val primary = MaterialTheme.colorScheme.primary
-    val ratingText = if (showRating) media.metadataPresentation().ratingText else null
-    // The catalog rating wears the IMDb mark only when the addon exposed an
-    // actual IMDb score; generic provider ratings keep the neutral star
-    // (SHR-PROD-05).
-    val imdbScore = if (showRating) {
-        metadataImdbScore(media.rating, media.ratingSource, "")
-    } else {
-        null
-    }
-    val cardDescription = ratingText?.let {
-        stringResource(R.string.media_card_description_rating, media.name, it)
-    } ?: media.name
+    // TV-ART-01: posters carry no rating overlay; ratings live in the
+    // focused hero/Spotlight metadata and on the details page.
+    val cardDescription = media.name
     val labelAlpha by animateFloatAsState(
         targetValue = if (!revealLabelOnFocus || focused) 1f else 0f,
         animationSpec = if (reducedMotion) snap() else tween(TvMotionTokens.focusDurationMillis),
@@ -623,57 +613,6 @@ internal fun TvMediaCard(
                 modifier = Modifier.fillMaxWidth().height(cardHeight),
                 contentScale = ContentScale.Crop,
             )
-            if (imdbScore != null && ratingText != null) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 10.dp)
-                        .clip(TvShapeTokens.card)
-                        .background(TvSurfaceTokens.ratingScrim)
-                        .border(
-                            width = 0.5.dp,
-                            color = TvSurfaceTokens.ratingBorder,
-                            shape = TvShapeTokens.card,
-                        )
-                        .padding(horizontal = 7.dp, vertical = 3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RatingBadgeChip(imdbScore)
-                    Text(
-                        text = ratingText,
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                    )
-                }
-            } else if (ratingText != null) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 10.dp)
-                        .clip(TvShapeTokens.card)
-                        .background(TvSurfaceTokens.ratingScrim)
-                        .border(
-                            width = 0.5.dp,
-                            color = TvSurfaceTokens.ratingBorder,
-                            shape = TvShapeTokens.card,
-                        )
-                        .padding(horizontal = 7.dp, vertical = 3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "★",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                    Text(
-                        text = ratingText,
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                    )
-                }
-            }
             watchProgress?.coerceIn(0f, 1f)?.takeIf { it > 0f }?.let { progress ->
                 Box(
                     modifier = Modifier
