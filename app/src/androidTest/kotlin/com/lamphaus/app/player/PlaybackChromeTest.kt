@@ -45,7 +45,7 @@ class PlaybackChromeTest {
                 request = PlaybackRequest(mediaKey = "movie:fixture", videoId = "fixture", title = "The quiet earth",
                     subtitle = "A journey beyond the familiar", source = PlaybackSource("https://example.invalid/fixture")),
                 player = player, isTelevision = tv, settings = PlaybackSettings(), segments = emptyList(),
-                nextEpisodeLoading = false, nextEpisodeMessage = null, onExit = { exits++ },
+                nextEpisodeProgress = NextEpisodeProgress.Idle, nextEpisodeMessage = null, onExit = { exits++ },
                 onOpenExternally = {}, onNextEpisode = {}, onDismissNextEpisodeMessage = {},
                 spoilerProtection = SpoilerProtectionSettings(), nextEpisodeDismissed = false,
                 onDismissNextEpisodeCard = {}, onPlayerViewLayout = {}, onEnterPictureInPicture = {},

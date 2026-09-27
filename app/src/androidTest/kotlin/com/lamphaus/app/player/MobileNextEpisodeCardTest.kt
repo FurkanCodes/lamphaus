@@ -43,7 +43,7 @@ class MobileNextEpisodeCardTest {
 
     private fun setContent(
         episode: Episode = airedEpisode,
-        loading: Boolean = false,
+        progress: NextEpisodeProgress = NextEpisodeProgress.Idle,
         failureMessage: String? = null,
         blurArtwork: Boolean = false,
         wide: Boolean = false,
@@ -61,9 +61,10 @@ class MobileNextEpisodeCardTest {
             ) {
                 NextEpisodeCard(
                     episode = episode,
-                    loading = loading,
+                    progress = progress,
                     failureMessage = failureMessage,
                     blurArtwork = blurArtwork,
+                    isTelevision = false,
                     wide = wide,
                     showSkipCredits = showSkipCredits,
                     onPlayNext = onPlay,
@@ -75,48 +76,50 @@ class MobileNextEpisodeCardTest {
     }
 
     @Test
-    fun readyCardShowsMetadataAndAPlayableAction() {
+    fun readyCardShowsMetadataAndPlaysWhenTapped() {
         var plays = 0
         setContent(onPlay = { plays++ })
 
-        compose.onNodeWithText("Up next").assertIsDisplayed()
-        compose.onNodeWithText("S1 · E2").assertIsDisplayed()
-        compose.onNodeWithText("The Second Hour").assertIsDisplayed()
-        compose.onNodeWithText("Play next")
-            .assertHasClickAction()
-            .performClick()
+        compose.onNodeWithText("Next episode").assertIsDisplayed()
+        compose.onNodeWithText("S1 · E2 • The Second Hour").assertIsDisplayed()
+        compose.onNodeWithText("Play").assertIsDisplayed().performClick()
         assertEquals(1, plays)
     }
 
     @Test
-    fun loadingStateShowsInlineProgressAndDisablesPlay() {
-        setContent(loading = true)
+    fun searchingStateShowsFindingSource() {
+        setContent(progress = NextEpisodeProgress.Searching)
 
         compose.onNodeWithText("Finding source…").assertIsDisplayed()
-        compose.onNodeWithText("Play next").assertIsNotEnabled()
     }
 
     @Test
-    fun failureStateExplainsInlineAndOffersRetry() {
+    fun startingStateNamesTheSourceAndCountsDown() {
+        setContent(progress = NextEpisodeProgress.Starting("Torrentio", 3))
+
+        compose.onNodeWithText("Playing via Torrentio in 3s").assertIsDisplayed()
+    }
+
+    @Test
+    fun failureStateExplainsInlineAndTheCardRetries() {
         var retries = 0
         setContent(failureMessage = "No playable source", onPlay = { retries++ })
 
-        compose.onNodeWithText("No playable source").assertIsDisplayed()
-        compose.onNodeWithText("Retry")
-            .assertHasClickAction()
-            .performClick()
+        compose.onNodeWithText("No playable source").assertIsDisplayed().performClick()
         assertEquals(1, retries)
     }
 
     @Test
-    fun unairedEpisodeShowsReleaseStatusAndDisablesPlay() {
+    fun unairedEpisodeShowsReleaseStatusAndDoesNotPlay() {
+        var plays = 0
         val future = airedEpisode.copy(
             releasedAtEpochMillis = System.currentTimeMillis() + 86_400_000L,
         )
-        setContent(episode = future)
+        setContent(episode = future, onPlay = { plays++ })
 
         compose.onNodeWithText("Not yet released", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Play next").assertIsNotEnabled()
+        compose.onNodeWithText("Next episode").performClick()
+        assertEquals(0, plays)
     }
 
     @Test
@@ -152,32 +155,31 @@ class MobileNextEpisodeCardTest {
     fun missingArtworkKeepsTheCardGeometry() {
         setContent(episode = airedEpisode.copy(thumbnailUrl = null))
 
-        compose.onNodeWithText("Up next").assertIsDisplayed()
-        compose.onNodeWithText("Play next").assertIsDisplayed()
+        compose.onNodeWithText("Next episode").assertIsDisplayed()
+        compose.onNodeWithText("Play").assertIsDisplayed()
     }
 
     @Test
     fun wideLayoutKeepsTheSameContentAvailable() {
         setContent(wide = true)
 
-        compose.onNodeWithText("Up next").assertIsDisplayed()
-        compose.onNodeWithText("Play next").assertIsDisplayed()
+        compose.onNodeWithText("Next episode").assertIsDisplayed()
+        compose.onNodeWithText("Play").assertIsDisplayed()
     }
 
     @Test
     fun rtlLayoutKeepsContentAccessible() {
         setContent(rtl = true)
 
-        compose.onNodeWithText("Up next").assertIsDisplayed()
-        compose.onNodeWithText("The Second Hour").assertIsDisplayed()
+        compose.onNodeWithText("Next episode").assertIsDisplayed()
+        compose.onNodeWithText("S1 · E2 • The Second Hour").assertIsDisplayed()
     }
 
     @Test
     fun scaledFontsKeepTheCardReadable() {
         setContent(fontScale = 2f)
 
-        compose.onNodeWithText("Up next").assertIsDisplayed()
-        compose.onNodeWithText("The Second Hour").assertIsDisplayed()
-        compose.onNodeWithText("Play next").assertIsDisplayed()
+        compose.onNodeWithText("Next episode").assertIsDisplayed()
+        compose.onNodeWithText("Play").assertIsDisplayed()
     }
 }

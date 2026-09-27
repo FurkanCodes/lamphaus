@@ -27,7 +27,11 @@ data class PlaybackSettings(
 @Serializable
 enum class PlaybackSegmentType {
     INTRO,
+    RECAP,
+    /** Series outro or movie credits. */
     ENDING,
+    /** A scene after the credits; never skipped, only skipped to. */
+    POST_CREDITS,
 }
 
 @Serializable

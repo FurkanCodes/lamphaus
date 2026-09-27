@@ -84,6 +84,15 @@ internal val PLAY_PAUSE_KEYS = setOf(
     androidx.compose.ui.input.key.Key.MediaPause,
 )
 
+/** Keys a focused skip button or next-episode card handles itself while the chrome is hidden. */
+internal val CUE_KEYS = setOf(
+    androidx.compose.ui.input.key.Key.DirectionCenter,
+    androidx.compose.ui.input.key.Key.Enter,
+    androidx.compose.ui.input.key.Key.NumPadEnter,
+    androidx.compose.ui.input.key.Key.DirectionLeft,
+    androidx.compose.ui.input.key.Key.DirectionRight,
+)
+
 /**
  * Subtitle languages in fallback order: preferred, then secondary, then the
  * device language — an empty preference means the device language

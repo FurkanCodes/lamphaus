@@ -103,6 +103,7 @@ import androidx.compose.ui.semantics.setProgress
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.mutableFloatStateOf
@@ -176,6 +177,9 @@ import com.lamphaus.core.model.PlaybackSegment
 import com.lamphaus.core.model.PlaybackSegmentType
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.NextEpisodePolicy
+import com.lamphaus.core.model.SkipSegmentPolicy
+import com.lamphaus.core.model.DisplayModeCandidate
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.hasAired
 import java.util.Locale
@@ -353,7 +357,7 @@ internal fun PlaybackScreen(
     isTelevision: Boolean,
     settings: PlaybackSettings,
     segments: List<PlaybackSegment>,
-    nextEpisodeLoading: Boolean,
+    nextEpisodeProgress: NextEpisodeProgress,
     nextEpisodeMessage: String?,
     onExit: () -> Unit,
     onOpenExternally: () -> Unit,
@@ -379,7 +383,9 @@ internal fun PlaybackScreen(
     onControlsVisibilityChanged: (Boolean) -> Unit = {},
     onSubtitleLiftChanged: (Float) -> Unit = {},
     startupPhase: PlaybackStartupPhase = PlaybackStartupPhase.READY,
+    matchedDisplayMode: DisplayModeCandidate? = null,
 ) {
+    val nextEpisodeLoading = nextEpisodeProgress != NextEpisodeProgress.Idle
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
     var controlsVisible by remember { mutableStateOf(true) }
     var resizeMode by rememberSaveable { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
@@ -485,14 +491,20 @@ internal fun PlaybackScreen(
     val wideLayout = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE ||
         windowWidthDp >= 600.dp
     val landscapeOrientation = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val activeSegment = segments.firstOrNull { segment ->
-        val enabled = when (segment.type) {
-            PlaybackSegmentType.INTRO -> settings.skipIntroEnabled
+    val skippableSegments = segments.filter { segment ->
+        when (segment.type) {
+            PlaybackSegmentType.INTRO, PlaybackSegmentType.RECAP -> settings.skipIntroEnabled
             PlaybackSegmentType.ENDING -> settings.skipEndingEnabled
+            PlaybackSegmentType.POST_CREDITS -> true
         }
-        val end = segment.endMillis ?: snapshot.durationMillis.takeIf { it > 0 } ?: Long.MAX_VALUE
-        enabled && snapshot.positionMillis in segment.startMillis until end
     }
+    val activeSegment = SkipSegmentPolicy.activeSegment(skippableSegments, snapshot.positionMillis, snapshot.durationMillis)
+    val skipTargetsPostCredits = activeSegment != null &&
+        SkipSegmentPolicy.postCreditsSceneAfter(activeSegment, segments, snapshot.durationMillis) != null
+    var dismissedSegment by remember(request.videoId) { mutableStateOf<PlaybackSegment?>(null) }
+    // A skip button or next-episode card holding TV focus receives Select and
+    // left/right itself instead of the hidden-chrome seek shortcuts.
+    var cueFocused by remember { mutableStateOf(false) }
     val nextEpisode = request.nextEpisode
     val timingReady = NextEpisodePolicy.shouldShowCard(
         positionMillis = snapshot.positionMillis,
@@ -506,9 +518,8 @@ internal fun PlaybackScreen(
         nextEpisode != null &&
         nextEpisode.hasAired() &&
         timingReady
-    // The card is mobile-only; TV keeps its existing cue pill.
-    val nextEpisodeCardVisible = nextEpisodeReady && !isTelevision && !nextEpisodeDismissed
-    val nextEpisodeSkipInCard = nextEpisodeCardVisible && !wideLayout &&
+    val nextEpisodeCardVisible = nextEpisodeReady && !nextEpisodeDismissed
+    val nextEpisodeSkipInCard = nextEpisodeCardVisible && !wideLayout && !isTelevision &&
         activeSegment?.type == PlaybackSegmentType.ENDING
 
     fun revealControls() {
@@ -624,6 +635,7 @@ internal fun PlaybackScreen(
                 if (event.type != KeyEventType.KeyDown || player == null || startupLoading) return@onPreviewKeyEvent false
                 // Any key is interaction: it restarts the auto-hide and pause-overlay timers.
                 interactionVersion++
+                if (cueFocused && !controlsVisible && event.key in CUE_KEYS) return@onPreviewKeyEvent false
                 if (pauseOverlayVisible && event.key !in PLAY_PAUSE_KEYS) {
                     // The first key only dismisses the overlay; it never seeks or moves focus.
                     revealControls()
@@ -905,83 +917,136 @@ internal fun PlaybackScreen(
 
         val visibleSegment = if (nextEpisodeSkipInCard) null else activeSegment
         val skipSegment: () -> Unit = {
-            when (activeSegment?.type) {
-                PlaybackSegmentType.INTRO -> activeSegment.endMillis?.let { player?.seekTo(it) }
-                PlaybackSegmentType.ENDING -> {
-                    (activeSegment.endMillis ?: snapshot.durationMillis.takeIf { it > 0 })
-                        ?.let { player?.seekTo(it) }
-                }
-                null -> Unit
+            activeSegment?.let { segment ->
+                SkipSegmentPolicy.skipTarget(segment, segments, snapshot.durationMillis)?.let { player?.seekTo(it) }
+                dismissedSegment = segment
             }
         }
-        if (
-            !loadingSurfaceVisible && !inPictureInPicture && panel == null && (
-                visibleSegment != null ||
-                    (nextEpisodeReady && isTelevision) ||
-                    (nextEpisodeMessage != null && !nextEpisodeCardVisible)
-                )
-        ) {
-            PlaybackCueActions(
-                modifier = when {
-                    nextEpisodeCardVisible && wideLayout -> Modifier.align(Alignment.BottomStart)
-                    else -> Modifier.align(Alignment.BottomCenter)
-                },
-                horizontalAlignment = if (nextEpisodeCardVisible && wideLayout) {
-                    Alignment.Start
-                } else {
-                    Alignment.End
-                },
-                segment = visibleSegment,
-                showNextEpisode = nextEpisodeReady && isTelevision,
-                loadingNextEpisode = nextEpisodeLoading,
-                message = if (nextEpisodeCardVisible) null else nextEpisodeMessage,
-                controlsVisible = controlsVisible,
-                isTelevision = isTelevision,
-                onSkip = skipSegment,
-                onNextEpisode = onNextEpisode,
-                onDismissMessage = onDismissNextEpisodeMessage,
+        val cueBottomPadding = if (controlsVisible) 190.dp else if (isTelevision) 32.dp else 28.dp
+        val cueHorizontalPadding = if (isTelevision) 58.dp else 16.dp
+        val cuesAllowed = !loadingSurfaceVisible && !inPictureInPicture && panel == null && shownError == null
+        if (cuesAllowed && nextEpisodeMessage != null && !nextEpisodeCardVisible) {
+            PlaybackMessage(
+                message = nextEpisodeMessage,
+                onDismiss = onDismissNextEpisodeMessage,
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .padding(horizontal = cueHorizontalPadding)
+                    .padding(bottom = cueBottomPadding),
             )
         }
+        if (cuesAllowed && !locked) {
+            PlayerSkipButton(
+                segment = visibleSegment,
+                targetsPostCredits = skipTargetsPostCredits,
+                movie = request.episode == null,
+                dismissed = visibleSegment != null && visibleSegment == dismissedSegment,
+                controlsVisible = controlsVisible,
+                isTelevision = isTelevision,
+                reducedMotion = reducedMotion,
+                onSkip = skipSegment,
+                onFocusChanged = { cueFocused = it },
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+                    .padding(start = cueHorizontalPadding, bottom = cueBottomPadding),
+            )
+        }
+        val nextEpisodeFocus = remember { FocusRequester() }
         AnimatedVisibility(
-            visible = !loadingSurfaceVisible && nextEpisodeCardVisible && !inPictureInPicture && panel == null,
+            visible = cuesAllowed && !locked && nextEpisodeCardVisible,
             enter = when {
                 reducedMotion -> EnterTransition.None
-                wideLayout -> slideInHorizontally(tween(220)) { it } + fadeIn(tween(220))
+                wideLayout || isTelevision -> slideInHorizontally(tween(260)) { it / 2 } + fadeIn(tween(220))
                 else -> slideInVertically(tween(220)) { it } + fadeIn(tween(220))
             },
             exit = when {
                 reducedMotion -> ExitTransition.None
-                wideLayout -> slideOutHorizontally(tween(160)) { it } + fadeOut(tween(160))
+                wideLayout || isTelevision -> slideOutHorizontally(tween(200)) { it / 2 } + fadeOut(tween(160))
                 else -> slideOutVertically(tween(160)) { it } + fadeOut(tween(160))
             },
             modifier = when {
-                wideLayout -> Modifier.align(Alignment.BottomEnd).padding(horizontal = 16.dp)
-                else -> Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp)
+                wideLayout || isTelevision -> Modifier.align(Alignment.BottomEnd)
+                else -> Modifier.align(Alignment.BottomCenter)
             }.windowInsetsPadding(
                 WindowInsets.safeDrawing.only(
                     WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
                 ),
-            ),
+            ).padding(horizontal = cueHorizontalPadding),
         ) {
+            DisposableEffect(Unit) { onDispose { cueFocused = false } }
             nextEpisode?.let { current ->
+                // Nuvio: the card takes TV focus when it appears over clean viewing.
+                LaunchedEffect(current.id, controlsVisible) {
+                    if (isTelevision && !controlsVisible) runCatching { nextEpisodeFocus.requestFocus() }
+                }
                 NextEpisodeCard(
                     episode = current,
-                    loading = nextEpisodeLoading,
+                    progress = nextEpisodeProgress,
                     failureMessage = nextEpisodeMessage,
                     blurArtwork = spoilerProtection.shouldBlur(
                         SpoilerContent.EPISODE_ARTWORK,
                         watched = false,
                     ),
+                    isTelevision = isTelevision,
                     wide = wideLayout,
                     showSkipCredits = nextEpisodeSkipInCard,
                     onPlayNext = onNextEpisode,
                     onSkipCredits = skipSegment,
                     onDismiss = onDismissNextEpisodeCard,
-                    modifier = Modifier.padding(
-                        bottom = if (controlsVisible) 190.dp else 28.dp,
-                    ),
+                    focusRequester = nextEpisodeFocus,
+                    onFocusChanged = { cueFocused = it },
+                    modifier = Modifier.padding(bottom = cueBottomPadding),
                 )
             }
+        }
+
+        // Nuvio's start-of-playback info: content details at the top start, the
+        // matched display mode at the top end, each once per item over clean viewing.
+        val infoAllowed = !loadingSurfaceVisible && !inPictureInPicture && !controlsVisible && panel == null &&
+            shownError == null && !pauseOverlayVisible && !locked
+        val contentRows = contentInfoRows(request)
+        var contentInfoDone by remember(request.videoId) { mutableStateOf(false) }
+        var contentInfoStarted by remember(request.videoId) { mutableStateOf(false) }
+        if (infoAllowed && snapshot.playing && !contentInfoDone && contentRows.isNotEmpty()) contentInfoStarted = true
+        if (contentInfoStarted && !contentInfoDone) {
+            if (infoAllowed) {
+                PlayerInfoLines(
+                    rows = contentRows,
+                    alignEnd = false,
+                    reducedMotion = reducedMotion,
+                    onFinished = { contentInfoDone = true },
+                    modifier = Modifier.align(Alignment.TopStart)
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Start))
+                        .padding(start = cueHorizontalPadding, top = if (isTelevision) 32.dp else 16.dp),
+                )
+            } else {
+                // The chrome or a panel interrupting the block ends it, as in Nuvio.
+                SideEffect { contentInfoDone = true }
+            }
+        }
+        var displayInfoDone by remember(matchedDisplayMode) { mutableStateOf(false) }
+        if (matchedDisplayMode != null && !displayInfoDone) {
+            if (infoAllowed) {
+                PlayerInfoLines(
+                    rows = displayModeRows(matchedDisplayMode),
+                    alignEnd = true,
+                    reducedMotion = reducedMotion,
+                    onFinished = { displayInfoDone = true },
+                    modifier = Modifier.align(Alignment.TopEnd)
+                        .padding(end = cueHorizontalPadding, top = if (isTelevision) 32.dp else 16.dp),
+                )
+            } else if (controlsVisible || panel != null) {
+                SideEffect { displayInfoDone = true }
+            }
+        }
+        if (isTelevision && !loadingSurfaceVisible && !inPictureInPicture && controlsVisible && panel == null &&
+            shownError == null
+        ) {
+            PlayerClock(
+                positionMillis = snapshot.positionMillis,
+                durationMillis = snapshot.durationMillis,
+                speed = snapshot.speed,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 58.dp, top = 32.dp),
+            )
         }
 
         if (!loadingSurfaceVisible && !isTelevision && !inPictureInPicture && !locked && wideLayout && (controlsVisible || panel != null)) {
@@ -1108,69 +1173,38 @@ internal fun PlaybackScreen(
 }
 
 @Composable
-private fun PlaybackCueActions(
-    modifier: Modifier = Modifier,
-    horizontalAlignment: Alignment.Horizontal = Alignment.End,
-    segment: PlaybackSegment?,
-    showNextEpisode: Boolean,
-    loadingNextEpisode: Boolean,
-    message: String?,
-    controlsVisible: Boolean,
-    isTelevision: Boolean,
-    onSkip: () -> Unit,
-    onNextEpisode: () -> Unit,
-    onDismissMessage: () -> Unit,
-) {
-    Column(
+private fun PlaybackMessage(message: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
         modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = if (isTelevision) 56.dp else 20.dp)
-            .padding(bottom = if (controlsVisible) 190.dp else 28.dp),
-        horizontalAlignment = horizontalAlignment,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .clip(RoundedCornerShape(6.dp))
+            .background(PlayerBackground.copy(alpha = 0.96f))
+            .clickable(onClick = onDismiss)
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        message?.let {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(PlayerBackground.copy(alpha = 0.96f))
-                    .clickable(onClick = onDismissMessage)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(it, color = PlayerOnSurface, fontFamily = PlayerFont, fontSize = 14.sp)
-                Text("Dismiss", color = PlayerPrimary, fontFamily = PlayerFont, fontWeight = FontWeight.Medium)
-            }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            segment?.let {
-                PlayerTextButton(
-                    label = if (it.type == PlaybackSegmentType.INTRO) "Skip intro" else "Skip ending",
-                    onClick = onSkip,
-                )
-            }
-            if (showNextEpisode) {
-                if (loadingNextEpisode) {
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(PlayerSurface)
-                            .padding(horizontal = 22.dp, vertical = 12.dp),
-                    ) {
-                        CircularProgressIndicator(Modifier.size(20.dp), color = PlayerPrimary, strokeWidth = 2.dp)
-                    }
-                } else {
-                    PlayerTextButton(
-                        label = "Next episode",
-                        onClick = onNextEpisode,
-                    )
-                }
-            }
-        }
+        Text(message, color = PlayerOnSurface, fontFamily = PlayerFont, fontSize = 14.sp)
+        Text(stringResource(R.string.player_dismiss), color = PlayerPrimary, fontFamily = PlayerFont, fontWeight = FontWeight.Medium)
     }
 }
 
+/** Rating, type and year, and genres from the catalog snapshot. */
+@Composable
+private fun contentInfoRows(request: PlaybackRequest): List<PlayerInfoRow> {
+    val preview = request.preview ?: return emptyList()
+    val typeLabel = stringResource(if (preview.type == MediaType.SERIES) R.string.player_info_series else R.string.player_info_movie)
+    val ratingLabel = stringResource(R.string.player_info_rating)
+    val genreLabel = stringResource(R.string.player_info_genre)
+    return remember(preview, typeLabel, ratingLabel, genreLabel) {
+        listOfNotNull(
+            preview.contentRating?.takeIf(String::isNotBlank)?.let { PlayerInfoRow(ratingLabel, it.trim()) },
+            preview.releaseYear?.let { PlayerInfoRow(typeLabel, it.toString()) },
+            preview.genres.filter(String::isNotBlank).take(2).takeIf { it.isNotEmpty() }
+                ?.let { PlayerInfoRow(genreLabel, it.joinToString(", ")) },
+        )
+    }
+}
 
 @Composable
 internal fun PlayerTitle(request: PlaybackRequest, isTelevision: Boolean, modifier: Modifier = Modifier) {

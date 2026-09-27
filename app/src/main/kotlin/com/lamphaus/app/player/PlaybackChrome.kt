@@ -189,8 +189,13 @@ internal fun PlayerControls(
             ) {
                 PlayerProgress(snapshot.positionMillis, snapshot.bufferedPositionMillis, snapshot.durationMillis,
                     Modifier.fillMaxWidth(), onSeekTo, onInteraction, segments)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     PlayerTime(snapshot.positionMillis)
+                    PlayerEndsAt(snapshot.positionMillis, snapshot.durationMillis, snapshot.speed)
                     PlayerRemaining(snapshot.positionMillis, snapshot.durationMillis)
                 }
                 Spacer(Modifier.height(8.dp))

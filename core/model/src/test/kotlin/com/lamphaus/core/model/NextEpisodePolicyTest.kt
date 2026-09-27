@@ -6,9 +6,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Nuvio-accurate ending rule: exact ENDING timestamps win over the fallback,
- * the fallback uses only the selected threshold mode, and unknown duration
- * disables the fallback without blocking exact triggers.
+ * Nuvio's PlayerNextEpisodeRules: credits that run to the end trigger at their
+ * start, a post-credits scene is never covered, the fallback uses only the
+ * selected threshold mode, and unknown duration disables the fallback without
+ * blocking exact triggers.
  */
 class NextEpisodePolicyTest {
     private fun ending(start: Long, end: Long? = null) =
@@ -31,24 +32,22 @@ class NextEpisodePolicyTest {
     )
 
     @Test
-    fun `exact ending start triggers the card`() {
-        val segments = listOf(ending(start = 1_700_000, end = 1_800_000))
+    fun `credits running to the end show the card at the ending start`() {
+        val segments = listOf(ending(start = 1_700_000, end = 1_898_000))
 
         assertFalse(shows(1_699_999, 1_900_000, segments))
         assertTrue(shows(1_700_000, 1_900_000, segments))
     }
 
     @Test
-    fun `card stays available after the ending interval ends`() {
-        val segments = listOf(ending(start = 1_700_000, end = 1_800_000))
-
-        assertTrue(shows(1_850_000, 1_900_000, segments))
+    fun `an open ending runs to the end of the file`() {
+        assertTrue(shows(1_700_000, 1_900_000, listOf(ending(start = 1_700_000))))
     }
 
     @Test
     fun `earliest ending interval of several controls the trigger`() {
         val segments = listOf(
-            ending(start = 1_700_000, end = 1_750_000),
+            ending(start = 1_700_000, end = 1_900_000),
             PlaybackSegment(
                 type = PlaybackSegmentType.INTRO,
                 startMillis = 0,
@@ -62,8 +61,33 @@ class NextEpisodePolicyTest {
     }
 
     @Test
+    fun `content after the credits waits for the post-credits scene`() {
+        // 100 s after the credits is a post-credits scene: the card waits for the end.
+        val segments = listOf(ending(start = 1_700_000, end = 1_800_000))
+
+        assertFalse(shows(1_850_000, 1_900_000, segments))
+        assertTrue(shows(1_900_000, 1_900_000, segments))
+    }
+
+    @Test
+    fun `explicit post-credits scene delays the card until it ends`() {
+        val segments = listOf(
+            ending(start = 1_700_000, end = 1_800_000),
+            PlaybackSegment(PlaybackSegmentType.POST_CREDITS, startMillis = 1_800_000, endMillis = 1_860_000),
+        )
+
+        assertFalse(shows(1_859_999, 1_900_000, segments))
+        assertTrue(shows(1_881_000, 1_900_000, segments))
+    }
+
+    @Test
     fun `ending timestamps trigger without a known duration`() {
         assertTrue(shows(1_700_000, 0, listOf(ending(start = 1_700_000))))
+    }
+
+    @Test
+    fun `a position past the duration is not an end signal`() {
+        assertFalse(shows(2_000_000, 1_000_000))
     }
 
     @Test

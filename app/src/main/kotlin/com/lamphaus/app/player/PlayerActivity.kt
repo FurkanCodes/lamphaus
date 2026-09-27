@@ -39,8 +39,10 @@ import com.lamphaus.app.R
 import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.CompletionPolicy
 import com.lamphaus.core.data.cloud.AccountState
+import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.NextEpisodeSourcePolicy
 import com.lamphaus.core.model.PlaybackSegment
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSettings
@@ -71,6 +73,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -88,7 +91,9 @@ class PlayerActivity : ComponentActivity() {
     private val requestState = mutableStateOf<PlaybackRequest?>(null)
     private val playbackSettingsState = mutableStateOf(PlaybackSettings())
     private val segmentsState = mutableStateOf<List<PlaybackSegment>>(emptyList())
-    private val nextEpisodeLoadingState = mutableStateOf(false)
+    /** The mode frame-rate matching settled on; announced once per item (Nuvio). */
+    private val matchedDisplayModeState = mutableStateOf<DisplayModeCandidate?>(null)
+    private val nextEpisodeProgressState = mutableStateOf<NextEpisodeProgress>(NextEpisodeProgress.Idle)
     private val nextEpisodeMessageState = mutableStateOf<String?>(null)
     private val spoilerProtectionState = mutableStateOf(SpoilerProtectionSettings())
     private val nextEpisodeDismissedVideoId = mutableStateOf<String?>(null)
@@ -166,6 +171,7 @@ class PlayerActivity : ComponentActivity() {
                 configProvider = { Media3EngineFactory.deviceConfig },
                 onModeDecision = { decision ->
                     displayModeSwitchInFlight = decision.reason == PlaybackDisplayModeController.DisplayModeReason.REQUESTED
+                    decision.appliedMode?.let { matchedDisplayModeState.value = it }
                     streamInfoState.value = buildString {
                         append(decision.appliedMode?.let { "${it.width}x${it.height} @ ${it.refreshRateHz} Hz" } ?: getString(R.string.playback_display_current))
                         append(" \u00b7 ").append(getString(decision.reason.stringRes))
@@ -221,7 +227,8 @@ class PlayerActivity : ComponentActivity() {
                     isTelevision = isTelevision,
                     settings = playbackSettingsState.value,
                     segments = segmentsState.value,
-                    nextEpisodeLoading = nextEpisodeLoadingState.value,
+                    nextEpisodeProgress = nextEpisodeProgressState.value,
+                    matchedDisplayMode = matchedDisplayModeState.value,
                     nextEpisodeMessage = nextEpisodeMessageState.value,
                     spoilerProtection = spoilerProtectionState.value,
                     nextEpisodeDismissed =
@@ -478,9 +485,9 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun playNextEpisode() {
-        if (nextEpisodeLoadingState.value || request?.nextEpisode == null) return
+        if (nextEpisodeProgressState.value != NextEpisodeProgress.Idle || request?.nextEpisode == null) return
         if (request?.nextEpisode?.hasAired() == false) return
-        nextEpisodeLoadingState.value = true
+        nextEpisodeProgressState.value = NextEpisodeProgress.Searching
         nextEpisodeMessageState.value = null
         nextEpisodeResolutionJob = lifecycleScope.launch {
             try {
@@ -489,14 +496,19 @@ class PlayerActivity : ComponentActivity() {
                 if (current == null || next == null) {
                     nextEpisodeMessageState.value = getString(R.string.next_episode_source_unavailable)
                 } else {
-                    switchPlayback(current, next)
+                    // Nuvio's hand-off: name the chosen source and count down before switching.
+                    for (secondsLeft in NextEpisodeSourcePolicy.START_COUNTDOWN_SECONDS downTo 1) {
+                        nextEpisodeProgressState.value = NextEpisodeProgress.Starting(next.sourceName, secondsLeft)
+                        delay(1_000)
+                    }
+                    switchPlayback(current, next.request)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 nextEpisodeMessageState.value = getString(R.string.next_episode_source_unavailable)
             } finally {
-                nextEpisodeLoadingState.value = false
+                nextEpisodeProgressState.value = NextEpisodeProgress.Idle
             }
         }
     }
@@ -509,11 +521,15 @@ class PlayerActivity : ComponentActivity() {
         nextEpisodeDismissedVideoId.value = request?.videoId
         nextEpisodeResolutionJob?.cancel()
         nextEpisodeResolutionJob = null
-        nextEpisodeLoadingState.value = false
+        nextEpisodeProgressState.value = NextEpisodeProgress.Idle
         nextEpisodeMessageState.value = null
     }
 
-    private suspend fun resolveNextPlayback(current: PlaybackRequest): PlaybackRequest? {
+    private class NextPlayback(val request: PlaybackRequest, val sourceName: String)
+
+    private class NextCandidate(val stream: StreamCandidate, val url: String, val providerName: String?)
+
+    private suspend fun resolveNextPlayback(current: PlaybackRequest): NextPlayback? {
         val media = current.preview ?: return null
         val next = current.nextEpisode ?: return null
         val providers = container.libraryRepository.providers().first()
@@ -530,43 +546,60 @@ class PlayerActivity : ComponentActivity() {
                 }
             }.awaitAll()
         }
-        val fetchedStreams = supervisorScope {
-            resolvedProviders.mapNotNull { provider ->
-                val manifest = provider.manifest ?: return@mapNotNull null
+        fun playable(streams: List<StreamCandidate>, providerName: String?) = streams.mapNotNull { source ->
+            val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal
+            resolution?.let { NextCandidate(source, it.url, providerName) }
+        }
+        // Results per provider, kept in provider order; embedded episode streams come first.
+        val perProvider = arrayOfNulls<List<NextCandidate>>(resolvedProviders.size)
+        val embedded = playable(next.streams, null)
+        val bingeMatch = CompletableDeferred<NextCandidate?>()
+        embedded.firstOrNull { NextEpisodeSourcePolicy.isBingeMatch(it.stream, current.sourceBingeGroup) }
+            ?.let(bingeMatch::complete)
+        supervisorScope {
+            val searches = resolvedProviders.mapIndexedNotNull { index, provider ->
+                val manifest = provider.manifest ?: return@mapIndexedNotNull null
                 if (!container.providerAggregator.supports(manifest, "stream", media.rawType, next.id)) {
-                    return@mapNotNull null
+                    return@mapIndexedNotNull null
                 }
-                async {
-                    (container.providerClient.streams(
+                launch {
+                    val streams = (container.providerClient.streams(
                         provider.subscription.manifestUrl,
                         provider.subscription.id,
                         media.rawType,
                         next.id,
                     ) as? ProviderResult.Success)?.value.orEmpty()
+                    val candidates = playable(streams, provider.subscription.displayName)
+                    perProvider[index] = candidates
+                    candidates.firstOrNull { NextEpisodeSourcePolicy.isBingeMatch(it.stream, current.sourceBingeGroup) }
+                        ?.let(bingeMatch::complete)
                 }
-            }.awaitAll().flatten()
+            }
+            val settled = launch {
+                searches.joinAll()
+                bingeMatch.complete(null)
+            }
+            withTimeoutOrNull(NextEpisodeSourcePolicy.SEARCH_TIMEOUT_MILLIS) { bingeMatch.await() }
+            searches.forEach(Job::cancel)
+            settled.cancel()
         }
-        val playable = (next.streams + fetchedStreams).distinctBy { candidate ->
-            listOf(candidate.providerId, candidate.url, candidate.externalUrl, candidate.infoHash).joinToString("|")
-        }.mapNotNull { source ->
-            val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal
-            resolution?.let { source to it.url }
+        val candidates = (embedded + perProvider.filterNotNull().flatten()).distinctBy { candidate ->
+            with(candidate.stream) { listOf(providerId, url, externalUrl, infoHash).joinToString("|") }
         }
-        val selected = playable.minWithOrNull(
-            compareBy<Pair<StreamCandidate, String>> {
-                if (it.first.providerId == current.sourceProviderId) 0 else 1
-            }.thenBy {
-                if (current.sourceBingeGroup != null && it.first.bingeGroup == current.sourceBingeGroup) 0 else 1
-            },
+        val selected = NextEpisodeSourcePolicy.select(
+            candidates = candidates,
+            stream = NextCandidate::stream,
+            preferredProviderId = current.sourceProviderId,
+            preferredBingeGroup = current.sourceBingeGroup,
         ) ?: return null
-        val source = selected.first
+        val source = selected.stream
         val subtitles = loadSubtitlesForNext(media, next, source, resolvedProviders)
-        return current.copy(
+        val nextRequest = current.copy(
             videoId = next.id,
             subtitle = next.episodeLabel(),
             source = PlaybackSource(
-                uri = selected.second,
-                mimeType = source.mimeType ?: selected.second.inferMimeType(),
+                uri = selected.url,
+                mimeType = source.mimeType ?: selected.url.inferMimeType(),
                 headers = source.headers,
                 subtitles = (source.subtitles + subtitles).distinctBy { "${it.language}|${it.url}|${it.id}" },
             ),
@@ -576,6 +609,9 @@ class PlayerActivity : ComponentActivity() {
             sourceProviderId = source.providerId,
             sourceBingeGroup = source.bingeGroup,
         )
+        val providerName = selected.providerName
+            ?: resolvedProviders.firstOrNull { it.subscription.id == source.providerId }?.subscription?.displayName
+        return NextPlayback(nextRequest, NextEpisodeSourcePolicy.sourceName(source, providerName))
     }
 
     private suspend fun loadSubtitlesForNext(
@@ -634,6 +670,7 @@ class PlayerActivity : ComponentActivity() {
         lastSavedPositionMillis = -1L
         nextEpisodeMessageState.value = null
         nextEpisodeDismissedVideoId.value = null
+        matchedDisplayModeState.value = null
         loadSegments(next, playbackSettingsState.value)
         displayModeController?.restore()
         controller?.apply {
