@@ -1,20 +1,12 @@
 package com.lamphaus.app.tv
 
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 
-/** TV-MOT-01: the boot sequence plays once per process and can always be skipped or omitted. */
+/** TV-MOT-01: the boot sequence plays once per launch and can always be skipped or omitted. */
 class TvBootStateTest {
-    @Before
-    @After
-    fun resetGate() {
-        TvBootGate.played = false
-    }
-
     @Test
     fun `plays on a cold start`() {
         assertTrue(TvBootState(enabled = true).active)
@@ -26,11 +18,12 @@ class TvBootStateTest {
     }
 
     @Test
-    fun `finishing marks the process so it never replays`() {
-        val first = TvBootState(enabled = true)
-        first.finish()
-        assertFalse(first.active)
-        assertFalse(TvBootState(enabled = true).active)
+    fun `finishing hides it and records the launch as played`() {
+        var played = false
+        val state = TvBootState(enabled = true) { played = true }
+        state.finish()
+        assertFalse(state.active)
+        assertTrue(played)
     }
 
     @Test

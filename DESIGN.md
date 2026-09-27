@@ -38,7 +38,7 @@ Poster cards, buttons, fields, and list rows use 4dp corners. Immersive hero car
 
 ## Motion
 
-State transitions last 150–250ms with fast-out-slow-in or linear-out-slow-in easing. TV focus responds in 160ms; labels lift by 6dp while fading in. Hero artwork crossfades in 220ms with a tiny horizontal drift after a short focus dwell. A cold start plays a one-time boot sequence: the house mark is traced as a blueprint, fills, its lamp flickers on and blooms, the wordmark lights letter by letter under a passing beam, and the lamp's light opens a circular window into Home once it is usable (any key skips; a still-visible loading mark keeps its 480ms beam), and adding to the library receives a 220ms confirmation pulse. Remove animations changes these transitions to instant state changes. Nothing auto-advances while the user is reading.
+State transitions last 150–250ms with fast-out-slow-in or linear-out-slow-in easing. TV focus responds in 160ms; labels lift by 6dp while fading in. Hero artwork crossfades in 220ms with a tiny horizontal drift after a short focus dwell. Each launch of the TV app plays a boot sequence: the house mark is traced as a blueprint, fills, its lamp flickers on and blooms, the wordmark lights letter by letter under a passing beam, and the lamp's light opens a circular window into Home once it is usable (any key skips; without it the loading mark is the lit lockup as a still frame), and adding to the library receives a 220ms confirmation pulse. Remove animations changes these transitions to instant state changes. Nothing auto-advances while the user is reading.
 
 ## Player chrome
 

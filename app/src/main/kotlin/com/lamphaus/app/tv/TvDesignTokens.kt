@@ -70,7 +70,6 @@ internal object TvMotionTokens {
      * this long, so passing through sections does not build every pane.
      */
     const val settingsPaneSettleMillis = 160L
-    const val startupSweepDurationMillis = 480
     const val focusedArtworkScale = 1.02f
 }
 

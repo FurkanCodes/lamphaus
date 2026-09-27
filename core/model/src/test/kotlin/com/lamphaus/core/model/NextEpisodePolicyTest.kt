@@ -6,8 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Nuvio's PlayerNextEpisodeRules: credits that run to the end trigger at their
- * start, a post-credits scene is never covered, the fallback uses only the
+ * The card appears as the credits start (or at the threshold, if earlier),
+ * waits only for a tagged post-credits scene, the fallback uses only the
  * selected threshold mode, and unknown duration disables the fallback without
  * blocking exact triggers.
  */
@@ -61,23 +61,32 @@ class NextEpisodePolicyTest {
     }
 
     @Test
-    fun `content after the credits waits for the post-credits scene`() {
-        // 100 s after the credits is a post-credits scene: the card waits for the end.
-        val segments = listOf(ending(start = 1_700_000, end = 1_800_000))
+    fun `content after the credits does not delay the card`() {
+        // X-Men '97 S2E4: IntroDB outro 30:15–30:45 in a 33:01 file.
+        val segments = listOf(ending(start = 1_815_000, end = 1_845_000))
 
-        assertFalse(shows(1_850_000, 1_900_000, segments))
-        assertTrue(shows(1_900_000, 1_900_000, segments))
+        assertFalse(shows(1_814_999, 1_981_000, segments))
+        assertTrue(shows(1_815_000, 1_981_000, segments))
     }
 
     @Test
-    fun `explicit post-credits scene delays the card until it ends`() {
+    fun `a tagged post-credits scene delays the card until it ends`() {
         val segments = listOf(
             ending(start = 1_700_000, end = 1_800_000),
             PlaybackSegment(PlaybackSegmentType.POST_CREDITS, startMillis = 1_800_000, endMillis = 1_860_000),
         )
 
         assertFalse(shows(1_859_999, 1_900_000, segments))
-        assertTrue(shows(1_881_000, 1_900_000, segments))
+        assertTrue(shows(1_860_000, 1_900_000, segments))
+    }
+
+    @Test
+    fun `credits data later than this file falls back to the threshold`() {
+        // Reference credits at 1_990_000 in a 2_000_000 file: 98% (1_960_000) comes first.
+        val segments = listOf(ending(start = 1_990_000, end = 2_000_000))
+
+        assertFalse(shows(1_959_999, 2_000_000, segments))
+        assertTrue(shows(1_960_000, 2_000_000, segments))
     }
 
     @Test

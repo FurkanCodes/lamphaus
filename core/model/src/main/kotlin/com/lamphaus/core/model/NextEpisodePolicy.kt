@@ -1,12 +1,14 @@
 package com.lamphaus.core.model
 
 /**
- * Pure timing policy for the next-episode card, ported from Nuvio's
- * PlayerNextEpisodeRules. With ending timestamps: the card waits for a
- * post-credits scene to finish, appears at the earliest ending when the
- * credits run to the end of the file, and otherwise follows the threshold.
- * Without them the selected fallback threshold decides. An unknown duration
- * disables the threshold and post-credits checks but not an exact ending start.
+ * Pure timing policy for the next-episode card. With ending timestamps the
+ * card appears as the credits start, which is when viewers reach for the next
+ * episode; it waits only for an explicitly tagged post-credits scene. Content
+ * that merely follows the credits (a next-week preview, a stinger nobody
+ * tagged) never delays it: the card is a small, non-blocking offer that never
+ * starts playback on its own. Without endings the selected fallback threshold
+ * decides. An unknown duration disables the threshold and post-credits checks
+ * but not an exact ending start.
  */
 object NextEpisodePolicy {
     const val PERCENT_MIN = 97f
@@ -38,19 +40,19 @@ object NextEpisodePolicy {
         )
         if (endings.isEmpty()) return positionMillis >= thresholdPosition
 
-        val latestEnding = endings.maxBy { it.endMillis ?: durationMillis }
-        // Never cover a post-credits scene: wait until it has played.
-        SkipSegmentPolicy.postCreditsSceneAfter(latestEnding, segments, durationMillis)?.let { scene ->
-            val sceneEnd = (scene.endMillis ?: durationMillis).coerceAtMost(durationMillis)
-            return positionMillis >= maxOf(sceneEnd, thresholdPosition)
+        val earliestEndingStart = endings.minOf { it.startMillis }
+        // Never cover a tagged post-credits scene: offer the next episode once it has played.
+        val taggedScene = segments
+            .filter { it.type == PlaybackSegmentType.POST_CREDITS && it.startMillis >= earliestEndingStart }
+            .minByOrNull { it.startMillis }
+        if (taggedScene != null) {
+            val sceneEnd = (taggedScene.endMillis ?: durationMillis).coerceAtMost(durationMillis)
+            return positionMillis >= sceneEnd
         }
-        val latestEndingEnd = endings.maxOf { it.endMillis ?: durationMillis }
-        return if (durationMillis - latestEndingEnd > durationMillis - thresholdPosition) {
-            positionMillis >= thresholdPosition
-        } else {
-            // The credits run to (nearly) the end of the file: offer the next episode as they start.
-            positionMillis >= endings.minOf { it.startMillis }
-        }
+        // Timestamps come from a reference release; whichever of the credits
+        // start and the fallback threshold comes first wins, so data that runs
+        // later than this file never delays the card.
+        return positionMillis >= minOf(earliestEndingStart, thresholdPosition)
     }
 
     private fun thresholdPositionMillis(
