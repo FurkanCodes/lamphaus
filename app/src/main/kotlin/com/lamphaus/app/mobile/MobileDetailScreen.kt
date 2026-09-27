@@ -704,7 +704,7 @@ private fun seasonLabel(season: Int): String =
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeCard(
+internal fun EpisodeCard(
     media: MediaPreview,
     episode: Episode,
     watched: Boolean,

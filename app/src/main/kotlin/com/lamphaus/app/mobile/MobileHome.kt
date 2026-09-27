@@ -405,8 +405,9 @@ private fun MobileHeroCarousel(
     val pagerState = rememberPagerState { items.size }
     val reducedMotion = rememberReducedMotion()
     // A cinematic stage: about two thirds of the screen on phones.
-    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.64f).dp
-        .coerceIn(460.dp, 640.dp)
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val windowHeight = with(density) { androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.height.toDp() }
+    val heroHeight = (windowHeight * 0.64f).coerceIn(460.dp, 640.dp)
     Box(
         Modifier
             .fillMaxWidth()
