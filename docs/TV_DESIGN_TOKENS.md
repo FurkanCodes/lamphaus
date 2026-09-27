@@ -34,7 +34,8 @@ The production source of truth is `TvDesignTokens.kt` plus `TvTheme.kt`. Values 
 | Delayed hero update | 240ms |
 | Hero transition | 220ms crossfade with 1–1.25% horizontal drift |
 | Library confirmation | 110ms out + 110ms return |
-| Startup sweep | 480ms, once |
+| Startup sweep | 480ms, once (loading mark only) |
+| Boot sequence | 1.9s intro, then a 620ms reveal from the lamp once Home is usable and frames are smooth; hold ≤3.5s; any key skips; off with remove animations (`TvBootTokens`) |
 
 ## Artwork behavior
 
