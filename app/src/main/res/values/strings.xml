@@ -13,7 +13,13 @@
     <string name="email_sign_in_link">Email me a sign-in link</string>
     <string name="cloud_not_configured">Cloud credentials are not configured in this build.</string>
     <string name="open_development_session">Open development session</string>
-    <string name="settings_and_profiles">Settings and profiles</string>
+    <string name="movies">Movies</string>
+    <string name="series">Series</string>
+    <string name="switch_profile_current">Switch profile, current profile %1$s</string>
+    <string name="who_is_watching">Who’s watching?</string>
+    <string name="manage_profiles">Manage profiles</string>
+    <string name="no_movie_catalogs">None of your add-ons offer movie catalogs yet.</string>
+    <string name="no_series_catalogs">None of your add-ons offer series catalogs yet.</string>
     <string name="library_empty_title">Your library is ready for its first title.</string>
     <string name="library_empty_body">Open a movie or series and choose Add to Library.</string>
     <string name="search_movies_series">Search movies and series</string>

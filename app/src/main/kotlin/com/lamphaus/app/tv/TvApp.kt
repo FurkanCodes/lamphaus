@@ -44,6 +44,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,6 +71,8 @@ import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.State
 import androidx.compose.runtime.snapshotFlow
 
@@ -165,6 +170,7 @@ import com.lamphaus.app.ui.nextUpEpisode
 import com.lamphaus.app.ui.NextUpKind
 import com.lamphaus.app.ui.continueWatchingItemsFromSections
 import com.lamphaus.app.ui.firstDistinctMedia
+import com.lamphaus.app.ui.homeSectionsOfType
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.app.ui.isRenderableHomeCatalogSection
 import com.lamphaus.app.ui.menuActions
@@ -811,6 +817,22 @@ private fun TvSignedIn(
             .toSet()
     }
     var navHasFocus by remember { mutableStateOf(true) }
+    val profileFocus = remember { FocusRequester() }
+    var profileSwitcherOpen by rememberSaveable { mutableStateOf(false) }
+    var returnToProfileAvatar by remember { mutableStateOf(false) }
+    var showProfilesSettings by remember { mutableStateOf(false) }
+    val closeProfileSwitcher = {
+        profileSwitcherOpen = false
+        returnToProfileAvatar = true
+    }
+    // TV-NAV-02: dismissing the switcher returns focus to the avatar that opened it.
+    LaunchedEffect(returnToProfileAvatar) {
+        if (returnToProfileAvatar) {
+            withFrameNanos { }
+            runCatching { profileFocus.requestFocus() }
+            returnToProfileAvatar = false
+        }
+    }
     val openMedia: (MediaPreview) -> Unit = { media ->
         pendingMediaKey = media.stableKey
         viewModel.loadDetail(media)
@@ -830,6 +852,8 @@ private fun TvSignedIn(
     val ambient = rememberTvContentAmbient {
         when (destination) {
             TvDestination.HOME,
+            TvDestination.MOVIES,
+            TvDestination.SERIES,
             TvDestination.DISCOVER,
             TvDestination.LIBRARY,
             TvDestination.SEARCH,
@@ -911,6 +935,49 @@ private fun TvSignedIn(
             focusDestination = destination
         }
     }
+    // Home, Movies and Series share one layout (TV-CNT-01); only the catalog
+    // type differs.
+    @Composable
+    fun SignedInHome(catalogType: String?) {
+        TvHome(
+            state = state,
+            onMedia = openMedia,
+            onHeroMedia = openHeroMedia,
+            onFocused = { lastFocusedMedia = it },
+            onAddSource = {
+                destination = TvDestination.SETTINGS
+                focusDestination = TvDestination.SETTINGS
+            },
+            onLoadMore = viewModel::loadMoreCatalog,
+            onRetry = viewModel::retryCatalogPage,
+            onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
+            onRetryHome = viewModel::retryHomeCatalogSections,
+            initialFocusRequester = contentFocus.getValue(destination),
+            restoreMediaKey = pendingMediaKey,
+            onFocusRestored = { pendingMediaKey = null },
+            spotlight = state.tvHomeLayout == TvHomeLayout.SPOTLIGHT,
+            catalogType = catalogType,
+        )
+    }
+
+    if (profileSwitcherOpen) {
+        TvProfileSwitcher(
+            profiles = state.profiles,
+            activeProfileId = state.activeProfileId,
+            onProfile = { profileId ->
+                viewModel.selectProfile(profileId)
+                closeProfileSwitcher()
+            },
+            onManageProfiles = {
+                profileSwitcherOpen = false
+                showProfilesSettings = true
+                destination = TvDestination.SETTINGS
+                focusDestination = TvDestination.SETTINGS
+            },
+            onDismiss = closeProfileSwitcher,
+        )
+    }
+
     CompositionLocalProvider(LocalTvContentAccent provides ambient) {
         Box(Modifier.fillMaxSize()) {
             if (backgroundArtwork && destination != TvDestination.SETTINGS) {
@@ -921,10 +988,12 @@ private fun TvSignedIn(
                 activeProfile = state.activeProfile,
                 focusDestination = focusDestination,
                 requesters = navFocus,
+                profileRequester = profileFocus,
                 contentDownRequester = contentFocus.getValue(destination),
                 onFocusHandled = { focusDestination = null },
                 onHasFocus = { navHasFocus = it },
                 onDestination = { destination = it },
+                onProfileSwitcher = { profileSwitcherOpen = true },
                 modifier = Modifier.padding(
                     start = TvLayoutTokens.screenHorizontalPadding,
                     top = TvLayoutTokens.screenTopPadding,
@@ -950,32 +1019,18 @@ private fun TvSignedIn(
             // and mediaFocusRestore can reach it, per TV-NAV-02/TV-FOC-03.
             contentStates.SaveableStateProvider(destination.name) {
                 when (destination) {
-                    TvDestination.HOME -> TvHome(
-                        state = state,
-                        onMedia = openMedia,
-                        onHeroMedia = openHeroMedia,
-                        onFocused = { lastFocusedMedia = it },
-                        onAddSource = {
-                            destination = TvDestination.SETTINGS
-                            focusDestination = TvDestination.SETTINGS
-                        },
-                        onLoadMore = viewModel::loadMoreCatalog,
-                        onRetry = viewModel::retryCatalogPage,
-                        onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
-                        onRetryHome = viewModel::retryHomeCatalogSections,
-                        initialFocusRequester = contentFocus.getValue(TvDestination.HOME),
-                        restoreMediaKey = pendingMediaKey,
-                        onFocusRestored = { pendingMediaKey = null },
-                        spotlight = state.tvHomeLayout == TvHomeLayout.SPOTLIGHT,
-                    )
+                    TvDestination.HOME -> SignedInHome(catalogType = null)
 
+                    TvDestination.MOVIES,
+                    TvDestination.SERIES,
+                    -> SignedInHome(catalogType = destination.catalogType)
 
                     TvDestination.DISCOVER -> TvDiscover(
                         state = state,
                         onPrepare = viewModel::prepareDiscover,
+                        onBrowseType = viewModel::selectBrowseType,
                         onBrowseCatalog = viewModel::selectBrowseCatalog,
                         onBrowseGenre = viewModel::selectBrowseGenre,
-                        onClearGenre = viewModel::clearBrowseGenre,
                         onLoadMore = viewModel::loadMoreBrowse,
                         onRetry = viewModel::retryBrowse,
                         onMedia = openMedia,
@@ -989,11 +1044,6 @@ private fun TvSignedIn(
                         initialSearch = initialSearch.orEmpty(),
                         state = state,
                         onSearch = viewModel::searchContent,
-                        onBrowseType = viewModel::selectBrowseType,
-                        onBrowseCatalog = viewModel::selectBrowseCatalog,
-                        onBrowseGenre = viewModel::selectBrowseGenre,
-                        onLoadMore = viewModel::loadMoreBrowse,
-                        onRetry = viewModel::retryBrowse,
                         onCatalogLoadMore = viewModel::loadMoreCatalog,
                         onCatalogRetry = viewModel::retryCatalogPage,
                         onMedia = openMedia,
@@ -1016,6 +1066,8 @@ private fun TvSignedIn(
                     TvDestination.SETTINGS -> TvSettings(
                         state = state,
                         viewModel = viewModel,
+                        showProfiles = showProfilesSettings,
+                        onProfilesShown = { showProfilesSettings = false },
                         sectionFocusRequester = contentFocus.getValue(TvDestination.SETTINGS),
                         topNavigationRequester = navFocus.getValue(TvDestination.SETTINGS),
                         updateViewModel = updateViewModel,
@@ -1052,6 +1104,7 @@ private fun TvHome(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     spotlight: Boolean = false,
+    catalogType: String? = null,
 ) {
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
     var contentHasFocus by remember { mutableStateOf(false) }
@@ -1062,10 +1115,12 @@ private fun TvHome(
     var featuredSelection by remember { mutableStateOf<MediaPreview?>(null) }
     // QA-08: never flatten every catalog title here; with 100+ addon rows
     // that ran on each row load. Both lookups stop as early as they can.
-    val heroItems = remember(state.sections) { firstDistinctMedia(state.sections, limit = 5) }
+    // Movies and Series are this page filtered to one catalog type (TV-CNT-01).
+    val sections = remember(state.sections, catalogType) { homeSectionsOfType(state.sections, catalogType) }
+    val heroItems = remember(sections) { firstDistinctMedia(sections, limit = 5) }
     val featured = featuredSelection ?: heroItems.firstOrNull()
-    val continueWatching = remember(state.progress, state.sections) {
-        continueWatchingItemsFromSections(state.progress, state.sections)
+    val continueWatching = remember(state.progress, sections) {
+        continueWatchingItemsFromSections(state.progress, sections)
     }
     LaunchedEffect(focusedCandidate) {
         focusedCandidate?.let {
@@ -1073,8 +1128,8 @@ private fun TvHome(
             featuredSelection = it
         }
     }
-    val visibleHomeSections = remember(state.sections) {
-        state.sections.filter(CatalogSection::isRenderableHomeCatalogSection)
+    val visibleHomeSections = remember(sections) {
+        sections.filter(CatalogSection::isRenderableHomeCatalogSection)
     }
     // TV-CNT-03 pins the focused row to the top, so the row above is always
     // fully off-screen and the row after next appears on every move. Keep
@@ -1119,7 +1174,7 @@ private fun TvHome(
     }
     val homeLoading = state.initialContentLoading ||
         state.homeCatalogBatch.loadingMore ||
-        state.sections.any(CatalogSection::initialLoading)
+        sections.any(CatalogSection::initialLoading)
     SpotlightColumnScrolling(enabled = spotlight) {
         LazyColumn(
             state = listState,
@@ -1197,7 +1252,7 @@ private fun TvHome(
                 !state.homeCatalogBatch.loadingMore &&
                 !state.homeCatalogBatch.loadMoreFailed &&
                 !state.homeCatalogBatch.hasMore &&
-                state.sections.isEmpty()
+                sections.isEmpty()
             ) {
                 item("empty") {
                     Column(
@@ -1206,7 +1261,13 @@ private fun TvHome(
                     ) {
                         TvEmptyMark()
                         Text(
-                            stringResource(R.string.install_first_addon),
+                            stringResource(
+                                when (catalogType) {
+                                    null -> R.string.install_first_addon
+                                    "series" -> R.string.no_series_catalogs
+                                    else -> R.string.no_movie_catalogs
+                                },
+                            ),
                             style = MaterialTheme.typography.headlineSmall,
                         )
                         Text(
@@ -1848,40 +1909,30 @@ private fun TvMediaGrid(
         }
     }
 }
-/**
- * Discover (TV-NAV-01): addon-declared category overview in a four-column
- * grid, then five-column poster results. Categories come from the selected
- * addon catalog's declared genre options — never a hard-coded list.
- */
-private val categoryGradientStarts = listOf(
-    Color(0xFF1E2023),
-    Color(0xFF232733),
-    Color(0xFF20272A),
-    Color(0xFF262331),
-    Color(0xFF1F262E),
-)
-private val categoryGradientEnds = listOf(
-    Color(0xFF354964),
-    Color(0xFF2F3B52),
-    Color(0xFF31424D),
-    Color(0xFF3A3450),
-    Color(0xFF2E3A4A),
-)
 
-/** Deterministic muted instrument-blue gradient per category id (SHR-PROD-03). */
-private fun categoryGradient(id: String): Brush {
-    val seed = id.fold(0) { acc, char -> acc * 31 + char.code }
-    val index = Math.floorMod(seed, categoryGradientStarts.size)
-    return Brush.linearGradient(listOf(categoryGradientStarts[index], categoryGradientEnds[index]))
+/** Shown name for a catalog type; add-ons may declare types beyond movie and series. */
+@Composable
+private fun catalogTypeLabel(type: String): String = when (type.lowercase()) {
+    "movie" -> stringResource(R.string.movies)
+    "series" -> stringResource(R.string.series)
+    else -> type.replaceFirstChar(Char::uppercase)
 }
 
+/** Posters left below the viewport when the next page is requested. */
+private const val DISCOVER_PREFETCH_ITEMS = 10
+
+/**
+ * Discover is one scrolling page: a type and catalog strip, a genre strip, and
+ * the poster grid for that selection. Choosing a chip filters in place, so
+ * focus never leaves the strip it was on (TV-NAV-05, TV-CNT-02).
+ */
 @Composable
 private fun TvDiscover(
     state: AppUiState,
     onPrepare: () -> Unit,
+    onBrowseType: (String) -> Unit,
     onBrowseCatalog: (String) -> Unit,
     onBrowseGenre: (String?) -> Unit,
-    onClearGenre: () -> Unit,
     onLoadMore: () -> Unit,
     onRetry: () -> Unit,
     onMedia: (MediaPreview) -> Unit,
@@ -1892,272 +1943,231 @@ private fun TvDiscover(
 ) {
     LaunchedEffect(Unit) { onPrepare() }
     val browse = state.browse
-    val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
-    val activeGenre = browse.selectedGenre
-    var showResults by rememberSaveable { mutableStateOf(false) }
-    // Back reverses the latest layer: results → overview → destination (TV-NAV-02).
-    BackHandler(enabled = showResults) {
-        showResults = false
-        if (activeGenre != null) onClearGenre()
-    }
-    Column(Modifier.fillMaxSize()) {
-        Text(
-            text = stringResource(R.string.discover),
-            modifier = Modifier
-                .padding(
-                    start = TvLayoutTokens.screenHorizontalPadding,
-                    end = TvLayoutTokens.screenHorizontalPadding,
-                    bottom = 16.dp,
-                )
-                .semantics { heading() },
-            style = MaterialTheme.typography.headlineSmall,
+    // Catalogs that need an input Discover cannot supply (Cinemeta's
+    // calendar and last-videos feeds) are not browsable here.
+    val targets = remember(browse.targets) { browse.targets.filter { it.unavailableReason == null } }
+    if (targets.isEmpty()) {
+        TvDiscoverMessage(
+            text = stringResource(
+                if (browse.targets.isEmpty() && state.providers.none { it.enabled }) {
+                    R.string.install_first_addon
+                } else {
+                    R.string.nothing_here
+                },
+            ),
         )
-        if (browse.targets.isEmpty()) {
-            Column(
-                modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TvEmptyMark()
-                Text(
-                    stringResource(R.string.install_first_addon),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
-            return@Column
-        }
-        // Down from the navigation lands on the top-most control, the
-        // selected catalog chip (TV-NAV-05); the grid below may be empty.
-        val selectedIndex = browse.targets.indexOfFirst { it.id == browse.selectedCatalogId }.coerceAtLeast(0)
-        val chipRow = rememberTvRowFocus(selectedIndex)
-        LazyRow(
-            modifier = Modifier.tvRowFocus(chipRow),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(start = TvLayoutTokens.screenHorizontalPadding),
-        ) {
-            itemsIndexed(browse.targets, key = { _, target -> target.id }) { index, target ->
-                TvFilterChip(
-                    label = target.catalog.name,
-                    selected = browse.selectedCatalogId == target.id,
-                    onClick = { onBrowseCatalog(target.id) },
-                    modifier = (if (index == selectedIndex) Modifier.focusRequester(initialFocusRequester) else Modifier)
-                        .tvRowItem(chipRow, index),
-                )
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-        if (showResults) {
-            TvCategoryResults(
-                genreLabel = activeGenre ?: stringResource(R.string.all_categories),
-                result = browse.result,
-                loading = browse.loading,
-                onMedia = onMedia,
-                onFocused = onFocused,
-                initialFocusRequester = remember { FocusRequester() },
-                restoreMediaKey = restoreMediaKey,
-                onFocusRestored = onFocusRestored,
-                onLoadMore = onLoadMore,
-                onRetry = onRetry,
-            )
-        } else {
-            val genres = selectedTarget?.genres.orEmpty()
-            if (genres.isEmpty()) {
-                Column(
-                    modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    TvEmptyMark()
-                    Text(
-                        stringResource(R.string.nothing_here),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(4),
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(
-                        start = TvLayoutTokens.screenHorizontalPadding,
-                        end = TvLayoutTokens.screenHorizontalPadding,
-                        bottom = TvLayoutTokens.bottomListPadding,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                ) {
-                    item(key = "all") {
-                        TvCategoryTile(
-                            label = stringResource(R.string.all_categories),
-                            gradient = categoryGradient("all"),
-                            onClick = {
-                                onBrowseGenre(null)
-                                showResults = true
-                            },
-                        )
-                    }
-                    items(genres, key = { it }) { genre ->
-                        TvCategoryTile(
-                            label = genre,
-                            gradient = categoryGradient(genre),
-                            onClick = {
-                                onBrowseGenre(genre)
-                                showResults = true
-                            },
-                        )
-                    }
-                }
-            }
+        return
+    }
+    val types = remember(targets) { targets.map { it.catalog.type }.distinct() }
+    val selectedType = browse.selectedType?.takeIf(types::contains) ?: types.first()
+    val catalogs = remember(targets, selectedType) { targets.filter { it.catalog.type == selectedType } }
+    val selectedTarget = catalogs.firstOrNull { it.id == browse.selectedCatalogId }
+    val genres = selectedTarget?.genres.orEmpty()
+    val result = browse.result
+    val items = result?.items.orEmpty()
+    val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    val typeRow = rememberTvRowFocus(types.indexOf(selectedType).coerceAtLeast(0))
+    val genreRow = rememberTvRowFocus((genres.indexOf(browse.selectedGenre) + 1).coerceAtLeast(0))
+
+    // Back from a scrolled grid returns to the filters first; the next Back
+    // reaches the navigation (TV-NAV-02, TV-NAV-07).
+    val scrolled by remember { derivedStateOf { gridState.firstVisibleItemIndex > 0 } }
+    BackHandler(enabled = scrolled) {
+        scope.launch {
+            gridState.scrollToItem(0)
+            withFrameNanos { }
+            runCatching { typeRow.entry.requestFocus() }
         }
     }
-}
 
-@Composable
-private fun TvCategoryTile(
-    label: String,
-    gradient: Brush,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    TvFocusableSurface(
-        onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(196f / 110f),
-        containerColor = Color.Transparent,
-        focusedContainerColor = Color.Transparent,
-    ) { _ ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(TvShapeTokens.card)
-                .background(gradient)
-                .padding(20.dp),
-            contentAlignment = Alignment.BottomStart,
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+    // Pages arrive as the viewer nears the end; no Load more stop (SHR-PROD-02).
+    val currentResult by rememberUpdatedState(result)
+    LaunchedEffect(gridState) {
+        snapshotFlow {
+            val info = gridState.layoutInfo
+            (info.visibleItemsInfo.lastOrNull()?.index ?: 0) >= info.totalItemsCount - DISCOVER_PREFETCH_ITEMS
         }
-    }
-}
-
-/** Five-column poster grid; the header keeps a stable height while results refresh (TV-CNT-02). */
-@Composable
-private fun TvCategoryResults(
-    genreLabel: String,
-    result: CatalogSection?,
-    loading: Boolean,
-    onMedia: (MediaPreview) -> Unit,
-    onFocused: (MediaPreview) -> Unit,
-    initialFocusRequester: FocusRequester,
-    restoreMediaKey: String?,
-    onFocusRestored: () -> Unit,
-    onLoadMore: () -> Unit,
-    onRetry: () -> Unit,
-) {
-    Column(Modifier.fillMaxSize()) {
-        Text(
-            text = genreLabel,
-            modifier = Modifier
-                .padding(
-                    start = TvLayoutTokens.screenHorizontalPadding,
-                    end = TvLayoutTokens.screenHorizontalPadding,
-                    bottom = 16.dp,
-                )
-                .semantics { heading() },
-            style = MaterialTheme.typography.headlineSmall,
-        )
-        when {
-            result?.errorMessage != null -> {
-                Text(
-                    text = result.errorMessage,
-                    modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
-                    color = MaterialTheme.colorScheme.error,
-                )
-                TvAction(
-                    label = stringResource(R.string.retry),
-                    icon = Icons.Outlined.Refresh,
-                    onClick = onRetry,
-                )
-            }
-            result != null -> {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(
-                        start = TvLayoutTokens.screenHorizontalPadding,
-                        end = TvLayoutTokens.screenHorizontalPadding,
-                        bottom = TvLayoutTokens.bottomListPadding,
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(40.dp),
-                ) {
-                    itemsIndexed(result.items, key = { _, item -> item.stableKey }) { index, item ->
-                        TvMediaCard(
-                            media = item,
-                            onClick = { onMedia(item) },
-                            onFocused = { onFocused(item) },
-                            showLabel = true,
-                            revealLabelOnFocus = true,
-                            showRating = true,
-                            modifier = (if (index == 0) Modifier.focusRequester(initialFocusRequester) else Modifier)
-                                .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
-                        )
-                    }
-                    if (result.loadMoreError != null || result.hasMore) {
-                        item("catalog-action") {
-                            TvAction(
-                                label = stringResource(
-                                    if (result.loadMoreError != null) R.string.retry else R.string.load_more,
-                                ),
-                                icon = Icons.Outlined.Refresh,
-                                onClick = if (result.loadMoreError != null) onRetry else onLoadMore,
-                            )
-                        }
-                    }
+            .distinctUntilChanged()
+            .collect { nearEnd ->
+                val section = currentResult ?: return@collect
+                if (nearEnd && section.hasMore && !section.loadingMore && section.loadMoreError == null && section.items.isNotEmpty()) {
+                    onLoadMore()
                 }
             }
-            loading -> TvCategoryResultsSkeleton(modifier = Modifier.weight(1f))
-        }
     }
-}
 
-/** Preserves the final grid geometry while the first category page loads. */
-@Composable
-private fun TvCategoryResultsSkeleton(modifier: Modifier = Modifier) {
-    val pulse = rememberInfiniteTransition(label = "category results loading").animateFloat(
-        initialValue = 0.58f,
-        targetValue = 0.98f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "category results pulse",
-    )
+    val fullSpan: LazyGridItemSpanScope.() -> GridItemSpan = { GridItemSpan(maxLineSpan) }
     LazyVerticalGrid(
         columns = GridCells.Fixed(5),
-        modifier = modifier,
+        state = gridState,
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = TvLayoutTokens.screenHorizontalPadding,
             end = TvLayoutTokens.screenHorizontalPadding,
             bottom = TvLayoutTokens.bottomListPadding,
         ),
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-        verticalArrangement = Arrangement.spacedBy(40.dp),
+        horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
+        verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        items(10, key = { "category-skeleton-$it" }) {
-            Box(
-                modifier = Modifier
-                    .size(width = TvLayoutTokens.posterWidth, height = TvLayoutTokens.posterHeight)
-                    .clip(TvShapeTokens.card)
-                    .skeletonPulseBackground(Color.White) { 0.04f + 0.05f * pulse.value },
-            )
+        item(key = "discover-selectors", span = fullSpan) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Type first, then that type's catalogs, so "Popular" is never
+                // ambiguous between movies and series.
+                Row(
+                    modifier = Modifier.tvRowFocus(typeRow, plainRow = true),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    types.forEachIndexed { index, type ->
+                        TvFilterChip(
+                            label = catalogTypeLabel(type),
+                            selected = type == selectedType,
+                            onClick = { if (type != selectedType) onBrowseType(type) },
+                            modifier = (if (type == selectedType) Modifier.focusRequester(initialFocusRequester) else Modifier)
+                                .tvRowItem(typeRow, index),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .padding(horizontal = 12.dp)
+                            .size(width = 1.dp, height = 24.dp)
+                            .background(TvSurfaceTokens.subtleBorder),
+                    )
+                    val multipleProviders = catalogs.distinctBy { it.providerId }.size > 1
+                    catalogs.forEachIndexed { index, target ->
+                        TvFilterChip(
+                            label = if (multipleProviders) "${target.catalog.name} · ${target.providerName}" else target.catalog.name,
+                            selected = target.id == selectedTarget?.id,
+                            onClick = { if (target.id != selectedTarget?.id) onBrowseCatalog(target.id) },
+                            modifier = Modifier.tvRowItem(typeRow, types.size + index),
+                        )
+                    }
+                }
+                if (genres.isNotEmpty()) {
+                    LazyRow(
+                        modifier = Modifier.tvRowFocus(genreRow),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        item(key = "all-genres") {
+                            TvFilterChip(
+                                label = stringResource(R.string.all_genres),
+                                selected = browse.selectedGenre == null,
+                                onClick = { if (browse.selectedGenre != null) onBrowseGenre(null) },
+                                modifier = Modifier.tvRowItem(genreRow, 0),
+                            )
+                        }
+                        itemsIndexed(genres, key = { _, genre -> "genre:$genre" }) { index, genre ->
+                            TvFilterChip(
+                                label = genre,
+                                selected = browse.selectedGenre == genre,
+                                onClick = { if (browse.selectedGenre != genre) onBrowseGenre(genre) },
+                                modifier = Modifier.tvRowItem(genreRow, index + 1),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "discover-heading", span = fullSpan) {
+            Column(Modifier.padding(top = 8.dp)) {
+                Text(
+                    text = listOfNotNull(selectedTarget?.catalog?.name, browse.selectedGenre)
+                        .joinToString(" · ")
+                        .ifEmpty { catalogTypeLabel(selectedType) },
+                    modifier = Modifier.semantics { heading() },
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                selectedTarget?.providerName?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.64f),
+                    )
+                }
+            }
+        }
+        when {
+            // Failure stays under the filters, which remain usable (SHR-PROD-04).
+            result?.errorMessage != null && items.isEmpty() -> item(key = "discover-error", span = fullSpan) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = result.errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    TvAction(
+                        label = stringResource(R.string.retry),
+                        icon = Icons.Outlined.Refresh,
+                        onClick = onRetry,
+                    )
+                }
+            }
+            items.isEmpty() && (browse.loading || result == null) -> items(10, key = { "discover-skeleton-$it" }) {
+                TvPosterSkeleton()
+            }
+            items.isEmpty() -> item(key = "discover-empty", span = fullSpan) {
+                Text(
+                    text = stringResource(R.string.nothing_here),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            else -> {
+                itemsIndexed(items, key = { _, item -> item.stableKey }) { _, item ->
+                    TvMediaCard(
+                        media = item,
+                        onClick = { onMedia(item) },
+                        onFocused = { onFocused(item) },
+                        showLabel = true,
+                        revealLabelOnFocus = true,
+                        showRating = result?.providerId == CINEMETA_PROVIDER_ID,
+                        modifier = Modifier.mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
+                    )
+                }
+                if (result?.loadingMore == true) {
+                    items(5, key = { "discover-more-$it" }) { TvPosterSkeleton() }
+                }
+                if (result?.loadMoreError != null) {
+                    item(key = "discover-retry", span = fullSpan) {
+                        TvAction(
+                            label = stringResource(R.string.retry),
+                            icon = Icons.Outlined.Refresh,
+                            onClick = onRetry,
+                        )
+                    }
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun TvDiscoverMessage(text: String) {
+    Column(
+        modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        TvEmptyMark()
+        Text(
+            text = text,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+    }
+}
+
+/** A poster-sized placeholder that keeps the final grid geometry (TV-CNT-02). */
+@Composable
+private fun TvPosterSkeleton() {
+    val pulse = rememberSkeletonPulse(label = "poster loading")
+    Box(
+        modifier = Modifier
+            .size(width = TvLayoutTokens.posterWidth, height = TvLayoutTokens.posterHeight)
+            .clip(TvShapeTokens.card)
+            .skeletonPulseBackground(Color.White) { 0.04f + 0.05f * pulse.value },
+    )
 }
 
 @Composable
@@ -2165,11 +2175,6 @@ private fun TvSearch(
     initialSearch: String,
     state: AppUiState,
     onSearch: (String) -> Unit,
-    onBrowseType: (String) -> Unit,
-    onBrowseCatalog: (String) -> Unit,
-    onBrowseGenre: (String?) -> Unit,
-    onLoadMore: () -> Unit,
-    onRetry: () -> Unit,
     onCatalogLoadMore: (String) -> Unit,
     onCatalogRetry: (String) -> Unit,
     onMedia: (MediaPreview) -> Unit,
@@ -2181,132 +2186,67 @@ private fun TvSearch(
     var query by rememberSaveable { mutableStateOf(initialSearch) }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(query) { onSearch(query) }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+    val blank = query.isBlank()
+    // Rows are titled by what they hold: every search catalog is named after
+    // its browse feed ("Popular"), which read as a filter, not a result.
+    val typeLabels = mapOf(
+        "movie" to stringResource(R.string.movies),
+        "series" to stringResource(R.string.series),
+    )
+    val sections = if (blank) {
+        state.sections.filter { it.items.isNotEmpty() }.take(2)
+    } else {
+        state.searchSections.map { section ->
+            section.copy(
+                title = typeLabels[section.baseQuery.type.lowercase()]
+                    ?: section.baseQuery.type.replaceFirstChar(Char::uppercase),
+            )
+        }
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.rowSpacing),
+        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
     ) {
-        TvEditableTextField(
-            value = query,
-            onValueChange = { query = it },
-            label = stringResource(R.string.search_label),
-            placeholder = stringResource(R.string.search_tv_hint),
-            contentPadding = PaddingValues(horizontal = 28.dp, vertical = 20.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            onNavigateDown = { focusManager.moveFocus(FocusDirection.Down) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(60.dp)
-                .focusRequester(initialFocusRequester),
-        )
-        Spacer(Modifier.height(24.dp))
-        if (query.isBlank()) {
-            val browse = state.browse
-            val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
-            val types = browse.targets.map { it.catalog.type }.distinct()
-            val typeRow = rememberTvRowFocus(types.indexOf(browse.selectedType).coerceAtLeast(0))
-            LazyRow(
-                modifier = Modifier.tvRowFocus(typeRow),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                itemsIndexed(types, key = { _, type -> type }) { index, type ->
-                    TvFilterChip(
-                        label = type.replaceFirstChar(Char::uppercase),
-                        selected = browse.selectedType == type,
-                        onClick = { onBrowseType(type) },
-                        modifier = Modifier.tvRowItem(typeRow, index),
-                    )
-                }
+        item(key = "search-field") {
+            Box(Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding)) {
+                TvEditableTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = stringResource(R.string.search_label),
+                    placeholder = stringResource(R.string.search_tv_hint),
+                    contentPadding = PaddingValues(horizontal = 28.dp, vertical = 20.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    onNavigateDown = { focusManager.moveFocus(FocusDirection.Down) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .focusRequester(initialFocusRequester),
+                )
             }
-            Spacer(Modifier.height(12.dp))
-            val catalogs = browse.targets.filter { it.catalog.type == browse.selectedType }
-            val catalogRow = rememberTvRowFocus(catalogs.indexOfFirst { it.id == browse.selectedCatalogId }.coerceAtLeast(0))
-            LazyRow(
-                modifier = Modifier.tvRowFocus(catalogRow),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                itemsIndexed(catalogs, key = { _, target -> target.id }) { index, target ->
-                    TvFilterChip(
-                        label = target.catalog.name,
-                        selected = browse.selectedCatalogId == target.id,
-                        onClick = { onBrowseCatalog(target.id) },
-                        modifier = Modifier.tvRowItem(catalogRow, index),
-                    )
-                }
+        }
+        when {
+            !blank && state.searching && sections.isEmpty() -> item(key = "search-loading") {
+                val pulse = rememberSkeletonPulse(label = "search loading")
+                TvCatalogItemsLoadingSkeleton(
+                    skeletonColor = MaterialTheme.colorScheme.surfaceVariant,
+                    pulse = { pulse.value },
+                )
             }
-            selectedTarget?.genres?.takeIf(List<String>::isNotEmpty)?.let { genres ->
-                Spacer(Modifier.height(12.dp))
-                val genreRow = rememberTvRowFocus((genres.indexOf(browse.selectedGenre) + 1).coerceAtLeast(0))
-                LazyRow(
-                    modifier = Modifier.tvRowFocus(genreRow),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    item {
-                        TvFilterChip(
-                            label = stringResource(R.string.all_genres),
-                            selected = browse.selectedGenre == null,
-                            onClick = { onBrowseGenre(null) },
-                            modifier = Modifier.tvRowItem(genreRow, 0),
-                        )
-                    }
-                    itemsIndexed(genres, key = { _, genre -> genre }) { index, genre ->
-                        TvFilterChip(
-                            label = genre,
-                            selected = browse.selectedGenre == genre,
-                            onClick = { onBrowseGenre(genre) },
-                            modifier = Modifier.tvRowItem(genreRow, index + 1),
-                        )
-                    }
+            !blank && sections.none { it.items.isNotEmpty() || it.errorMessage != null } && !state.searching ->
+                item(key = "search-empty") {
+                    TvDiscoverMessage(text = stringResource(R.string.search_no_results))
                 }
-            }
-            Spacer(Modifier.height(16.dp))
-            val result = browse.result
-            when {
-                result?.errorMessage != null -> Text(result.errorMessage, color = MaterialTheme.colorScheme.error)
-                result != null -> TvMediaGrid(
-                    title = result.title,
-                    media = result.items,
+            else -> items(sections, key = CatalogSection::id) { section ->
+                TvCatalogRow(
+                    section = section,
                     onMedia = onMedia,
                     onFocused = onFocused,
-                    initialFocusRequester = remember { FocusRequester() },
+                    onLoadMore = { onCatalogLoadMore(section.id) },
+                    onRetry = { onCatalogRetry(section.id) },
                     restoreMediaKey = restoreMediaKey,
                     onFocusRestored = onFocusRestored,
-                    section = result,
-                    onLoadMore = onLoadMore,
-                    onRetry = onRetry,
                 )
-                else -> {
-                    TvEmptyMark()
-                    Text(stringResource(R.string.install_first_addon), style = MaterialTheme.typography.titleMedium)
-                }
-            }
-        } else if (state.searching) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-        } else if (state.searchSections.isEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvEmptyMark()
-                Text(
-                    stringResource(R.string.search_no_results),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.rowSpacing),
-                contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
-            ) {
-                items(state.searchSections, key = CatalogSection::id) { section ->
-                    TvCatalogRow(
-                        section = section,
-                        onMedia = onMedia,
-                        onFocused = onFocused,
-                        onLoadMore = { onCatalogLoadMore(section.id) },
-                        onRetry = { onCatalogRetry(section.id) },
-                        restoreMediaKey = restoreMediaKey,
-                        onFocusRestored = onFocusRestored,
-                    )
-                }
             }
         }
     }
@@ -3209,6 +3149,8 @@ private enum class TvSettingsSection(
 private fun TvSettings(
     state: AppUiState,
     viewModel: AppViewModel,
+    showProfiles: Boolean,
+    onProfilesShown: () -> Unit,
     sectionFocusRequester: FocusRequester,
     topNavigationRequester: FocusRequester,
     updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
@@ -3220,6 +3162,14 @@ private fun TvSettings(
     var shownSection by rememberSaveable { mutableStateOf(section) }
     var moveIntoPane by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+    // "Manage profiles" in the profile switcher opens this section directly.
+    LaunchedEffect(showProfiles) {
+        if (showProfiles) {
+            section = TvSettingsSection.PROFILES
+            shownSection = TvSettingsSection.PROFILES
+            onProfilesShown()
+        }
+    }
     LaunchedEffect(section) {
         if (shownSection != section) {
             delay(TvMotionTokens.settingsPaneSettleMillis)

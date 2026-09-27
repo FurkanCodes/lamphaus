@@ -29,7 +29,7 @@ Use Inter through Material type roles on TV. The complete scale is defined once 
 ## Layout
 
 - Mobile: 16dp compact margins; 24dp medium/expanded margins; 4/8/12-column thinking; bottom navigation under 600dp and rail from 600dp.
-- TV: 960×540 mdpi reference canvas, 58dp horizontal safe margins, 32dp top navigation origin, 20dp rail gutters, a 320dp hero, and no critical element near overscan edges.
+- TV: 960×540 mdpi reference canvas, 58dp horizontal safe margins, 32dp top navigation origin, 20dp rail gutters, a 320dp hero, and no critical element near overscan edges. The top navigation places the profile avatar at the start, Search · Home · Movies · Series · Discover · Library in the centre, and a Settings gear at the end beside the Lamphaus wordmark.
 - Touch targets are at least 48×48dp. TV targets leave enough surrounding space for focused scale without clipping.
 
 ## Shape and elevation

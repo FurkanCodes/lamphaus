@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,8 +34,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,8 +89,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntSize
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.core.text.HtmlCompat
@@ -111,12 +112,22 @@ internal enum class TvDestination(
     @StringRes val labelRes: Int,
     val icon: ImageVector,
     val showLabel: Boolean = true,
+    /** Movies and Series show the Home layout filtered to this catalog type (TV-CNT-01). */
+    val catalogType: String? = null,
 ) {
     HOME(R.string.home, Icons.Filled.Home),
+    MOVIES(R.string.movies, Icons.Filled.Movie, catalogType = "movie"),
+    SERIES(R.string.series, Icons.Filled.Tv, catalogType = "series"),
     DISCOVER(R.string.discover, Icons.Filled.Explore),
     LIBRARY(R.string.library, Icons.Filled.VideoLibrary),
     SEARCH(R.string.search, Icons.Filled.Search, showLabel = false),
-    SETTINGS(R.string.settings, Icons.Filled.Settings),
+    SETTINGS(R.string.settings, Icons.Filled.Settings, showLabel = false),
+    ;
+
+    companion object {
+        /** TV-NAV-01: the centred tabs; the avatar sits at the start and Settings at the end. */
+        val centerTabs = listOf(SEARCH, HOME, MOVIES, SERIES, DISCOVER, LIBRARY)
+    }
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -230,6 +241,25 @@ internal fun TvEditableTextField(
                 } else if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                     finishEditing()
                     true
+                } else if (
+                    event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionDown || event.key == Key.DirectionUp)
+                ) {
+                    // Arrows reach the field only once the keyboard is gone. On TV
+                    // the IME's own Back can hide it without the field ever seeing
+                    // Back, which left it editing and swallowing Down, so results
+                    // below were unreachable (TV-NAV-03, TV-NAV-05).
+                    finishEditing()
+                    if (event.key == Key.DirectionDown) {
+                        onNavigateDown() || focusManager.moveFocus(FocusDirection.Down)
+                    } else {
+                        focusManager.moveFocus(FocusDirection.Up)
+                    }
+                    true
+                } else if (event.key == Key.DirectionCenter) {
+                    // Select on a field whose keyboard was dismissed brings it back.
+                    if (event.type == KeyEventType.KeyUp) keyboardController?.show()
+                    true
                 } else {
                     false
                 }
@@ -264,10 +294,12 @@ internal fun TvTopNavigation(
     activeProfile: Profile?,
     focusDestination: TvDestination?,
     requesters: Map<TvDestination, FocusRequester>,
+    profileRequester: FocusRequester,
     contentDownRequester: FocusRequester,
     onFocusHandled: () -> Unit,
     onHasFocus: (Boolean) -> Unit,
     onDestination: (TvDestination) -> Unit,
+    onProfileSwitcher: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(focusDestination) {
@@ -276,7 +308,9 @@ internal fun TvTopNavigation(
             onFocusHandled()
         }
     }
-    Row(
+    // TV-NAV-01: avatar at the start, the tabs centred, Settings at the end.
+    // All three share one row, so Left/Right traverse them spatially.
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .height(TvLayoutTokens.topBarHeight)
@@ -289,80 +323,85 @@ internal fun TvTopNavigation(
                     event.key == Key.DirectionDown &&
                     runCatching { contentDownRequester.requestFocus() }.getOrDefault(false)
             },
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         TvProfileNavigationItem(
-            selected = selectedDestination == TvDestination.SETTINGS,
             profile = activeProfile,
             modifier = Modifier
-                .focusRequester(requesters.getValue(TvDestination.SETTINGS)),
-            onFocused = { onDestination(TvDestination.SETTINGS) },
-            onClick = { onDestination(TvDestination.SETTINGS) },
+                .align(Alignment.CenterStart)
+                .focusRequester(profileRequester),
+            onClick = onProfileSwitcher,
         )
-        Spacer(Modifier.width(20.dp))
-        TvDestination.entries.filterNot { it == TvDestination.SETTINGS }.forEach { destination ->
-            TvTopNavigationItem(
-                destination = destination,
-                selected = selectedDestination == destination,
-                modifier = Modifier
-                    .focusRequester(requesters.getValue(destination)),
-                onFocused = { onDestination(destination) },
-                onClick = { onDestination(destination) },
-            )
-        }
-        Spacer(Modifier.weight(1f))
         Row(
-            modifier = Modifier.alpha(0.72f),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.align(Alignment.Center),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Image(
-                painter = painterResource(R.drawable.ic_lamphaus_foreground),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
+            TvDestination.centerTabs.forEach { destination ->
+                TvTopNavigationItem(
+                    destination = destination,
+                    selected = selectedDestination == destination,
+                    modifier = Modifier.focusRequester(requesters.getValue(destination)),
+                    onFocused = { onDestination(destination) },
+                    onClick = { onDestination(destination) },
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TvTopNavigationItem(
+                destination = TvDestination.SETTINGS,
+                selected = selectedDestination == TvDestination.SETTINGS,
+                modifier = Modifier.focusRequester(requesters.getValue(TvDestination.SETTINGS)),
+                onFocused = { onDestination(TvDestination.SETTINGS) },
+                onClick = { onDestination(TvDestination.SETTINGS) },
             )
-            Text(
-                text = stringResource(R.string.app_name).uppercase(),
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 1.6.sp,
-                ),
-                color = MaterialTheme.colorScheme.onBackground,
-            )
+            Row(
+                modifier = Modifier.alpha(0.72f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_lamphaus_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                )
+                Text(
+                    text = stringResource(R.string.app_name).uppercase(),
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 1.6.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
         }
     }
 }
 
+/** Select opens the profile switcher; focusing it never changes the page. */
 @Composable
 private fun TvProfileNavigationItem(
-    selected: Boolean,
     profile: Profile?,
-    onFocused: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val description = stringResource(R.string.settings_and_profiles)
+    val description = stringResource(R.string.switch_profile_current, profile?.name.orEmpty())
     Box(
         modifier = modifier
             .size(32.dp)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
+            .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
             .focusable()
-            .semantics {
-                this.selected = selected
-                contentDescription = description
-            },
+            .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
         TvProfileAvatar(
             name = profile?.name.orEmpty(),
             avatarKey = profile?.avatarKey.orEmpty(),
             focused = focused,
-            selected = selected,
             modifier = Modifier.fillMaxWidth().height(32.dp),
         )
     }
