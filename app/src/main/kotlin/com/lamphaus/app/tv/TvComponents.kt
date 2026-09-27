@@ -53,6 +53,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -87,6 +88,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntSize
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -322,14 +324,38 @@ internal fun TvTopNavigation(
                 )
             }
         }
-        TvTopNavigationItem(
-            destination = TvDestination.SETTINGS,
-            selected = selectedDestination == TvDestination.SETTINGS,
-            boxModifier = Modifier.align(Alignment.CenterEnd),
-            modifier = Modifier.focusRequester(requesters.getValue(TvDestination.SETTINGS)),
-            onFocused = { onDestination(TvDestination.SETTINGS) },
-            onClick = { onDestination(TvDestination.SETTINGS) },
-        )
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TvTopNavigationItem(
+                destination = TvDestination.SETTINGS,
+                selected = selectedDestination == TvDestination.SETTINGS,
+                modifier = Modifier.focusRequester(requesters.getValue(TvDestination.SETTINGS)),
+                onFocused = { onDestination(TvDestination.SETTINGS) },
+                onClick = { onDestination(TvDestination.SETTINGS) },
+            )
+            Row(
+                modifier = Modifier.alpha(0.72f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_lamphaus_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                )
+                Text(
+                    text = stringResource(R.string.app_name).uppercase(),
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 1.6.sp,
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+        }
     }
 }
 
@@ -367,12 +393,11 @@ private fun TvTopNavigationItem(
     onFocused: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    boxModifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
     val label = stringResource(destination.labelRes)
     Box(
-        modifier = boxModifier.height(32.dp),
+        modifier = Modifier.height(32.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(

@@ -23,10 +23,9 @@ The production source of truth is `TvDesignTokens.kt` plus `TvTheme.kt`. Values 
 | --- | --- |
 | Card/button/field/list shape | 4dp |
 | Hero shape | 12dp |
-| Card focus outline | 3dp, clamped artwork accent; Lamphaus primary `#A8C8FF` fallback |
-| Artwork accent | HCT tone 80, chroma ≤ 48; container tone 30, chroma ≤ 36; seeds below chroma 12 fall back |
+| Card focus outline | 3dp, Lamphaus primary `#A8C8FF` |
 | Focused artwork scale | 1.02× |
-| Focus halo | 7dp elevation, 28% of the focus outline color |
+| Focus halo | 7dp elevation, 28% Lamphaus primary |
 | Selected navigation beam | 24×2dp |
 | Focused container | `#E3E2E6` |
 | Focused content | `#2F3033` |
