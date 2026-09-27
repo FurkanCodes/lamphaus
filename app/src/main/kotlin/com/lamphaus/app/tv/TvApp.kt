@@ -125,6 +125,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -139,6 +140,7 @@ import androidx.tv.material3.Switch
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.R
 import com.lamphaus.core.data.perf.PerfTrace
+import com.lamphaus.app.ui.LocalAccountPhotoUrl
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.LocalArtworkResolver
@@ -249,6 +251,7 @@ fun TvApp(
         CompositionLocalProvider(
             LocalArtworkResolver provides artworkResolver,
             LocalTvContentMenuEnvironment provides menuEnvironment,
+            LocalAccountPhotoUrl provides (state.account as? AccountState.SignedIn)?.avatarUrl,
         ) {
         LaunchedEffect(state.playbackRequest) {
             state.playbackRequest?.let {
@@ -3530,6 +3533,31 @@ private fun TvSettingsMenuItem(
 
 @Composable
 private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
+    var pickerProfileId by rememberSaveable { mutableStateOf<String?>(null) }
+    val rowFocus = remember { mutableMapOf<String, FocusRequester>() }
+    var returnFocusTo by remember { mutableStateOf<String?>(null) }
+    // TV-NAV-02: closing the picker returns focus to the row that opened it.
+    LaunchedEffect(returnFocusTo) {
+        val id = returnFocusTo ?: return@LaunchedEffect
+        withFrameNanos { }
+        runCatching { rowFocus[id]?.requestFocus() }
+        returnFocusTo = null
+    }
+    state.profiles.firstOrNull { it.id == pickerProfileId }?.let { profile ->
+        val close = {
+            pickerProfileId = null
+            returnFocusTo = profile.id
+        }
+        TvAvatarPicker(
+            profile = profile,
+            accountPhotoAvailable = LocalAccountPhotoUrl.current != null,
+            onAvatar = { key ->
+                viewModel.setProfileAvatar(profile.id, key)
+                close()
+            },
+            onDismiss = close,
+        )
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -3539,21 +3567,33 @@ private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
             Text(stringResource(R.string.profiles), style = MaterialTheme.typography.headlineSmall)
         }
         items(state.profiles, key = { it.id }) { profile ->
-            TvSettingsRow(onClick = { viewModel.selectProfile(profile.id) }) { focused ->
+            val requester = rowFocus.getOrPut(profile.id) { FocusRequester() }
+            // Switching profiles lives in the navigation avatar; here a row
+            // edits that profile's avatar.
+            TvSettingsRow(
+                onClick = { pickerProfileId = profile.id },
+                modifier = Modifier.focusRequester(requester),
+                height = 64.dp,
+            ) { focused ->
                 TvProfileAvatar(
-                    name = profile.name,
                     avatarKey = profile.avatarKey,
                     focused = focused,
                     selected = state.activeProfileId == profile.id,
-                    modifier = Modifier.size(32.dp),
+                    modifier = Modifier.size(40.dp),
                 )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    text = profile.name,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
-                )
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = profile.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(R.string.choose_avatar),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (state.activeProfileId == profile.id) {
                     Text(
                         stringResource(R.string.active),
@@ -4224,13 +4264,15 @@ private fun TvAboutSettings(updateViewModel: com.lamphaus.app.update.UpdateViewM
 @Composable
 private fun TvSettingsRow(
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    height: Dp = 48.dp,
     content: @Composable RowScope.(focused: Boolean) -> Unit,
 ) {
     TvFocusableSurface(
         onClick = onClick,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .height(48.dp),
+            .height(height),
         containerColor = TvSurfaceTokens.elevated,
     ) { focused ->
         Row(

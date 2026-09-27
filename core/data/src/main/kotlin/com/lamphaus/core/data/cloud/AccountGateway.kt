@@ -8,7 +8,13 @@ import kotlinx.coroutines.flow.StateFlow
 sealed interface AccountState {
     data object Loading : AccountState
     data object SignedOut : AccountState
-    data class SignedIn(val userId: String, val displayName: String?, val email: String?) : AccountState
+    data class SignedIn(
+        val userId: String,
+        val displayName: String?,
+        val email: String?,
+        /** The identity provider's profile photo (for example Google's), HTTPS only. */
+        val avatarUrl: String? = null,
+    ) : AccountState
 }
 
 interface AccountGateway {

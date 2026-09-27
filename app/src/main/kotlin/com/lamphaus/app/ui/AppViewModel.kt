@@ -403,6 +403,15 @@ class AppViewModel(
         container.preferences.setActiveProfile(profileId)
     }
 
+    fun setProfileAvatar(profileId: String, avatarKey: String) = viewModelScope.launch {
+        val profile = state.value.profiles.firstOrNull { it.id == profileId } ?: return@launch
+        if (profile.avatarKey == avatarKey) return@launch
+        val updated = profile.copy(avatarKey = avatarKey, updatedAtEpochMillis = System.currentTimeMillis())
+        // A null PIN keeps the stored PIN hash.
+        container.libraryRepository.saveProfile(updated, null)
+        (state.value.account as? AccountState.SignedIn)?.userId?.let { container.cloudSyncGateway.saveProfile(it, updated) }
+    }
+
     fun addProfile(name: String, child: Boolean, pin: CharArray? = null) = viewModelScope.launch {
         val profile = Profile(
             id = UUID.randomUUID().toString(),
