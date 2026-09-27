@@ -239,117 +239,6 @@ private data class SubtitleLanguageRailItem(
     val trackCount: Int,
 )
 
-/** Quiet startup surface shown until the source is prepared and the output is matched. */
-@Composable
-internal fun PlaybackLoadingSurface(
-    request: PlaybackRequest,
-    isTelevision: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val reducedMotion = rememberReducedMotion()
-    val logoAlpha by rememberInfiniteTransition(label = "playback-loading-logo").animateFloat(
-        initialValue = 0.62f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_400),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "playback-loading-logo-alpha",
-    )
-    val artwork = request.artworkUrl
-        ?: request.preview?.backgroundUrl
-        ?: request.preview?.posterUrl
-    val logo = request.preview?.logoUrl
-    val metadata = listOfNotNull(
-        request.subtitle?.takeIf(String::isNotBlank),
-        request.preview?.releaseYear?.toString(),
-    ).joinToString(" · ")
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(PlayerBackground)
-            .testTag("playback-loading")
-            .semantics {
-                contentDescription = "Loading ${request.title}"
-            },
-    ) {
-        if (!artwork.isNullOrBlank()) {
-            AsyncImage(
-                model = artwork,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to Color.Black.copy(alpha = 0.48f),
-                    0.48f to Color.Black.copy(alpha = 0.60f),
-                    1f to Color.Black.copy(alpha = 0.88f),
-                ),
-            ),
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = if (isTelevision) 64.dp else 28.dp, vertical = 36.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Spacer(Modifier.size(1.dp))
-            if (!logo.isNullOrBlank()) {
-                AsyncImage(
-                    model = logo,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .widthIn(max = if (isTelevision) 360.dp else 260.dp)
-                        .heightIn(max = if (isTelevision) 150.dp else 112.dp)
-                        .alpha(if (reducedMotion) 0.9f else logoAlpha),
-                )
-            } else {
-                Image(
-                    painter = painterResource(R.drawable.ic_lamphaus_foreground),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(if (isTelevision) 108.dp else 84.dp)
-                        .alpha(if (reducedMotion) 0.9f else logoAlpha),
-                    contentScale = ContentScale.Fit,
-                )
-            }
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = request.title,
-                    color = PlayerOnSurface,
-                    fontFamily = PlayerFont,
-                    fontSize = if (isTelevision) 26.sp else 21.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-                if (metadata.isNotBlank()) {
-                    Text(
-                        text = metadata,
-                        color = PlayerOnSurfaceMuted,
-                        fontFamily = PlayerFont,
-                        fontSize = if (isTelevision) 16.sp else 14.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(UnstableApi::class)
 @Composable
 internal fun PlaybackScreen(
     request: PlaybackRequest,
@@ -1161,7 +1050,12 @@ internal fun PlaybackScreen(
             PausedInfoOverlay(request)
         }
 
-        if (loadingSurfaceVisible) {
+        // The loading surface dissolves into the first frames instead of cutting away.
+        AnimatedVisibility(
+            visible = loadingSurfaceVisible,
+            enter = if (reducedMotion) EnterTransition.None else fadeIn(tween(220)),
+            exit = if (reducedMotion) ExitTransition.None else fadeOut(tween(420)),
+        ) {
             PlaybackLoadingSurface(
                 request = request,
                 isTelevision = isTelevision,
