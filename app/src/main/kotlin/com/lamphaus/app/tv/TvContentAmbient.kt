@@ -1,6 +1,5 @@
 package com.lamphaus.app.tv
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.LruCache
@@ -25,7 +24,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalResources
 import coil3.SingletonImageLoader
@@ -37,7 +35,7 @@ import coil3.request.bitmapConfig
 import coil3.size.Size
 import coil3.toBitmap
 import com.google.android.material.color.DynamicColorsOptions
-import com.google.android.material.color.utilities.Hct
+import com.google.android.material.color.MaterialColors
 import com.lamphaus.app.ui.ArtworkResolution
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.core.model.MediaPreview
@@ -77,29 +75,10 @@ internal data class AmbientArtworkSource(
     val data: Any,
 )
 
-internal data class TvAmbientPalette(
+private data class TvAmbientPalette(
     val accent: Color,
     val accentContainer: Color,
 )
-
-/**
- * SHR-PROD-08, SHR-PROD-03: the artwork's seed is re-toned so the accent is
- * always light enough for the focus ring on the dark scheme and the container
- * dark enough for the wash, and its chroma is capped so saturated artwork
- * tints the room without turning the interface loud. Near-grey artwork has no
- * useful hue, so it keeps the instrument-blue defaults (null).
- */
-@SuppressLint("RestrictedApi") // Material's pure-Java HCT utilities; no public equivalent.
-internal fun tvAmbientPalette(seedArgb: Int): TvAmbientPalette? {
-    val seed = Hct.fromInt(seedArgb)
-    if (seed.chroma < TvAmbientTokens.neutralSeedChroma) return null
-    fun role(tone: Double, maxChroma: Double) =
-        Color(Hct.from(seed.hue, minOf(seed.chroma, maxChroma), tone).toInt())
-    return TvAmbientPalette(
-        accent = role(TvAmbientTokens.accentTone, TvAmbientTokens.accentMaxChroma),
-        accentContainer = role(TvAmbientTokens.accentContainerTone, TvAmbientTokens.accentContainerMaxChroma),
-    )
-}
 
 private val paletteCache = LruCache<String, TvAmbientPalette>(PALETTE_CACHE_CAPACITY)
 
@@ -211,7 +190,7 @@ internal fun TvContentAmbientBackground(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Brush.horizontalGradient(colorStops = horizontalScrimStops(background, accentContainer)))
-                    .background(Brush.verticalGradient(colorStops = verticalScrimStops(background, accentContainer))),
+                    .background(Brush.verticalGradient(colorStops = verticalScrimStops(background))),
             )
         }
     }
@@ -223,12 +202,10 @@ private fun horizontalScrimStops(background: Color, accentContainer: Color) = ar
     1f to accentContainer.copy(alpha = TvAmbientTokens.horizontalScrimRightAlpha),
 )
 
-private fun verticalScrimStops(background: Color, accentContainer: Color) = arrayOf(
+private fun verticalScrimStops(background: Color) = arrayOf(
     0f to background.copy(alpha = TvAmbientTokens.verticalScrimTopAlpha),
     0.55f to Color.Transparent.copy(alpha = TvAmbientTokens.verticalScrimMiddleAlpha),
-    // The floor of the room picks up the title's color instead of going flat.
-    1f to lerp(background, accentContainer, TvAmbientTokens.verticalScrimBottomTint)
-        .copy(alpha = TvAmbientTokens.verticalScrimBottomAlpha),
+    1f to background.copy(alpha = TvAmbientTokens.verticalScrimBottomAlpha),
 )
 
 /** The ambient stack (TvAmbientTokens) baked by [bakeArtwork] at 960x540. */
@@ -246,7 +223,7 @@ internal fun composeAmbient(
         imageAlpha = TvAmbientTokens.imageAlpha,
         scrims = listOf(
             ScrimLayer(horizontalScrimStops(background, accentContainer), horizontal = true),
-            ScrimLayer(verticalScrimStops(background, accentContainer), horizontal = false),
+            ScrimLayer(verticalScrimStops(background), horizontal = false),
         ),
     ).asImageBitmap()
 
@@ -300,7 +277,13 @@ private suspend fun loadAmbient(
             .build()
             .contentBasedSeedColor
             ?: return@runCatching null
-        tvAmbientPalette(seed)
+        val roles = MaterialColors.getColorRoles(seed, false)
+        val accent = roles.accent
+        val accentContainer = roles.accentContainer
+        TvAmbientPalette(
+            accent = Color(accent),
+            accentContainer = Color(accentContainer),
+        )
     }.getOrNull()?.also { paletteCache.put(artwork.key, it) }
 
     val accentContainer = palette?.accentContainer ?: defaultAccentContainer

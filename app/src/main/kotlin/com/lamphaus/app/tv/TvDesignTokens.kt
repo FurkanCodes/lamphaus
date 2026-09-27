@@ -60,9 +60,6 @@ internal object TvSurfaceTokens {
     val subtleBorder = Color.White.copy(alpha = 0.10f)
     val ratingScrim = Color.Black.copy(alpha = 0.62f)
     val ratingBorder = Color.White.copy(alpha = 0.16f)
-    val carouselLabel = Color.White.copy(alpha = 0.80f)
-    val carouselIndicatorActive = Color.White
-    val carouselIndicator = Color.White.copy(alpha = 0.48f)
 }
 
 internal object TvMotionTokens {
@@ -80,21 +77,11 @@ internal object TvMotionTokens {
 }
 
 internal object TvAmbientTokens {
-    val imageAlpha = 0.36f
+    val imageAlpha = 0.30f
     val horizontalScrimLeftAlpha = 0.97f
     val horizontalScrimMiddleAlpha = 0.72f
-    val horizontalScrimRightAlpha = 0.55f
+    val horizontalScrimRightAlpha = 0.42f
     val verticalScrimTopAlpha = 0.35f
     val verticalScrimMiddleAlpha = 0f
     val verticalScrimBottomAlpha = 0.94f
-    /** Share of the artwork's container color mixed into the bottom scrim. */
-    val verticalScrimBottomTint = 0.12f
-
-    /** SHR-PROD-08: HCT tones and chroma caps for the artwork-derived palette. */
-    const val accentTone = 80.0
-    const val accentMaxChroma = 48.0
-    const val accentContainerTone = 30.0
-    const val accentContainerMaxChroma = 36.0
-    /** Seeds below this chroma are effectively grey and keep the brand blue. */
-    const val neutralSeedChroma = 12.0
 }

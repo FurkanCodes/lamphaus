@@ -1712,7 +1712,7 @@ private fun TvHero(
                 .fillMaxSize()
                 .tvHeroScrim(
                     background = MaterialTheme.colorScheme.background,
-                    tint = { ambient.accent ?: primary },
+                    primary = MaterialTheme.colorScheme.primary,
                 ),
         )
         if (hasCarousel) {
@@ -1725,7 +1725,7 @@ private fun TvHero(
             ) {
                 Text(
                     text = stringResource(R.string.hero_carousel_position, carouselPosition, carouselItems.size),
-                    color = TvSurfaceTokens.carouselLabel,
+                    color = Color.White.copy(alpha = 0.80f),
                     style = MaterialTheme.typography.labelSmall,
                 )
                 carouselItems.forEachIndexed { index, _ ->
@@ -1736,9 +1736,9 @@ private fun TvHero(
                             .clip(RoundedCornerShape(2.dp))
                             .background(
                                 if (index == currentIndex) {
-                                    TvSurfaceTokens.carouselIndicatorActive
+                                    Color.White
                                 } else {
-                                    TvSurfaceTokens.carouselIndicator
+                                    Color.White.copy(alpha = 0.48f)
                                 },
                             ),
                     )
@@ -1773,7 +1773,7 @@ private fun TvHero(
                     text = it,
                     modifier = Modifier.padding(top = 8.dp),
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.68f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
