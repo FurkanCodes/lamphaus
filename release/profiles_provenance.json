@@ -1,15 +1,14 @@
 {
-  "generatedAt": "2026-09-26T10:05:09Z",
-  "sourceCommit": "93564f487e792ed2bb054becdfefca535307c7d6",
+  "generatedAt": "2026-09-27T21:45:26Z",
+  "sourceCommit": "2c8ff4ed9d362668608c8ca900c5af02c8bdb83c",
   "profileKind": "startup",
-  "profileSha256": "012f4d7571fe36aa5cd528245054253f600dc1d3b323b72d791857c60338c506",
+  "profileSha256": "935257e649811901471c6a7744fe2dd3bc9cf16f32aa459b38f0a0d7a2c5ddd2",
   "devices": {
     "mobile": "FocusPhone(AVD) Android 16 emulator (retained 2026-09-18)",
-    "tv": "SEI Robotics Box R 4K Plus (Amlogic sc2, Mali-G31) Android 14, physical device (regenerated with playback journey)"
+    "tv": "SEI Robotics Box R 4K Plus (Amlogic sc2, Mali-G31) Android 14, physical device (regenerated with the boot sequence, D-pad rails, details and playback)"
   },
   "rules": [
     "QA-07",
     "QA-08"
-  ],
-  "retainedFor": "1.0.0-beta.15: owner chose to reuse the beta.14 TV profile although Home loading changed; regenerate next time startup or Home paths change (REL-04)"
+  ]
 }

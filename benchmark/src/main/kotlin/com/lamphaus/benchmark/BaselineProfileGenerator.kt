@@ -107,6 +107,7 @@ class BaselineProfileGenerator {
         pressHome()
         startActivityAndWait(tvIntent())
         device.requireFixtureHome()
+        device.awaitTvBootSequence()
         device.waitForIdle()
         // D-pad traversal across rails with focus restoration.
         repeat(3) {
@@ -133,6 +134,7 @@ class BaselineProfileGenerator {
         pressHome()
         startActivityAndWait(tvIntent())
         device.requireFixtureHome()
+        device.awaitTvBootSequence()
         device.waitForIdle()
         device.pressDPadDown()
         device.waitForIdle()
