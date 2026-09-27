@@ -45,11 +45,69 @@ class TvNavigationBehaviorTest {
     val compose = createComposeRule()
 
     @Test
-    fun destinationBoundsKeepSearchAfterLibrary() {
+    fun centerTabsLeadWithSearchAndIncludeMoviesAndSeries() {
+        // TV-NAV-01: avatar at the start, these tabs centred, Settings at the end.
         assertEquals(
-            listOf(TvDestination.HOME, TvDestination.DISCOVER, TvDestination.LIBRARY, TvDestination.SEARCH),
-            TvDestination.entries.filterNot { it == TvDestination.SETTINGS },
+            listOf(
+                TvDestination.SEARCH,
+                TvDestination.HOME,
+                TvDestination.MOVIES,
+                TvDestination.SERIES,
+                TvDestination.LIBRARY,
+            ),
+            TvDestination.centerTabs,
         )
+    }
+
+    @Test
+    fun avatarOpensProfileSwitcherWithoutChangingDestinationAndSettingsSitsAtTheEnd() {
+        val navigationRequesters = TvDestination.entries.associateWith { FocusRequester() }
+        val profileRequester = FocusRequester()
+        val contentRequester = FocusRequester()
+        val destinations = mutableListOf<TvDestination>()
+        var switcherOpened = 0
+
+        compose.setContent {
+            LamphausTvTheme {
+                Surface(modifier = Modifier.width(960.dp)) {
+                    TvTopNavigation(
+                        selectedDestination = TvDestination.HOME,
+                        activeProfile = null,
+                        focusDestination = TvDestination.SEARCH,
+                        requesters = navigationRequesters,
+                        profileRequester = profileRequester,
+                        contentDownRequester = contentRequester,
+                        onFocusHandled = {},
+                        onHasFocus = {},
+                        onDestination = { destinations += it },
+                        onProfileSwitcher = { switcherOpened++ },
+                    )
+                }
+            }
+        }
+
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Search").assertIsFocused().performKeyInput {
+            keyDown(Key.DirectionLeft)
+            keyUp(Key.DirectionLeft)
+        }
+        val avatar = compose.onNodeWithContentDescription("Switch profile", substring = true)
+        avatar.assertIsFocused()
+        destinations.clear()
+        avatar.performKeyInput {
+            keyDown(Key.DirectionCenter)
+            keyUp(Key.DirectionCenter)
+        }
+        assertEquals(1, switcherOpened)
+        assertEquals(emptyList<TvDestination>(), destinations)
+
+        compose.runOnIdle { navigationRequesters.getValue(TvDestination.LIBRARY).requestFocus() }
+        compose.onNodeWithContentDescription("Library").assertIsFocused().performKeyInput {
+            keyDown(Key.DirectionRight)
+            keyUp(Key.DirectionRight)
+        }
+        compose.onNodeWithContentDescription("Settings").assertIsFocused()
+        assertEquals(TvDestination.SETTINGS, destinations.last())
     }
 
     @Test
@@ -280,9 +338,10 @@ class TvNavigationBehaviorTest {
     }
 
     @Test
-    fun settingsContentUpExitFocusesAvatarNavigationItem() {
+    fun settingsContentUpExitFocusesSettingsNavigationItem() {
         val navigationRequesters = TvDestination.entries.associateWith { FocusRequester() }
         val contentRequester = FocusRequester()
+        val profileRequester = FocusRequester()
 
         compose.setContent {
             LamphausTvTheme {
@@ -293,10 +352,12 @@ class TvNavigationBehaviorTest {
                             activeProfile = null,
                             focusDestination = null,
                             requesters = navigationRequesters,
+                            profileRequester = profileRequester,
                             contentDownRequester = contentRequester,
                             onFocusHandled = {},
                             onHasFocus = {},
                             onDestination = {},
+                            onProfileSwitcher = {},
                         )
                         Box(
                             modifier = Modifier
@@ -327,7 +388,7 @@ class TvNavigationBehaviorTest {
             keyDown(Key.DirectionUp)
             keyUp(Key.DirectionUp)
         }
-        compose.onNodeWithContentDescription("Settings and profiles").assertIsFocused()
+        compose.onNodeWithContentDescription("Settings").assertIsFocused()
     }
 
     @Test

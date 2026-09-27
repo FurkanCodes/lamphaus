@@ -245,6 +245,18 @@ internal fun continueWatchingItemsFromSections(
     return continueWatchingItems(progress, mediaByKey)
 }
 
+/** TV-CNT-01: Movies and Series show only the Home catalogs of their type; null keeps every catalog. */
+internal fun homeSectionsOfType(sections: List<CatalogSection>, catalogType: String?): List<CatalogSection> =
+    if (catalogType == null) sections else sections.filter { it.baseQuery.type.equals(catalogType, ignoreCase = true) }
+
+/** Distinct genres offered by the available browse catalogs of [catalogType], in catalog order. */
+internal fun browseGenresOfType(targets: List<CatalogBrowseTarget>, catalogType: String): List<String> =
+    targets.asSequence()
+        .filter { it.unavailableReason == null && it.catalog.type.equals(catalogType, ignoreCase = true) }
+        .flatMap { it.genres.asSequence() }
+        .distinct()
+        .toList()
+
 /** The first [limit] distinct titles in catalog order, stopping as soon as they are found. */
 internal fun firstDistinctMedia(sections: List<CatalogSection>, limit: Int): List<MediaPreview> {
     val seen = HashSet<String>()
