@@ -573,17 +573,22 @@ private fun MobileSignedInApp(
             val detailProgress = state.progress.lastOrNull {
                 it.mediaKey == state.selectedDetail.preview.stableKey && it.isResumable()
             }
+            val detailInLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey }
             MobileDetailScreen(
                 detail = state.selectedDetail,
-                expanded = widthSizeClass == WindowWidthSizeClass.Expanded,
-                inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
+                enrichment = state.detailEnrichment,
+                inLibrary = detailInLibrary,
                 watchedEpisodeIds = watchedEpisodeIds,
                 spoilerProtection = state.spoilerProtection,
                 onBack = viewModel::clearDetail,
                 resumeProgress = detailProgress,
                 onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
-                onLibrary = { viewModel.addToLibrary(state.selectedDetail.preview) },
+                onLibrary = {
+                    val preview = state.selectedDetail.preview
+                    if (detailInLibrary) viewModel.removeFromLibrary(preview.stableKey) else viewModel.addToLibrary(preview)
+                },
                 onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
+                onOpenMedia = viewModel::loadDetail,
                 progress = state.progress,
                 onOpenMenu = viewModel::openContentMenu,
             )
