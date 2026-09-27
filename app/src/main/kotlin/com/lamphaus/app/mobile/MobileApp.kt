@@ -90,6 +90,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lamphaus.app.ui.StreamBadgeMatcher
+import com.lamphaus.app.ui.LocalStreamBadges
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.rememberReducedMotion
 import kotlinx.coroutines.delay
@@ -143,7 +145,11 @@ fun MobileApp(
         val artworkResolver = remember(state.artworkOverrides) {
             ArtworkResolver(state.artworkOverrides.associateBy { it.mediaKey })
         }
-        CompositionLocalProvider(LocalArtworkResolver provides artworkResolver) {
+        val streamBadges = remember(state.streamBadges) { StreamBadgeMatcher(state.streamBadges) }
+        CompositionLocalProvider(
+            LocalArtworkResolver provides artworkResolver,
+            LocalStreamBadges provides streamBadges,
+        ) {
         val snackbar = remember { SnackbarHostState() }
         LaunchedEffect(state.message) {
             state.message?.let {

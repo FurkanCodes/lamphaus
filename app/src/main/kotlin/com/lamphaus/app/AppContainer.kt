@@ -91,6 +91,7 @@ class AppContainer(context: Context) {
         )?.takeIf { it.length >= 8 }
 
     val preferences = UserPreferences(context)
+    val streamBadgeRepository = com.lamphaus.core.data.repository.StreamBadgeRepository(context)
 
     /** Android's own low-memory classification, used for lighter TV defaults. */
     val isLowRamDevice: Boolean =

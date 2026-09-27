@@ -80,6 +80,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -728,6 +729,46 @@ private fun SettingsPairedDevicesPage(state: AppUiState, viewModel: AppViewModel
     var deviceToRevoke by remember { mutableStateOf<PairedDevice?>(null) }
     LaunchedEffect(Unit) { viewModel.loadDevices() }
     SettingsPage(title = stringResource(R.string.paired_devices)) {
+        item {
+            // Nuvio-compatible badges.json; its image badges decorate source cards.
+            var badgeUrl by rememberSaveable { mutableStateOf("") }
+            SettingsCard(stringResource(R.string.stream_badges)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = state.streamBadges?.let { rules ->
+                            pluralStringResource(
+                                R.plurals.stream_badges_status,
+                                rules.enabledFilterCount,
+                                rules.enabledFilterCount,
+                                runCatching { java.net.URI(rules.sourceUrl).host }.getOrNull().orEmpty(),
+                            )
+                        } ?: stringResource(R.string.stream_badges_description),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value = badgeUrl,
+                        onValueChange = { badgeUrl = it },
+                        label = { Text(stringResource(R.string.stream_badges_address)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.importStreamBadges(badgeUrl) },
+                            enabled = badgeUrl.trim().startsWith("https://", ignoreCase = true) && !state.streamBadgesImporting,
+                        ) {
+                            Text(stringResource(if (state.streamBadgesImporting) R.string.stream_badges_importing else R.string.stream_badges_import))
+                        }
+                        if (state.streamBadges != null) {
+                            OutlinedButton(onClick = viewModel::removeStreamBadges) {
+                                Text(stringResource(R.string.stream_badges_remove))
+                            }
+                        }
+                    }
+                }
+            }
+        }
         item {
             SettingsCard(stringResource(R.string.paired_devices)) {
                 if (state.pairedDevices.isEmpty()) {
