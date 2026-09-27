@@ -96,6 +96,7 @@ import androidx.tv.material3.Text
 import androidx.core.text.HtmlCompat
 import com.lamphaus.app.R
 import androidx.compose.runtime.rememberCoroutineScope
+import com.lamphaus.app.ui.ProfileAvatarArt
 import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.ContentMenuTarget
@@ -399,7 +400,6 @@ private fun TvProfileNavigationItem(
         contentAlignment = Alignment.Center,
     ) {
         TvProfileAvatar(
-            name = profile?.name.orEmpty(),
             avatarKey = profile?.avatarKey.orEmpty(),
             focused = focused,
             modifier = Modifier.fillMaxWidth().height(32.dp),
@@ -876,42 +876,31 @@ internal fun TvContinueWatchingCard(
     }
 }
 
+/**
+ * A profile's drawn avatar (or account photo) in the brand's profile shape.
+ * Focus adds the beam outline and keeps the artwork visible (TV-FOC-01).
+ */
 @Composable
 internal fun TvProfileAvatar(
-    name: String,
     avatarKey: String,
     focused: Boolean,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
 ) {
-    val container = when (Math.floorMod(avatarKey.hashCode(), 3)) {
-        0 -> MaterialTheme.colorScheme.primaryContainer
-        1 -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.tertiaryContainer
-    }
     Box(
         modifier = modifier
-            .background(
+            .clip(TvShapeTokens.profile)
+            .border(
+                width = if (focused || selected) 2.dp else 1.dp,
                 color = when {
-                    focused -> TvFocusTokens.focusedContainer
-                    selected -> container.copy(alpha = 0.72f)
-                    else -> container
+                    focused -> TvFocusTokens.beam
+                    selected -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f)
+                    else -> TvSurfaceTokens.subtleBorder
                 },
                 shape = TvShapeTokens.profile,
-            )
-            .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) TvFocusTokens.beam else TvSurfaceTokens.subtleBorder,
-                shape = TvShapeTokens.profile,
-            )
-            .clip(TvShapeTokens.profile),
-        contentAlignment = Alignment.Center,
+            ),
     ) {
-        Text(
-            text = name.trim().firstOrNull()?.uppercase() ?: "L",
-            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
-            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium),
-        )
+        ProfileAvatarArt(avatarKey = avatarKey, modifier = Modifier.fillMaxSize().clip(TvShapeTokens.profile))
     }
 }
 

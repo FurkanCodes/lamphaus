@@ -38,6 +38,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.ProfileAvatar
 import com.lamphaus.core.model.Profile
 
 private val SwitcherAvatarSize = 72.dp
@@ -124,7 +125,6 @@ private fun TvProfileSwitcherTile(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         TvProfileAvatar(
-            name = profile.name,
             avatarKey = profile.avatarKey,
             focused = focused,
             selected = active,
@@ -140,6 +140,120 @@ private fun TvProfileSwitcherTile(
             text = profile.name,
             style = MaterialTheme.typography.titleSmall,
             color = if (focused || active) {
+                MaterialTheme.colorScheme.onBackground
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Full-screen avatar choice for one profile. Focus opens on the current
+ * avatar; choosing saves and closes, and Back dismisses without a change
+ * (TV-NAV-02). The account photo leads when the account has one.
+ */
+@Composable
+internal fun TvAvatarPicker(
+    profile: Profile,
+    accountPhotoAvailable: Boolean,
+    onAvatar: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val keys = buildList {
+        if (accountPhotoAvailable) add(ProfileAvatar.ACCOUNT_PHOTO_KEY)
+        ProfileAvatar.entries.forEach { add(it.key) }
+    }
+    val currentFocus = remember { FocusRequester() }
+    val currentIndex = keys.indexOf(profile.avatarKey).takeIf { it >= 0 }
+        ?: keys.indexOf(ProfileAvatar.forKey(profile.avatarKey).key)
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { currentFocus.requestFocus() }
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = TvLayoutTokens.screenHorizontalPadding, vertical = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(32.dp, Alignment.CenterVertically),
+        ) {
+            Text(
+                text = stringResource(R.string.choose_avatar_for, profile.name),
+                modifier = Modifier.semantics { heading() },
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            // Rows of six keep a straight D-pad path to every choice (TV-NAV-05).
+            Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                keys.chunked(AVATAR_PICKER_COLUMNS).forEachIndexed { rowIndex, row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing)) {
+                        row.forEachIndexed { columnIndex, key ->
+                            val index = rowIndex * AVATAR_PICKER_COLUMNS + columnIndex
+                            TvAvatarChoice(
+                                avatarKey = key,
+                                label = if (key == ProfileAvatar.ACCOUNT_PHOTO_KEY) {
+                                    stringResource(R.string.avatar_account_photo)
+                                } else {
+                                    stringResource(ProfileAvatar.forKey(key).labelRes)
+                                },
+                                current = index == currentIndex,
+                                modifier = if (index == currentIndex) Modifier.focusRequester(currentFocus) else Modifier,
+                                onClick = { onAvatar(key) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val AVATAR_PICKER_COLUMNS = 6
+
+@Composable
+private fun TvAvatarChoice(
+    avatarKey: String,
+    label: String,
+    current: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Column(
+        modifier = modifier
+            .width(SwitcherTileWidth)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(interactionSource = null, indication = null, role = Role.Button, onClick = onClick)
+            .focusable()
+            .semantics(mergeDescendants = true) { selected = current },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        TvProfileAvatar(
+            avatarKey = avatarKey,
+            focused = focused,
+            selected = current,
+            modifier = Modifier
+                .size(SwitcherAvatarSize)
+                .graphicsLayer {
+                    val scale = if (focused) TvMotionTokens.focusedArtworkScale else 1f
+                    scaleX = scale
+                    scaleY = scale
+                },
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (focused || current) {
                 MaterialTheme.colorScheme.onBackground
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant

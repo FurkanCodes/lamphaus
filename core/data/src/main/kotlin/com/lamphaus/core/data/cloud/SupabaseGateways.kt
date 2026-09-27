@@ -112,7 +112,14 @@ class SupabaseAccountGateway(
             userId = user.id,
             displayName = user.displayName(),
             email = user.email,
+            avatarUrl = user.avatarUrl(),
         )
+    }
+
+    private fun UserInfo.avatarUrl(): String? {
+        val metadata = userMetadata.orEmpty()
+        return (metadata["avatar_url"]?.jsonPrimitive?.contentOrNull ?: metadata["picture"]?.jsonPrimitive?.contentOrNull)
+            ?.takeIf { it.startsWith("https://") }
     }
 
     private fun UserInfo.displayName(): String? {
