@@ -140,6 +140,9 @@ import androidx.tv.material3.Switch
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.R
 import com.lamphaus.core.data.perf.PerfTrace
+import com.lamphaus.app.ui.StreamBadgeRow
+import com.lamphaus.app.ui.StreamBadgeMatcher
+import com.lamphaus.app.ui.LocalStreamBadges
 import com.lamphaus.app.ui.LocalAccountPhotoUrl
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.rememberReducedMotion
@@ -252,6 +255,7 @@ fun TvApp(
             LocalArtworkResolver provides artworkResolver,
             LocalTvContentMenuEnvironment provides menuEnvironment,
             LocalAccountPhotoUrl provides (state.account as? AccountState.SignedIn)?.avatarUrl,
+            LocalStreamBadges provides remember(state.streamBadges) { StreamBadgeMatcher(state.streamBadges) },
         ) {
         LaunchedEffect(state.playbackRequest) {
             state.playbackRequest?.let {
@@ -2320,6 +2324,8 @@ private fun TvSourcePickerScreen(
                             val presentation = remember(source, providerLabel) {
                                 source.sourcePresentation(providerLabel)
                             }
+                            val badgeMatcher = LocalStreamBadges.current
+                            val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
                             TvFocusableSurface(
                                 onClick = { onSource(source) },
                                 modifier = Modifier
@@ -2345,17 +2351,22 @@ private fun TvSourcePickerScreen(
                                         modifier = Modifier.size(22.dp),
                                     )
                                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        if (presentation.badges.isNotEmpty()) {
+                                        // Imported badges replace Lamphaus's own labels, as in Nuvio.
+                                        if (badgeMatcher.isActive) {
+                                            StreamBadgeRow(importedBadges)
+                                        } else if (presentation.badges.isNotEmpty()) {
                                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 presentation.badges.forEach { badge ->
                                                     TvSourceBadge(badge, focused)
                                                 }
                                             }
                                         }
+                                        // Addon-formatted text is shown whole: the addon's
+                                        // formatter owns the card's lines (as in Nuvio).
                                         Text(
                                             presentation.title,
                                             color = primaryColor,
-                                            maxLines = 2,
+                                            maxLines = if (presentation.usesProviderFormatting) Int.MAX_VALUE else 2,
                                             overflow = TextOverflow.Ellipsis,
                                             style = MaterialTheme.typography.titleSmall,
                                         )
@@ -2363,7 +2374,7 @@ private fun TvSourcePickerScreen(
                                             Text(
                                                 description,
                                                 color = secondaryColor,
-                                                maxLines = 3,
+                                                maxLines = if (presentation.usesProviderFormatting) Int.MAX_VALUE else 3,
                                                 overflow = TextOverflow.Ellipsis,
                                                 style = MaterialTheme.typography.bodySmall,
                                             )
@@ -3644,6 +3655,67 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setTvHomeLayout(if (spotlight) TvHomeLayout.CLASSIC else TvHomeLayout.SPOTLIGHT)
                 },
             )
+        }
+        item { TvStreamBadgeSettings(state, viewModel) }
+    }
+}
+
+/**
+ * Nuvio-compatible stream badges: one imported `badges.json` whose image
+ * badges decorate source cards. Stored on this device only.
+ */
+@Composable
+private fun TvStreamBadgeSettings(state: AppUiState, viewModel: AppViewModel) {
+    var address by rememberSaveable { mutableStateOf("") }
+    val importFocus = remember { FocusRequester() }
+    // Stays enabled while importing (the view model ignores repeats): disabling
+    // the focused button would drop focus out of the page (TV-FOC-01).
+    val importEnabled = address.trim().startsWith("https://", ignoreCase = true)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                stringResource(R.string.stream_badges),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 12.dp).semantics { heading() },
+            )
+            Text(
+                text = state.streamBadges?.let { rules ->
+                    pluralStringResource(
+                        R.plurals.stream_badges_status,
+                        rules.enabledFilterCount,
+                        rules.enabledFilterCount,
+                        runCatching { java.net.URI(rules.sourceUrl).host }.getOrNull().orEmpty(),
+                    )
+                } ?: stringResource(R.string.stream_badges_description),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        TvEditableTextField(
+            value = address,
+            onValueChange = { address = it },
+            label = stringResource(R.string.stream_badges_address),
+            placeholder = stringResource(R.string.stream_badges_placeholder),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+            onImeAction = { if (importEnabled) viewModel.importStreamBadges(address) },
+            modifier = Modifier.fillMaxWidth().height(60.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TvAction(
+                label = stringResource(if (state.streamBadgesImporting) R.string.stream_badges_importing else R.string.stream_badges_import),
+                icon = Icons.Outlined.Add,
+                enabled = importEnabled,
+                modifier = Modifier.focusRequester(importFocus),
+                onClick = { viewModel.importStreamBadges(address) },
+            )
+            if (state.streamBadges != null) {
+                TvAction(
+                    label = stringResource(R.string.stream_badges_remove),
+                    icon = Icons.Outlined.Delete,
+                    onClick = viewModel::removeStreamBadges,
+                )
+            }
         }
     }
 }

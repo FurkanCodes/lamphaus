@@ -72,6 +72,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 import androidx.core.text.HtmlCompat
+import com.lamphaus.app.ui.StreamBadgeRow
+import com.lamphaus.app.ui.LocalStreamBadges
 import com.lamphaus.app.ui.artworkImageUrl
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -1015,6 +1017,8 @@ internal fun MobileSourcePickerScreen(
                         val presentation = remember(source, providerLabel) {
                             source.sourcePresentation(providerLabel)
                         }
+                        val badgeMatcher = LocalStreamBadges.current
+                        val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
                         Card(
                             onClick = { onSource(source) },
                             modifier = Modifier.fillMaxWidth(),
@@ -1031,7 +1035,9 @@ internal fun MobileSourcePickerScreen(
                                     modifier = Modifier.weight(1f),
                                     verticalArrangement = Arrangement.spacedBy(5.dp),
                                 ) {
-                                    if (presentation.badges.isNotEmpty()) {
+                                    if (badgeMatcher.isActive) {
+                                        StreamBadgeRow(importedBadges)
+                                    } else if (presentation.badges.isNotEmpty()) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             presentation.badges.forEach { badge ->
                                                 Surface(
@@ -1050,7 +1056,7 @@ internal fun MobileSourcePickerScreen(
                                     }
                                     Text(
                                         presentation.title,
-                                        maxLines = 2,
+                                        maxLines = if (presentation.usesProviderFormatting) Int.MAX_VALUE else 2,
                                         overflow = TextOverflow.Ellipsis,
                                         style = MaterialTheme.typography.titleMedium,
                                     )
@@ -1058,7 +1064,7 @@ internal fun MobileSourcePickerScreen(
                                         Text(
                                             description,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 3,
+                                            maxLines = if (presentation.usesProviderFormatting) Int.MAX_VALUE else 3,
                                             overflow = TextOverflow.Ellipsis,
                                             style = MaterialTheme.typography.bodySmall,
                                         )

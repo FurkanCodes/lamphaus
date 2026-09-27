@@ -168,6 +168,11 @@ class AppViewModel(
 
     init {
         viewModelScope.launch {
+            container.streamBadgeRepository.rules.collect { rules ->
+                mutableState.update { it.copy(streamBadges = rules) }
+            }
+        }
+        viewModelScope.launch {
             combine(
                 container.accountGateway.state,
                 container.libraryRepository.profiles(),
@@ -401,6 +406,20 @@ class AppViewModel(
 
     fun selectProfile(profileId: String) = viewModelScope.launch {
         container.preferences.setActiveProfile(profileId)
+    }
+
+    fun importStreamBadges(url: String) = viewModelScope.launch {
+        if (state.value.streamBadgesImporting) return@launch
+        mutableState.update { it.copy(streamBadgesImporting = true) }
+        container.streamBadgeRepository.import(url)
+            .onSuccess { showMessage("Imported ${it.enabledFilterCount} stream badges.") }
+            // Validation messages are ours; network errors stay generic.
+            .onFailure { showMessage((it as? IllegalArgumentException)?.message ?: "Could not download that badge file.") }
+        mutableState.update { it.copy(streamBadgesImporting = false) }
+    }
+
+    fun removeStreamBadges() = viewModelScope.launch {
+        container.streamBadgeRepository.remove()
     }
 
     fun setProfileAvatar(profileId: String, avatarKey: String) = viewModelScope.launch {

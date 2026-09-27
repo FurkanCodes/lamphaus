@@ -320,6 +320,9 @@ data class AppUiState(
     /** Effective TV background artwork choice (see [effectiveBackgroundArtwork]). */
     val backgroundArtworkEnabled: Boolean = true,
     val tvHomeLayout: TvHomeLayout = TvHomeLayout.CLASSIC,
+    /** Imported Nuvio-compatible stream badges; null when none are imported. */
+    val streamBadges: com.lamphaus.core.data.repository.StreamBadgeImport? = null,
+    val streamBadgesImporting: Boolean = false,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playbackSettings: PlaybackSettings = PlaybackSettings(),

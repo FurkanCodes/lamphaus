@@ -19,6 +19,13 @@
     <string name="who_is_watching">Who’s watching?</string>
     <string name="manage_profiles">Manage profiles</string>
     <string name="choose_avatar">Choose avatar</string>
+    <string name="stream_badges">Stream badges</string>
+    <string name="stream_badges_description">Import a Nuvio-compatible badges.json to show image badges on source cards.</string>
+    <string name="stream_badges_address">Badge file address</string>
+    <string name="stream_badges_placeholder">https://raw.githubusercontent.com/…/badges.json</string>
+    <string name="stream_badges_import">Import badges</string>
+    <string name="stream_badges_importing">Importing…</string>
+    <string name="stream_badges_remove">Remove badges</string>
     <string name="choose_avatar_for">Choose an avatar for %1$s</string>
     <string name="avatar_account_photo">Account photo</string>
     <string name="avatar_moon">Moon</string>
@@ -449,4 +456,8 @@
     <string name="playback_display_requested">display mode switch requested</string>
     <string name="playback_display_hdr_unavailable">current mode retained; no HDR-capable output mode</string>
     <string name="playback_display_current">current display mode</string>
+    <plurals name="stream_badges_status">
+        <item quantity="one">%1$d badge from %2$s</item>
+        <item quantity="other">%1$d badges from %2$s</item>
+    </plurals>
 </resources>
