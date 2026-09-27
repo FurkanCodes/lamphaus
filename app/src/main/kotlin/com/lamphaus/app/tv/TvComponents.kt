@@ -241,6 +241,25 @@ internal fun TvEditableTextField(
                 } else if (event.type == KeyEventType.KeyDown && event.key == Key.Back) {
                     finishEditing()
                     true
+                } else if (
+                    event.type == KeyEventType.KeyDown &&
+                    (event.key == Key.DirectionDown || event.key == Key.DirectionUp)
+                ) {
+                    // Arrows reach the field only once the keyboard is gone. On TV
+                    // the IME's own Back can hide it without the field ever seeing
+                    // Back, which left it editing and swallowing Down, so results
+                    // below were unreachable (TV-NAV-03, TV-NAV-05).
+                    finishEditing()
+                    if (event.key == Key.DirectionDown) {
+                        onNavigateDown() || focusManager.moveFocus(FocusDirection.Down)
+                    } else {
+                        focusManager.moveFocus(FocusDirection.Up)
+                    }
+                    true
+                } else if (event.key == Key.DirectionCenter) {
+                    // Select on a field whose keyboard was dismissed brings it back.
+                    if (event.type == KeyEventType.KeyUp) keyboardController?.show()
+                    true
                 } else {
                     false
                 }

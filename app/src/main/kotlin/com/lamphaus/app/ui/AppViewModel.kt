@@ -690,11 +690,6 @@ class AppViewModel(
         ensureBrowseTargets()
     }
 
-    /** Back from category results: drop the genre filter without reloading. */
-    fun clearBrowseGenre() {
-        mutableState.update { it.copy(browse = it.browse.copy(selectedGenre = null)) }
-    }
-
     private fun selectBrowseTarget(target: CatalogBrowseTarget, genre: String?) {
         browseJob?.cancel()
         browseJob = viewModelScope.launch {
