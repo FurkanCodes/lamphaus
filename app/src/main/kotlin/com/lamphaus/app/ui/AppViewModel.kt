@@ -1692,9 +1692,10 @@ class AppViewModel(
                         .orEmpty()
                         .playbackQueueFrom(episode)
                         .map { queued ->
+                            // Stills stay: the next-episode card shows them. Only the
+                            // long synopses are dropped to keep the launch data small.
                             queued.copy(
                                 overview = null,
-                                thumbnailUrl = null,
                                 streams = queued.streams
                                     .filter(StreamCandidate::isPlayableInternally)
                                     .take(8)

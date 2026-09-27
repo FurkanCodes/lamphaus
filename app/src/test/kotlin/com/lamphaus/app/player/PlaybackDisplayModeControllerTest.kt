@@ -249,6 +249,43 @@ class PlaybackDisplayModeControllerTest {
         assertEquals(count, decisions.size)
     }
 
+    @Test
+    fun `next episode with the same cadence keeps the matched output`() {
+        controller.onVideoFormat(1920, 1080, 24f)
+        assertTrue(controller.prepareForPlayback())
+        controller.tick(0)
+        output.currentMode = hd24
+        controller.tick(100)
+        val switches = output.preferredModeSetCount
+
+        controller.resetForNextItem()
+        assertEquals(hd24.id, output.preferredModeId)
+        assertEquals(24f, surface.requestedFrameRate!!, 0.001f)
+
+        controller.onVideoFormat(1920, 1080, 24f)
+        assertTrue(controller.prepareForPlayback())
+        controller.tick(0)
+        assertEquals(switches, output.preferredModeSetCount)
+        assertEquals(hd24.id, output.preferredModeId)
+    }
+
+    @Test
+    fun `next episode with a different cadence switches once`() {
+        controller.onVideoFormat(1920, 1080, 24f)
+        assertTrue(controller.prepareForPlayback())
+        controller.tick(0)
+        output.currentMode = hd24
+        controller.tick(100)
+        val switches = output.preferredModeSetCount
+
+        controller.resetForNextItem()
+        controller.onVideoFormat(1920, 1080, 60f)
+        assertTrue(controller.prepareForPlayback())
+        controller.tick(0)
+        assertEquals(switches + 1, output.preferredModeSetCount)
+        assertEquals(hd60.id, output.preferredModeId)
+    }
+
     private class FakeDisplayHost(
         override var currentMode: PlaybackOutputMode?,
         override val supportedModes: List<PlaybackOutputMode>,

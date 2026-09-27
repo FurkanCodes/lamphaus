@@ -212,6 +212,23 @@ class PlaybackDisplayModeController internal constructor(
         surfaceFrameRateHost.clearFrameRate()
     }
 
+    /**
+     * Next episode in the same session: forget the previous item's format and
+     * decision, but keep the output mode and surface frame-rate vote. A next
+     * episode with the same cadence then needs no HDMI switch at all, and a
+     * different one gets exactly one, instead of dropping to the original
+     * mode and switching straight back.
+     */
+    fun resetForNextItem() {
+        requestedMode = null
+        requestMillis = 0L
+        pendingFormat = null
+        evaluated = false
+        stableMillis = 0L
+        evaluateImmediately = false
+        outputLockedForItem = false
+    }
+
     /** Restores system policy and clears the previous source on end, failure, or replacement. */
     fun restore() {
         restoreOutputPreferences()
