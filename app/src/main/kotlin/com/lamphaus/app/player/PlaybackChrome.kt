@@ -78,8 +78,10 @@ internal fun PlayerControls(
     onExit: () -> Unit = {},
     onLock: () -> Unit = {},
     onToggleOrientation: () -> Unit = {},
+    canSwitchSource: Boolean = false,
 ) {
     val playFocus = remember { FocusRequester() }
+    val sourcesFocus = remember { FocusRequester() }
     val audioFocus = remember { FocusRequester() }
     val subtitlesFocus = remember { FocusRequester() }
     val moreFocus = remember { FocusRequester() }
@@ -101,6 +103,7 @@ internal fun PlayerControls(
             when (focusPanel) {
                 PlayerPanel.AUDIO -> audioFocus
                 PlayerPanel.SUBTITLES -> subtitlesFocus
+                PlayerPanel.SOURCES -> if (canSwitchSource) sourcesFocus else moreFocus
                 null -> playFocus
                 else -> moreFocus
             }.requestFocus()
@@ -144,6 +147,8 @@ internal fun PlayerControls(
                         subtitlesActive, Modifier.focusRequester(subtitlesFocus)) { onPanel(PlayerPanel.SUBTITLES) }
                     PlayerSettingButton(Icons.AutoMirrored.Rounded.VolumeUp, stringResource(R.string.player_audio),
                         false, Modifier.focusRequester(audioFocus)) { onPanel(PlayerPanel.AUDIO) }
+                    if (canSwitchSource) PlayerSettingButton(Icons.Rounded.Layers, stringResource(R.string.player_sources),
+                        false, Modifier.focusRequester(sourcesFocus)) { onPanel(PlayerPanel.SOURCES) }
                     PlayerSettingButton(Icons.Rounded.MoreHoriz, stringResource(R.string.player_more),
                         false, Modifier.focusRequester(moreFocus)) { onPanel(PlayerPanel.MORE) }
                     Spacer(Modifier.weight(1f))
@@ -209,6 +214,8 @@ internal fun PlayerControls(
                         if (!nextEpisodeLoading) onNextEpisode()
                         onInteraction()
                     }
+                    if (canSwitchSource) PlayerSettingButton(Icons.Rounded.Layers, stringResource(R.string.player_sources),
+                        false, Modifier.focusRequester(sourcesFocus)) { onPanel(PlayerPanel.SOURCES) }
                 }
             }
         }

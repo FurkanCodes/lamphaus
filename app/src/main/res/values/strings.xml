@@ -146,6 +146,8 @@
     <string name="detail_language">Language</string>
     <string name="detail_budget">Budget</string>
     <string name="detail_revenue">Revenue</string>
+    <string name="player_sources">Sources</string>
+    <string name="player_source_playing">Playing now</string>
     <string name="player_dismiss">Dismiss</string>
     <string name="player_ends_at">Ends at %1$s</string>
     <string name="player_info_rating">Rated</string>

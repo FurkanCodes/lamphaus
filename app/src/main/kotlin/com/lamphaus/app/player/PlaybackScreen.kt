@@ -205,7 +205,7 @@ internal val PlayerFont = FontFamily(
     Font(R.font.inter_semi_bold, FontWeight.SemiBold),
 )
 
-internal enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, DISPLAY, MORE, INFO }
+internal enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, DISPLAY, MORE, INFO, SOURCES }
 
 internal enum class PlaybackStartupPhase { LOADING, READY, FAILED }
 
@@ -273,6 +273,9 @@ internal fun PlaybackScreen(
     onSubtitleLiftChanged: (Float) -> Unit = {},
     startupPhase: PlaybackStartupPhase = PlaybackStartupPhase.READY,
     matchedDisplayMode: DisplayModeCandidate? = null,
+    sources: PlayerSourcesState = PlayerSourcesState(),
+    onLoadSources: () -> Unit = {},
+    onSelectSource: (PlayerSourceOption) -> Unit = {},
 ) {
     val nextEpisodeLoading = nextEpisodeProgress != NextEpisodeProgress.Idle
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
@@ -778,6 +781,7 @@ internal fun PlaybackScreen(
                     controlsVisible = false
                     panel = null
                 },
+                canSwitchSource = request.preview != null,
                 onToggleOrientation = {
                     hostActivity?.requestedOrientation = if (landscapeOrientation) {
                         ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -990,7 +994,19 @@ internal fun PlaybackScreen(
         }
 
         panel?.takeUnless { inPictureInPicture || loadingSurfaceVisible }?.let { activePanel ->
-            if (activePanel == PlayerPanel.INFO) {
+            if (activePanel == PlayerPanel.SOURCES) {
+                LaunchedEffect(Unit) { onLoadSources() }
+                PlayerSourcesPanel(
+                    state = sources,
+                    currentUri = request.source.uri,
+                    isTelevision = isTelevision,
+                    onSelect = { option ->
+                        onSelectSource(option)
+                        closePanel()
+                    },
+                    onClose = ::closePanel,
+                )
+            } else if (activePanel == PlayerPanel.INFO) {
                 PlayerStreamInfoPanel(
                     streamInfo = streamInfo,
                     streamStats = streamStats,
@@ -1397,6 +1413,7 @@ private fun PlayerSettingsPanel(
         PlayerPanel.DISPLAY -> R.string.player_display
         PlayerPanel.MORE -> R.string.player_more
         PlayerPanel.INFO -> R.string.player_info
+        PlayerPanel.SOURCES -> R.string.player_sources
     })
     val options = when (panel) {
         PlayerPanel.AUDIO -> snapshot.tracks.options(C.TRACK_TYPE_AUDIO)
@@ -1484,7 +1501,7 @@ private fun PlayerSettingsPanel(
                 item { PlayerChoiceRow(stringResource(R.string.player_info), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.INFO) } }
                 item { PlayerChoiceRow(stringResource(R.string.player_external), null, false, actionRole = Role.Button, onClick = onOpenExternally) }
             }
-            PlayerPanel.INFO -> Unit
+            PlayerPanel.INFO, PlayerPanel.SOURCES -> Unit
         }
     }
 }
@@ -2019,7 +2036,7 @@ private fun PlayerAudioTimingControls(
 }
 
 @Composable
-private fun PlayerChoiceRow(
+internal fun PlayerChoiceRow(
     title: String,
     supportingText: String?,
     selected: Boolean,
@@ -2707,9 +2724,9 @@ private fun Player.snapshot(): PlayerSnapshot {
     val tracks = currentTracks
     val capabilityError = when {
         tracks.containsType(C.TRACK_TYPE_VIDEO) && !tracks.isTypeSupported(C.TRACK_TYPE_VIDEO) ->
-            "This TV cannot decode this video's format or resolution. Try another source or player."
+            "This device cannot decode this video's format or resolution. Try another source or player."
         tracks.containsType(C.TRACK_TYPE_AUDIO) && !tracks.isTypeSupported(C.TRACK_TYPE_AUDIO) ->
-            "This TV cannot decode this source's audio. Try another source or player."
+            "This device cannot decode this source's audio. Try another source or player."
         else -> null
     }
     return PlayerSnapshot(
@@ -2727,7 +2744,7 @@ private fun Player.snapshot(): PlayerSnapshot {
 private fun PlaybackException.safeMessage(): String = when (errorCode) {
     in 2000..2999 -> "The stream could not be loaded. Check the connection or try another source."
     in 3000..3999 -> "This source uses a container the player could not read."
-    in 4000..4999 -> "This TV cannot decode this video format. Try another source or player."
+    in 4000..4999 -> "This device cannot decode this video format. Try another source or player."
     in 5000..5999 -> "This TV cannot play the source's audio format. Try another source or player."
     else -> "Playback stopped unexpectedly. Try again or choose another source."
 }
