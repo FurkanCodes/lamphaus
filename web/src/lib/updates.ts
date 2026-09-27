@@ -11,6 +11,21 @@
 export const FEED_URL =
   "https://raw.githubusercontent.com/furkancodes/lamphaus/release-metadata/updates/v1/index.json";
 
+/**
+ * raw.githubusercontent.com caches the branch file for five minutes or more
+ * and ignores query strings, so a new release could stay hidden long after
+ * promotion. The contents API serves the same signed bytes within a minute;
+ * raw is the fallback when the API is rate-limited. The signature check
+ * decides what is trusted either way.
+ */
+const FEED_SOURCES: { url: string; accept: string }[] = [
+  {
+    url: "https://api.github.com/repos/furkancodes/lamphaus/contents/updates/v1/index.json?ref=release-metadata",
+    accept: "application/vnd.github.raw+json",
+  },
+  { url: FEED_URL, accept: "application/json" },
+];
+
 export const RELEASES_PAGE = "https://github.com/furkancodes/lamphaus/releases";
 
 export const SCHEMA_VERSION = 1;
@@ -145,19 +160,26 @@ export function renderChangelog(source: string): { paragraphs: string[]; items: 
  * cached recommendations are never followed without revalidation.
  */
 export async function loadVerifiedFeed(): Promise<FeedStatus> {
-  let res: Response;
-  try {
-    const feedUrl = new URL(FEED_URL);
-    feedUrl.searchParams.set("requestedAt", Date.now().toString());
-    res = await fetch(feedUrl, {
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-  } catch {
-    return { kind: "error", reason: "offline" };
+  let res: Response | undefined;
+  let lastStatus: number | undefined;
+  for (const source of FEED_SOURCES) {
+    try {
+      const response = await fetch(source.url, {
+        cache: "no-store",
+        headers: { Accept: source.accept },
+      });
+      if (response.ok) {
+        res = response;
+        break;
+      }
+      lastStatus = response.status;
+    } catch {
+      // Try the next source; report offline only if every source failed.
+    }
   }
-  if (!res.ok) {
-    return res.status === 404
+  if (!res) {
+    if (lastStatus === undefined) return { kind: "error", reason: "offline" };
+    return lastStatus === 404
       ? { kind: "empty" }
       : { kind: "error", reason: "unavailable" };
   }

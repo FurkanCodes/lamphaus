@@ -79,7 +79,7 @@ class UpdateRepository(
 
     /** Revalidate the feed before installing; block withdrawn artifacts. */
     suspend fun revalidate(selected: UpdateFeed.Release): Boolean = withContext(Dispatchers.IO) {
-        val fetch = fetchFeed(force = true) ?: return@withContext false
+        val fetch = fetchFeed() ?: return@withContext false
         val (payload, _) = fetch
         val current = payload.releases.firstOrNull { it.versionCode == selected.versionCode }
             ?: return@withContext false
@@ -97,35 +97,23 @@ class UpdateRepository(
         return code to (info.versionName ?: "0.0.0")
     }
 
-    private fun fetchFeed(force: Boolean = false): Pair<UpdateFeed.Payload, Boolean>? {
-        var conn: HttpURLConnection? = null
-        try {
-            conn = (URL(feedUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 15_000
-                setRequestProperty("Accept", "application/json")
-                if (!force) {
-                    if (prefs.etag.isNotBlank()) setRequestProperty("If-None-Match", prefs.etag)
-                    if (prefs.lastModified.isNotBlank()) setRequestProperty("If-Modified-Since", prefs.lastModified)
-                }
-            }
-            if (conn.responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
-                // Cached revision stands; reconstruct minimal payload marker.
-                // Caller treats null-payload + 304 as "no change": re-run
-                // selection from last accepted state is impossible without the
-                // bytes, so force a full fetch instead.
-                return fetchFeed(force = true)
-            }
-            if (conn.responseCode != HttpURLConnection.HTTP_OK) return null
-            val body = conn.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
-            conn.headerFields["ETag"]?.firstOrNull()?.let { prefs.etag = it }
-            conn.headerFields["Last-Modified"]?.firstOrNull()?.let { prefs.lastModified = it }
+    /**
+     * raw.githubusercontent.com caches a branch file for five minutes or more
+     * and ignores query strings, so a new release could stay invisible long
+     * after promotion. The contents API serves the same signed bytes within a
+     * minute; raw remains the fallback when the API is rate-limited. Either
+     * way the signature and revision checks below decide what is trusted.
+     */
+    private fun fetchFeed(): Pair<UpdateFeed.Payload, Boolean>? {
+        for (source in UpdateFeedSources.forFeedUrl(feedUrl)) {
+            val body = download(source) ?: continue
             when (val result = UpdateFeed.verifyEnvelope(body)) {
-                is UpdateFeed.VerifyResult.Invalid -> return null
+                is UpdateFeed.VerifyResult.Invalid -> continue
                 is UpdateFeed.VerifyResult.Valid -> {
                     val payload = result.payload
                     val hash = sha256(result.rawBytes)
-                    if (payload.revision < prefs.acceptedRevision) return null
+                    // A stale mirror may still serve an older revision: try the next source.
+                    if (payload.revision < prefs.acceptedRevision) continue
                     if (payload.revision == prefs.acceptedRevision &&
                         prefs.acceptedPayloadHash.isNotBlank() &&
                         prefs.acceptedPayloadHash != hash
@@ -138,8 +126,24 @@ class UpdateRepository(
                     return payload to true
                 }
             }
+        }
+        return null
+    }
+
+    private fun download(source: UpdateFeedSources.Source): String? {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL(source.url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15_000
+                readTimeout = 15_000
+                setRequestProperty("Accept", source.accept)
+                // Always a full, uncached read: the feed is small and signed.
+                useCaches = false
+            }
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) return null
+            conn.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
         } catch (_: Exception) {
-            return null
+            null
         } finally {
             conn?.disconnect()
         }
