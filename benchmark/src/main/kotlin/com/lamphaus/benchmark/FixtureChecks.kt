@@ -14,6 +14,17 @@ internal fun UiDevice.requireFixtureHome() {
     waitForIdle()
 }
 
+/**
+ * TV-MOT-01: a cold TV start plays the boot sequence over Home, and any key
+ * skips it. Journeys that press keys wait it out so no press is swallowed.
+ */
+internal fun UiDevice.awaitTvBootSequence() {
+    android.os.SystemClock.sleep(TV_BOOT_SEQUENCE_MILLIS)
+    waitForIdle()
+}
+
+private const val TV_BOOT_SEQUENCE_MILLIS = 4_000L
+
 /** QA-07: activity hosts redirect on the wrong form factor. */
 internal fun requireBenchmarkFormFactor(leanback: Boolean) {
     val pm = InstrumentationRegistry.getInstrumentation().context.packageManager
