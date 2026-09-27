@@ -19,6 +19,8 @@ Mobile supports light and dark schemes plus Android dynamic color. TV uses the f
 | Surface ink | `#505563` | `#C7C6CA` |
 | Muted ink | `#505563` | `#C4C6CF` |
 
+On TV the focused title's artwork supplies the emotional color: its seed is re-toned (accent tone 80, container tone 30) and chroma-capped, then tints the ambient wash, the hero, and the focus ring. Neutral or missing art keeps instrument blue, which also stays the color of navigation, progress, and selection.
+
 Components consume semantic color roles, never raw values. Normal text must reach 4.5:1 contrast and large text/focus boundaries 3:1.
 - Focused TV surfaces use the focused content color for every title, supporting label, icon, and control label against the pale focused container. Settings toggles must match source-card focus treatment; never leave default dark-theme text colors on a focused surface.
 
@@ -29,7 +31,7 @@ Use Inter through Material type roles on TV. The complete scale is defined once 
 ## Layout
 
 - Mobile: 16dp compact margins; 24dp medium/expanded margins; 4/8/12-column thinking; bottom navigation under 600dp and rail from 600dp.
-- TV: 960×540 mdpi reference canvas, 58dp horizontal safe margins, 32dp top navigation origin, 20dp rail gutters, a 320dp hero, and no critical element near overscan edges.
+- TV: 960×540 mdpi reference canvas, 58dp horizontal safe margins, 32dp top navigation origin, 20dp rail gutters, a 320dp hero, and no critical element near overscan edges. The top navigation places the profile avatar at the start, Search · Home · Movies · Series · Library in the centre, and a Settings gear at the end.
 - Touch targets are at least 48×48dp. TV targets leave enough surrounding space for focused scale without clipping.
 
 ## Shape and elevation
