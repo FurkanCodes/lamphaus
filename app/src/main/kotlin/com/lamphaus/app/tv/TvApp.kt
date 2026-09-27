@@ -1,5 +1,12 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.CatalogBrowseState
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+
+import androidx.compose.foundation.lazy.grid.LazyGridState
+
+
 import android.os.SystemClock
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
@@ -153,7 +160,6 @@ import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.TvHomeLayout
 import com.lamphaus.app.ui.CatalogBrowseTarget
 import com.lamphaus.app.ui.AppViewModel
-import com.lamphaus.app.ui.CINEMETA_PROVIDER_ID
 import com.lamphaus.app.ui.ContentMenuAction
 import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.ContentMenuState
@@ -1046,7 +1052,8 @@ private fun TvSignedIn(
                     -> SignedInHome(catalogType = destination.catalogType)
 
                     TvDestination.DISCOVER -> TvDiscover(
-                        state = state,
+                        browse = state.browse,
+                        hasEnabledProviders = state.providers.any { it.enabled },
                         onPrepare = viewModel::prepareDiscover,
                         onBrowseType = viewModel::selectBrowseType,
                         onBrowseCatalog = viewModel::selectBrowseCatalog,
@@ -1075,7 +1082,9 @@ private fun TvSignedIn(
 
                     TvDestination.LIBRARY -> TvMediaGrid(
                         title = stringResource(R.string.library),
-                        media = state.library.map { it.preview },
+                        // QA-08: mapped once per library change, not on every state
+                        // emission (a large library is thousands of entries).
+                        media = remember(state.library) { state.library.map { it.preview } },
                         onMedia = openMedia,
                         onFocused = { lastFocusedMedia = it },
                         initialFocusRequester = contentFocus.getValue(TvDestination.LIBRARY),
@@ -1818,7 +1827,6 @@ private fun TvCatalogRow(
                         media = media,
                         onClick = { onMedia(media) },
                         onFocused = { onFocused(media) },
-                        showRating = section.providerId == CINEMETA_PROVIDER_ID,
                         modifier = Modifier
                             .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
                             .tvRowItem(row, index)
@@ -1904,12 +1912,11 @@ private fun TvMediaGrid(
                 horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                 verticalArrangement = Arrangement.spacedBy(28.dp),
             ) {
-                itemsIndexed(media, key = { _, item -> item.stableKey }) { index, item ->
+                itemsIndexed(media, key = { _, item -> item.stableKey }, contentType = { _, _ -> "poster" }) { index, item ->
                     TvMediaCard(
                         media = item,
                         onClick = { onMedia(item) },
                         onFocused = { onFocused(item) },
-                        showRating = section?.providerId == CINEMETA_PROVIDER_ID,
                         modifier = (if (index == 0) Modifier.focusRequester(initialFocusRequester) else Modifier)
                             .mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
                         showLabel = true,
@@ -1917,7 +1924,7 @@ private fun TvMediaGrid(
                     )
                 }
                 if (section?.loadMoreError != null || section?.hasMore == true) {
-                    item("catalog-action") {
+                    item("catalog-action", contentType = "action") {
                         TvAction(
                             label = stringResource(if (section?.loadMoreError != null) R.string.retry else R.string.load_more),
                             icon = Icons.Outlined.Refresh,
@@ -1948,7 +1955,8 @@ private const val DISCOVER_PREFETCH_ITEMS = 10
  */
 @Composable
 private fun TvDiscover(
-    state: AppUiState,
+    browse: CatalogBrowseState,
+    hasEnabledProviders: Boolean,
     onPrepare: () -> Unit,
     onBrowseType: (String) -> Unit,
     onBrowseCatalog: (String) -> Unit,
@@ -1962,14 +1970,13 @@ private fun TvDiscover(
     onFocusRestored: () -> Unit,
 ) {
     LaunchedEffect(Unit) { onPrepare() }
-    val browse = state.browse
     // Catalogs that need an input Discover cannot supply (Cinemeta's
     // calendar and last-videos feeds) are not browsable here.
     val targets = remember(browse.targets) { browse.targets.filter { it.unavailableReason == null } }
     if (targets.isEmpty()) {
         TvDiscoverMessage(
             text = stringResource(
-                if (browse.targets.isEmpty() && state.providers.none { it.enabled }) {
+                if (browse.targets.isEmpty() && !hasEnabledProviders) {
                     R.string.install_first_addon
                 } else {
                     R.string.nothing_here
@@ -2030,16 +2037,18 @@ private fun TvDiscover(
         horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
         verticalArrangement = Arrangement.spacedBy(28.dp),
     ) {
-        item(key = "discover-selectors", span = fullSpan) {
+        item(key = "discover-selectors", span = fullSpan, contentType = "selectors") {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // Type first, then that type's catalogs, so "Popular" is never
-                // ambiguous between movies and series.
-                Row(
-                    modifier = Modifier.tvRowFocus(typeRow, plainRow = true),
+                // ambiguous between movies and series. Lazy: with many add-ons
+                // only the visible chips are composed and measured (QA-08).
+                val multipleProviders = remember(catalogs) { catalogs.distinctBy { it.providerId }.size > 1 }
+                LazyRow(
+                    modifier = Modifier.tvRowFocus(typeRow),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    types.forEachIndexed { index, type ->
+                    itemsIndexed(types, key = { _, type -> "type:$type" }, contentType = { _, _ -> "chip" }) { index, type ->
                         TvFilterChip(
                             label = catalogTypeLabel(type),
                             selected = type == selectedType,
@@ -2048,14 +2057,15 @@ private fun TvDiscover(
                                 .tvRowItem(typeRow, index),
                         )
                     }
-                    Box(
-                        Modifier
-                            .padding(horizontal = 12.dp)
-                            .size(width = 1.dp, height = 24.dp)
-                            .background(TvSurfaceTokens.subtleBorder),
-                    )
-                    val multipleProviders = catalogs.distinctBy { it.providerId }.size > 1
-                    catalogs.forEachIndexed { index, target ->
+                    item(key = "type-divider", contentType = "divider") {
+                        Box(
+                            Modifier
+                                .padding(horizontal = 12.dp)
+                                .size(width = 1.dp, height = 24.dp)
+                                .background(TvSurfaceTokens.subtleBorder),
+                        )
+                    }
+                    itemsIndexed(catalogs, key = { _, target -> "catalog:${target.id}" }, contentType = { _, _ -> "chip" }) { index, target ->
                         TvFilterChip(
                             label = if (multipleProviders) "${target.catalog.name} · ${target.providerName}" else target.catalog.name,
                             selected = target.id == selectedTarget?.id,
@@ -2089,7 +2099,7 @@ private fun TvDiscover(
                 }
             }
         }
-        item(key = "discover-heading", span = fullSpan) {
+        item(key = "discover-heading", span = fullSpan, contentType = "heading") {
             Column(Modifier.padding(top = 8.dp)) {
                 Text(
                     text = listOfNotNull(selectedTarget?.catalog?.name, browse.selectedGenre)
@@ -2124,7 +2134,7 @@ private fun TvDiscover(
                     )
                 }
             }
-            items.isEmpty() && (browse.loading || result == null) -> items(10, key = { "discover-skeleton-$it" }) {
+            items.isEmpty() && (browse.loading || result == null) -> items(10, key = { "discover-skeleton-$it" }, contentType = { "skeleton" }) {
                 TvPosterSkeleton()
             }
             items.isEmpty() -> item(key = "discover-empty", span = fullSpan) {
@@ -2135,19 +2145,18 @@ private fun TvDiscover(
                 )
             }
             else -> {
-                itemsIndexed(items, key = { _, item -> item.stableKey }) { _, item ->
+                itemsIndexed(items, key = { _, item -> item.stableKey }, contentType = { _, _ -> "poster" }) { _, item ->
                     TvMediaCard(
                         media = item,
                         onClick = { onMedia(item) },
                         onFocused = { onFocused(item) },
                         showLabel = true,
                         revealLabelOnFocus = true,
-                        showRating = result?.providerId == CINEMETA_PROVIDER_ID,
                         modifier = Modifier.mediaFocusRestore(item.stableKey, restoreMediaKey, onFocusRestored),
                     )
                 }
                 if (result?.loadingMore == true) {
-                    items(5, key = { "discover-more-$it" }) { TvPosterSkeleton() }
+                    items(5, key = { "discover-more-$it" }, contentType = { "skeleton" }) { TvPosterSkeleton() }
                 }
                 if (result?.loadMoreError != null) {
                     item(key = "discover-retry", span = fullSpan) {

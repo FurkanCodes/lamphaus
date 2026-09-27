@@ -34,7 +34,7 @@ Use Inter through Material type roles on TV. The complete scale is defined once 
 
 ## Shape and elevation
 
-Poster cards, buttons, fields, and list rows use 4dp corners. Immersive hero cards use 12dp. Focused TV card bounds remain stable while the artwork receives a 2% visual scale, a 3dp Lamphaus-blue outline, and a restrained blue halo. Buttons and navigation retain their existing geometry; selected navigation adds a 24×2dp beam. Available ratings appear as small neutral poster overlays rather than additional card chrome.
+Poster cards, buttons, fields, and list rows use 4dp corners. Immersive hero cards use 12dp. Focused TV card bounds remain stable while the artwork receives a 2% visual scale, a 3dp Lamphaus-blue outline, and a restrained blue halo. Buttons and navigation retain their existing geometry; selected navigation adds a 24×2dp beam. Posters carry no rating overlay; ratings appear in the focused hero or Spotlight metadata and on the details page.
 
 ## Motion
 
