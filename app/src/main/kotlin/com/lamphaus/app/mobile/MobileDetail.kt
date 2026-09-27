@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -47,6 +48,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -1005,7 +1007,16 @@ internal fun MobileSourcePickerScreen(
                 Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 val sourceKeys = remember(picker.visibleSources) { sourceItemKeys(picker.visibleSources) }
+                // Every filter opens its list at the first source; a fresh state per
+                // provider stops the keyed list from jumping to the old anchor.
+                val listState = remember(picker.selectedProviderId) { LazyListState() }
+                // Slower providers can add sources above the first one; unless the
+                // viewer has scrolled away from the top, keep the list at the start.
+                LaunchedEffect(sourceKeys.firstOrNull()) {
+                    if (listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0)
+                }
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
