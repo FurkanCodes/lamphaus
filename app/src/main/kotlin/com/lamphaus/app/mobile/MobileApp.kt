@@ -988,8 +988,15 @@ private fun SearchScreen(
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = navBarClearancePadding()), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                 items(state.searchSections, key = CatalogSection::id) { section ->
+                    // Search rows are titled by what they hold, as on TV:
+                    // every search catalog is named after its feed ("Popular").
+                    val typeTitle = when (section.baseQuery.type.lowercase()) {
+                        "movie" -> stringResource(R.string.movies)
+                        "series" -> stringResource(R.string.series)
+                        else -> section.baseQuery.type.replaceFirstChar(Char::uppercase)
+                    }
                     CatalogRow(
-                        section,
+                        section.copy(title = typeTitle),
                         onMedia,
                         "search:${section.id}",
                         onCatalogLoadMore,

@@ -67,6 +67,14 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -130,7 +138,10 @@ private val HERO_LAYER_FADE_STOPS = arrayOf(
 )
 
 /** Fixed bottom gradient height ending in opaque black behind the title and dots. */
-private val HERO_BOTTOM_ANCHOR_HEIGHT = 120.dp
+private val HERO_BOTTOM_ANCHOR_HEIGHT = 200.dp
+
+/** About 3.3 posters across a phone, as streaming apps show them. */
+private val PosterWidth = 112.dp
 
 /** Crossfade timing for the detached hero title block (MOB-MOT-02: 150-250ms). */
 private const val HERO_CONTENT_FADE_MILLIS = 220
@@ -198,7 +209,7 @@ internal fun MobileHomeScreen(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = navBarClearancePadding()),
-            verticalArrangement = Arrangement.spacedBy(MobileTokens.sectionGap),
+            verticalArrangement = Arrangement.spacedBy(26.dp),
         ) {
             if (heroItems.isNotEmpty()) {
                 item(key = "feature") {
@@ -277,6 +288,30 @@ internal fun MobileHomeScreen(
                 }
             }
         }
+        // Status-bar protection fades in once the hero has scrolled away, so
+        // posters never run under the clock and icons (MOB-SYS-04).
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(with(androidx.compose.ui.platform.LocalDensity.current) {
+                    WindowInsets.statusBars.getTop(this).toDp() + 28.dp
+                })
+                .graphicsLayer {
+                    alpha = if (listState.firstVisibleItemIndex > 0) {
+                        1f
+                    } else {
+                        (listState.firstVisibleItemScrollOffset / 600f).coerceIn(0f, 1f)
+                    }
+                }
+                .background(
+                    Brush.verticalGradient(
+                        0f to MobileTokens.black.copy(alpha = 0.92f),
+                        0.6f to MobileTokens.black.copy(alpha = 0.6f),
+                        1f to Color.Transparent,
+                    ),
+                ),
+        )
     }
 }
 
@@ -346,7 +381,7 @@ private fun MobileCatalogItemsLoadingSkeleton(
         items(4) {
             Box(
                 modifier = Modifier
-                    .width(138.dp)
+                    .width(PosterWidth)
                     .aspectRatio(2f / 3f)
                     .clip(RoundedCornerShape(MobileTokens.radiusCard))
                     .background(skeletonColor),
@@ -369,10 +404,13 @@ private fun MobileHeroCarousel(
     if (items.isEmpty()) return
     val pagerState = rememberPagerState { items.size }
     val reducedMotion = rememberReducedMotion()
+    // A cinematic stage: about two thirds of the screen on phones.
+    val heroHeight = (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.64f).dp
+        .coerceIn(460.dp, 640.dp)
     Box(
         Modifier
             .fillMaxWidth()
-            .height(400.dp)
+            .height(heroHeight)
             .clipToBounds(),
     ) {
         // Artwork stage: each full-bleed layer carries its own soft bottom
@@ -427,6 +465,29 @@ private fun MobileHeroCarousel(
                     ),
                 ),
         )
+        // Brand mark over the stage, like a streaming app's masthead.
+        Row(
+            Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(start = 18.dp, top = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(R.drawable.ic_lamphaus_foreground),
+                contentDescription = null,
+                modifier = Modifier.size(34.dp),
+            )
+            Text(
+                stringResource(R.string.app_name).uppercase(),
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = androidx.compose.ui.unit.TextUnit(3f, androidx.compose.ui.unit.TextUnitType.Sp),
+                ),
+                color = Color.White,
+            )
+        }
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -612,7 +673,7 @@ private fun HeroOverlayContent(
             AsyncImage(
                 model = heroLogo,
                 contentDescription = media.name,
-                modifier = Modifier.heightIn(max = 64.dp),
+                modifier = Modifier.fillMaxWidth(0.74f).heightIn(max = 108.dp),
                 contentScale = ContentScale.Fit,
             )
         }
@@ -745,12 +806,10 @@ private fun MobileContinueWatchingCard(
         minutes > 0 -> "$minutes min"
         else -> null
     }
-    Box(
+    Column(
         modifier
-            .width(220.dp)
-            .aspectRatio(16f / 9f)
+            .width(252.dp)
             .clip(RoundedCornerShape(MobileTokens.radiusResume))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
             .combinedClickable(
                 role = Role.Button,
                 onClick = { onMedia(media) },
@@ -759,7 +818,7 @@ private fun MobileContinueWatchingCard(
                     onOpenMenu(target)
                 },
             )
-            .semantics {
+            .semantics(mergeDescendants = true) {
                 contentDescription = description
                 customActions = target.menuActions().map { action ->
                     CustomAccessibilityAction(action.menuLabel(target, inLibrary, context)) {
@@ -768,63 +827,80 @@ private fun MobileContinueWatchingCard(
                     }
                 }
             },
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
-        if (progress.completed) {
-            SelectionCheckmark(
-                selected = true,
-                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                selectedContentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
-            )
-        }
         Box(
             Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.45f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.78f),
-                    ),
-                ),
-        )
-        timeLeft?.let { left ->
-            Text(
-                text = stringResource(R.string.continue_watching_time_left, left),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.62f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-            )
-        }
-        Text(
-            text = title,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 8.dp, end = 8.dp, bottom = 15.dp),
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = Color.White,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .height(7.dp)
-                .background(Color.Black.copy(alpha = 0.55f)),
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(MobileTokens.radiusResume))
+                .background(MobileTokens.surfaceRaised),
         ) {
+            MediaArtwork(media, Modifier.fillMaxSize(), preferBackdrop = true)
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.6f)),
+                ),
+            )
             Box(
                 Modifier
-                    .fillMaxWidth(progress.fraction)
-                    .height(7.dp)
-                    .background(MaterialTheme.colorScheme.primary),
+                    .align(Alignment.Center)
+                    .size(42.dp)
+                    .background(Color.Black.copy(alpha = 0.42f), CircleShape)
+                    .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
+            }
+            timeLeft?.let { left ->
+                Text(
+                    text = stringResource(R.string.continue_watching_time_left, left),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 8.dp, bottom = 10.dp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = Color.White,
+                )
+            }
+            if (progress.completed) {
+                SelectionCheckmark(
+                    selected = true,
+                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                    selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                )
+            }
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(Color.White.copy(alpha = 0.22f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress.fraction)
+                        .height(3.dp)
+                        .background(MobileTokens.accent),
+                )
+            }
+        }
+        Column(Modifier.padding(horizontal = 2.dp)) {
+            Text(
+                text = media.name,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            progress.episodeLabel?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MobileTokens.textMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -864,9 +940,21 @@ internal fun CatalogRow(
     onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.padding(horizontal = 16.dp)) {
-            Text(section.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-            Text(section.providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.Bottom) {
+            Text(
+                section.title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.weight(1f, fill = false).semantics { heading() },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                section.providerName,
+                style = MaterialTheme.typography.labelMedium,
+                color = MobileTokens.textMuted,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+            )
         }
         section.errorMessage?.let { error ->
             Text(
@@ -893,7 +981,7 @@ internal fun CatalogRow(
         } else if (section.items.isNotEmpty() || section.supportsSkip) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(section.items, key = MediaPreview::stableKey) { media ->
                     val menuTarget = ContentMenuTarget(media, progress = progressByVideo[media.id])
@@ -942,20 +1030,10 @@ private fun PosterCard(
 ) {
     val landscape = media.posterShape.equals("landscape", ignoreCase = true) ||
         (media.posterUrl.isNullOrBlank() && !media.backgroundUrl.isNullOrBlank())
-    // Artwork carries the emotion: no name or metadata text on the card,
-    // matching the TV design. The name stays available to TalkBack, and the
-    // rating appears as a small neutral overlay per the design system — the
-    // IMDb mark only when the addon exposed an actual IMDb score (SHR-PROD-05).
-    val ratingText = media.metadataPresentation().ratingText
-    val imdbScore = metadataImdbScore(media.rating, media.ratingSource, "")
-    val cardDescription = ratingText
-        ?.let { stringResource(R.string.media_card_description_rating, media.name, it) }
-        ?: media.name
+    // Artwork leads; the title sits quietly underneath and ratings stay on
+    // details (no badge over the poster, as on TV).
     val haptics = LocalHapticFeedback.current
     val context = androidx.compose.ui.platform.LocalContext.current
-    // Direct accessibility actions mirror the sheet; when no action handler
-    // is available, an explicit More action still reaches the menu so
-    // long-press is never the only route (MOB-A11Y-03).
     val accessibilityActions = when {
         menuTarget != null && onMenuAction != null -> menuTarget.menuActions().map { action ->
             CustomAccessibilityAction(action.menuLabel(menuTarget, inLibrary, context)) {
@@ -969,13 +1047,20 @@ private fun PosterCard(
         )
         else -> emptyList()
     }
-    Box(
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(if (pressed) 0.95f else 1f, tween(140), label = "poster press")
+    val cardWidth = if (landscape) 200.dp else PosterWidth
+    Column(
         modifier
-            .width(if (landscape) 220.dp else 138.dp)
-            .aspectRatio(if (landscape) 16f / 9f else 2f / 3f)
-            .clip(RoundedCornerShape(MobileTokens.radiusCard))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .width(cardWidth)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
                 role = Role.Button,
                 onClick = { onMedia(media) },
                 onLongClick = menuTarget?.let { target -> {
@@ -983,49 +1068,37 @@ private fun PosterCard(
                     onOpenMenu?.invoke(target)
                 } },
             )
-            .semantics {
-                contentDescription = cardDescription
+            .semantics(mergeDescendants = true) {
+                contentDescription = media.name
                 customActions = accessibilityActions
             },
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        MediaArtwork(media, Modifier.fillMaxSize())
-        if (completed) {
-            SelectionCheckmark(
-                selected = true,
-                selectedContainerColor = MaterialTheme.colorScheme.primary,
-                selectedContentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
-            )
-        }
-        imdbScore?.let { score ->
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RatingBadgeChip(score)
-                Text(ratingText!!, style = MaterialTheme.typography.labelSmall, color = Color.White)
-            }
-        } ?: ratingText?.let { rating ->
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("★", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                Text(rating, style = MaterialTheme.typography.labelSmall, color = Color.White)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(if (landscape) 16f / 9f else 2f / 3f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MobileTokens.surfaceRaised),
+        ) {
+            MediaArtwork(media, Modifier.fillMaxSize())
+            if (completed) {
+                SelectionCheckmark(
+                    selected = true,
+                    selectedContainerColor = MaterialTheme.colorScheme.primary,
+                    selectedContentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                )
             }
         }
+        Text(
+            media.name,
+            style = MaterialTheme.typography.labelMedium,
+            color = MobileTokens.textPrimary.copy(alpha = 0.88f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
     }
 }
 
