@@ -223,6 +223,9 @@ fun TvApp(
     var menuReturnFocus by remember { mutableStateOf<FocusRequester?>(null) }
     var restoreMenuFocus by remember { mutableStateOf(false) }
     var suppressMenuOpeningKey by remember { mutableStateOf(false) }
+    // The boot sequence plays over a cold start only; remove-animations and a
+    // global-search launch go straight to content (TV-MOT-01).
+    val boot = rememberTvBootState(enabled = !rememberReducedMotion() && initialSearch == null)
     val completedVideoIds = remember(state.progress) {
         state.progress.asSequence().filter { it.completed }.map { it.videoId }.toSet()
     }
@@ -309,6 +312,11 @@ fun TvApp(
                 Modifier
                     .fillMaxSize()
                     .onPreviewKeyEvent { event ->
+                        if (boot.active) {
+                            // Any key skips the boot sequence; none reach the content beneath.
+                            if (event.type == KeyEventType.KeyDown) boot.skip()
+                            return@onPreviewKeyEvent true
+                        }
                         val opensMenu = event.key == Key.DirectionCenter ||
                             event.key == Key.Enter ||
                             event.key == Key.Menu
@@ -376,7 +384,7 @@ fun TvApp(
                     val updateState by updateViewModel.state.collectAsStateWithLifecycle()
                     com.lamphaus.app.update.UpdateInstallerHost(updateViewModel, updateState)
                     val openUpdateSettings = com.lamphaus.app.update.rememberUpdatePermissionLauncher(updateViewModel)
-                    val modalOpen = state.contentMenu.target != null || state.sourcePicker != null
+                    val modalOpen = state.contentMenu.target != null || state.sourcePicker != null || boot.active
                     LaunchedEffect(modalOpen) { updateViewModel.setPresentationBlocked(modalOpen) }
                     if (!modalOpen) {
                         com.lamphaus.app.update.TvUpdateDialog(
@@ -396,6 +404,11 @@ fun TvApp(
                         )
                     }
                 }
+                TvBootOverlay(
+                    state = boot,
+                    contentReady = state.account != AccountState.Loading &&
+                        (state.account !is AccountState.SignedIn || !state.initialContentLoading),
+                )
             }
         }
         }
