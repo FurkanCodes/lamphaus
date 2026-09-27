@@ -633,73 +633,14 @@ private fun tvContentMenuIcon(action: ContentMenuAction, inLibrary: Boolean): Im
     ContentMenuAction.StartFromBeginning -> Icons.Outlined.Replay
 }
 
+/**
+ * Account resolution under the boot sequence; on its own (remove animations,
+ * a global-search launch) it is the boot lockup as a still frame, so the old
+ * loading mark never appears (TV-MOT-01).
+ */
 @Composable
 private fun TvLoading() {
-    val reducedMotion = rememberReducedMotion()
-    val sweep = remember { Animatable(-0.12f) }
-    LaunchedEffect(reducedMotion) {
-        if (reducedMotion) {
-            sweep.snapTo(1.12f)
-        } else {
-            sweep.animateTo(
-                targetValue = 1.12f,
-                animationSpec = tween(
-                    durationMillis = TvMotionTokens.startupSweepDurationMillis,
-                    easing = LinearEasing,
-                ),
-            )
-        }
-    }
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(280.dp)
-                    .height(72.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Image(
-                        painter = painterResource(R.drawable.ic_lamphaus_foreground),
-                        contentDescription = null,
-                        modifier = Modifier.size(44.dp),
-                    )
-                    Text(
-                        text = stringResource(R.string.app_name).uppercase(),
-                        style = MaterialTheme.typography.headlineMedium.copy(letterSpacing = 1.6.sp),
-                    )
-                }
-                if (!reducedMotion) {
-                    Canvas(Modifier.fillMaxSize()) {
-                        val x = size.width * sweep.value
-                        drawLine(
-                            color = TvFocusTokens.beam.copy(alpha = 0.12f),
-                            start = androidx.compose.ui.geometry.Offset(x, 4.dp.toPx()),
-                            end = androidx.compose.ui.geometry.Offset(x, size.height - 4.dp.toPx()),
-                            strokeWidth = 12.dp.toPx(),
-                        )
-                        drawLine(
-                            color = TvFocusTokens.beam.copy(alpha = 0.72f),
-                            start = androidx.compose.ui.geometry.Offset(x, 8.dp.toPx()),
-                            end = androidx.compose.ui.geometry.Offset(x, size.height - 8.dp.toPx()),
-                            strokeWidth = 1.dp.toPx(),
-                        )
-                    }
-                }
-            }
-            Text(
-                text = stringResource(R.string.loading_library),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    }
+    TvBootStill(Modifier.fillMaxSize())
 }
 
 @Composable

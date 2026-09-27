@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
@@ -99,14 +100,14 @@ internal object TvBootTokens {
     const val sweepStart = 1_350; const val sweepEnd = 1_900
 }
 
-/** Once per process: returning from playback or a configuration change never replays it. */
-internal object TvBootGate {
-    var played = false
-}
-
+/**
+ * Plays on every launch of the TV host. The played flag is saved state, so a
+ * configuration change, process-death restore, or returning from playback
+ * (the activity survives) never replays it, while a fresh launch always does.
+ */
 @Stable
-internal class TvBootState(enabled: Boolean) {
-    var active by mutableStateOf(enabled && !TvBootGate.played)
+internal class TvBootState(enabled: Boolean, private val onFinished: () -> Unit = {}) {
+    var active by mutableStateOf(enabled)
         private set
     internal var skipRequests by mutableIntStateOf(0)
         private set
@@ -117,13 +118,16 @@ internal class TvBootState(enabled: Boolean) {
     }
 
     internal fun finish() {
-        TvBootGate.played = true
         active = false
+        onFinished()
     }
 }
 
 @Composable
-internal fun rememberTvBootState(enabled: Boolean): TvBootState = remember { TvBootState(enabled) }
+internal fun rememberTvBootState(enabled: Boolean): TvBootState {
+    var played by rememberSaveable { mutableStateOf(false) }
+    return remember { TvBootState(enabled && !played) { played = true } }
+}
 
 private val EmphasizedDecelerate: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 
@@ -186,8 +190,20 @@ internal fun TvBootOverlay(state: TvBootState, contentReady: Boolean, modifier: 
         }
     }
 
-    val t = timeline.value
-    val e = exit.value
+    TvBootScene(t = timeline.value, e = exit.value, breathing = breathing, modifier = modifier)
+}
+
+/**
+ * The lit lockup as a still frame, for the loading mark when the boot
+ * sequence is not playing (remove animations, a global-search launch).
+ */
+@Composable
+internal fun TvBootStill(modifier: Modifier = Modifier) {
+    TvBootScene(t = TvBootTokens.introMillis.toFloat(), e = 0f, breathing = 0f, modifier = modifier)
+}
+
+@Composable
+private fun TvBootScene(t: Float, e: Float, breathing: Float, modifier: Modifier = Modifier) {
     var rowWidth by remember { mutableIntStateOf(0) }
     var lightCenter by remember { mutableStateOf(Offset.Unspecified) }
     val appName = stringResource(R.string.app_name)
