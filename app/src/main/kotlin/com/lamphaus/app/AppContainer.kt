@@ -101,7 +101,8 @@ class AppContainer(context: Context) {
 
     /** Playback queued by a closing player (next episode, another source); see [launchPendingPlayback]. */
     val pendingPlayback = kotlinx.coroutines.flow.MutableStateFlow<com.lamphaus.core.model.PlaybackRequest?>(null)
-    val trailerRepository = com.lamphaus.core.data.trailer.TrailerRepository()
+    /** Built on first trailer request so app startup never pays for its HTTP client. */
+    val trailerRepository by lazy { com.lamphaus.core.data.trailer.TrailerRepository() }
 
     /**
      * Application-lifetime scope for work that must outlive any single screen.
