@@ -58,6 +58,8 @@ data class PlaybackRequest(
     /** The selected add-on is preferred when resolving the following episode. */
     val sourceProviderId: String? = null,
     val sourceBingeGroup: String? = null,
+    /** The playing source's name, title and file, used to find the closest next-episode source. */
+    val sourceLabel: String? = null,
     /** Catalog item snapshot, persisted with watch progress for Continue Watching. */
     val preview: MediaPreview? = null,
 )
