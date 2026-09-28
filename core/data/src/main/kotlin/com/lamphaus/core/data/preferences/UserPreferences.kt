@@ -130,6 +130,7 @@ class UserPreferences(private val context: Context) {
                 audioOutputMode = values[PLAYBACK_AUDIO_OUTPUT],
                 decoderPriority = values[PLAYBACK_DECODER_PRIORITY],
                 downmixMode = values[PLAYBACK_DOWNMIX],
+                nightListening = values[PLAYBACK_NIGHT_LISTENING],
             ),
             updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
@@ -283,6 +284,7 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_AUDIO_OUTPUT] = config.audioOutputMode.name
             it[PLAYBACK_DECODER_PRIORITY] = config.decoderPriority.name
             it[PLAYBACK_DOWNMIX] = config.downmixMode.name
+            it[PLAYBACK_NIGHT_LISTENING] = config.nightListening
         }
     }
 
@@ -358,6 +360,7 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_AUDIO_OUTPUT = stringPreferencesKey("playback_audio_output")
         val PLAYBACK_DECODER_PRIORITY = stringPreferencesKey("playback_decoder_priority")
         val PLAYBACK_DOWNMIX = stringPreferencesKey("playback_downmix")
+        val PLAYBACK_NIGHT_LISTENING = booleanPreferencesKey("playback_night_listening")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }
@@ -405,6 +408,7 @@ internal fun devicePlaybackConfigFromKeys(
     audioOutputMode: String?,
     decoderPriority: String?,
     downmixMode: String?,
+    nightListening: Boolean? = null,
 ): DevicePlaybackConfig {
 
     return DevicePlaybackConfig(
@@ -415,5 +419,6 @@ internal fun devicePlaybackConfigFromKeys(
         audioOutputMode = parseEnum(audioOutputMode, AudioOutputMode.AUTO),
         decoderPriority = parseEnum(decoderPriority, DecoderPriority.AUTO),
         downmixMode = parseEnum(downmixMode, DownmixMode.AUTO),
+        nightListening = nightListening ?: false,
     )
 }

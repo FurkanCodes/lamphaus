@@ -98,6 +98,11 @@ class MpvPlayer(
             if (com.lamphaus.core.player.DeviceEnvironment.isAndroidEmulator()) "no" else "auto-safe",
         )
         MpvLibrary.setOptionString(handle, "ao", "audiotrack,opensles")
+        // Night listening (SHR-PROD-15): FFmpeg's compressor with the same
+        // shape as the Media3 path (-30 dB, 4:1, +8 dB makeup), then a limiter.
+        if (com.lamphaus.core.player.Media3EngineFactory.deviceConfig.nightListening) {
+            MpvLibrary.setOptionString(handle, "af", NIGHT_LISTENING_FILTER)
+        }
         // Embedded ASS/SSA styling through libass stays on by default (plan §4).
         MpvLibrary.setOptionString(handle, "sub-ass", "yes")
         MpvLibrary.setOptionString(handle, "keep-open", "yes")
@@ -554,3 +559,7 @@ internal fun mpvVideoFormat(
         .setFrameRate(frameRate)
         .build()
 }
+
+/** mpv `af` chain for night listening; threshold and makeup are linear (0.0316 ≈ -30 dBFS, 2.5 ≈ +8 dB). */
+private const val NIGHT_LISTENING_FILTER =
+    "lavfi=[acompressor=threshold=0.0316:ratio=4:attack=5:release=250:makeup=2.5,alimiter=limit=0.97]"

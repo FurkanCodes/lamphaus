@@ -193,4 +193,6 @@ data class DevicePlaybackConfig(
     val audioOutputMode: AudioOutputMode = AudioOutputMode.AUTO,
     val decoderPriority: DecoderPriority = DecoderPriority.AUTO,
     val downmixMode: DownmixMode = DownmixMode.AUTO,
+    /** Night listening (SHR-PROD-15): compress loud and quiet moments, lift dialogue; decodes on the device. */
+    val nightListening: Boolean = false,
 )

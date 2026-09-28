@@ -273,6 +273,13 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     onClick = { choiceDialog = PlaybackChoiceDialog.DOWNMIX },
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.night_listening_setting),
+                    description = stringResource(R.string.night_listening_setting_description),
+                    checked = device.nightListening,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(nightListening = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 PlaybackEngineChoiceRow(
                     title = "Dolby Vision",
                     description = PlaybackEngineOptions.DOLBY_VISION_DESCRIPTION,
