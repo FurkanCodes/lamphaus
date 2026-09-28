@@ -98,6 +98,8 @@ data class MediaPreview(
     val ratingSource: String? = null,
     val providerIds: Set<String> = emptySet(),
     val posterShape: String? = null,
+    /** YouTube video ids of the title's trailers, best first (provider `trailers`/`trailerStreams`). */
+    val trailerYtIds: List<String> = emptyList(),
 ) {
     val stableKey: String get() = "${rawType.lowercase()}:$id"
 }

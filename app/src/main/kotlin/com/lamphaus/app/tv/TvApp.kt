@@ -945,7 +945,15 @@ private fun TvSignedIn(
         )
     }
 
-    CompositionLocalProvider(LocalTvContentAccent provides ambient) {
+    // TV-CNT-04: opt-in, Spotlight only; unset means off.
+    val trailerPreviews = rememberTvTrailerPreviews(
+        enabled = state.trailers == true && state.tvHomeLayout == TvHomeLayout.SPOTLIGHT,
+        resolve = { media, maxHeight -> viewModel.trailerSource(media, maxHeight) },
+    )
+    CompositionLocalProvider(
+        LocalTvContentAccent provides ambient,
+        LocalTvTrailerPreviews provides trailerPreviews,
+    ) {
         Box(Modifier.fillMaxSize()) {
             if (backgroundArtwork && destination != TvDestination.SETTINGS) {
                 TvContentAmbientBackground(ambient = ambient)
@@ -3627,6 +3635,14 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 onClick = {
                     viewModel.setTvHomeLayout(if (spotlight) TvHomeLayout.CLASSIC else TvHomeLayout.SPOTLIGHT)
                 },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.trailer_previews),
+                description = stringResource(R.string.trailer_previews_description),
+                checked = state.trailers == true,
+                onCheckedChange = viewModel::setTrailersEnabled,
             )
         }
         item { TvStreamBadgeSettings(state, viewModel) }

@@ -9,6 +9,22 @@ import org.junit.Test
 
 class MetadataMergeTest {
     @Test
+    fun `trailer ids from every provider are kept in order without duplicates`() {
+        val catalog = MediaPreview(
+            id = "tt1234567",
+            type = MediaType.MOVIE,
+            rawType = "movie",
+            name = "Example",
+            trailerYtIds = listOf("catalogAAAA"),
+        )
+        val meta = catalog.copy(trailerYtIds = listOf("catalogAAAA", "metaBBBBBBB"))
+
+        val merged = MediaDetail(catalog).merge(MediaDetail(meta))
+
+        assertEquals(listOf("catalogAAAA", "metaBBBBBBB"), merged.preview.trailerYtIds)
+    }
+
+    @Test
     fun `catalog preview artwork and rating remain authoritative while metadata fills gaps`() {
         val catalogPreview = MediaPreview(
             id = "tt1234567",

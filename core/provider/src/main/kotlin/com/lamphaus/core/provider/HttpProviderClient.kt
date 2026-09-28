@@ -585,7 +585,23 @@ class HttpProviderClient(
             ratingSource = rating?.second,
             providerIds = setOf(providerId),
             posterShape = string("posterShape") ?: catalogPosterShape,
+            trailerYtIds = trailerYtIds(),
         )
+    }
+
+    /**
+     * Trailer ids from `trailers` (`source` holds the YouTube id; trailers
+     * before clips and teasers) and `trailerStreams` (`ytId`). Only strings
+     * shaped like a YouTube id pass, so nothing else reaches the extractor.
+     */
+    private fun JsonObject.trailerYtIds(): List<String> {
+        val fromTrailers = array("trailers").orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .sortedBy { if (it.string("type").equals("Trailer", ignoreCase = true)) 0 else 1 }
+            .mapNotNull { it.firstString("source", "ytId") }
+        val fromStreams = array("trailerStreams").orEmpty()
+            .mapNotNull { (it as? JsonObject)?.firstString("ytId", "yt_id") }
+        return (fromTrailers + fromStreams).filter(YOUTUBE_ID::matches).distinct()
     }
 
     private fun JsonObject.toDetail(providerId: String, fallbackType: String): MediaDetail {
@@ -793,6 +809,7 @@ class HttpProviderClient(
     private class ProviderProtocolException(message: String) : IllegalArgumentException(message)
 
     private companion object {
+        val YOUTUBE_ID = Regex("^[A-Za-z0-9_-]{11}$")
         const val STALE_LIMIT_MILLIS = 7L * 24 * 60 * 60 * 1000
         const val MAX_REDIRECTS = 3
 

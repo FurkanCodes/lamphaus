@@ -289,6 +289,17 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
+            SettingsCard(stringResource(R.string.trailers)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.trailer_button),
+                    description = stringResource(R.string.trailers_description),
+                    // Unset means on for phones and tablets.
+                    checked = state.trailers != false,
+                    onCheckedChange = viewModel::setTrailersEnabled,
+                )
+            }
+        }
+        item {
             SettingsCard(stringResource(R.string.episode_playback)) {
                 PlaybackSettingRow(
                     title = stringResource(R.string.skip_intro),

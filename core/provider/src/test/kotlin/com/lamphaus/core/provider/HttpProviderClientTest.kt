@@ -181,6 +181,23 @@ class HttpProviderClientTest {
     }
 
     @Test
+    fun `catalog previews carry trailer ids with trailers before clips`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"metas":[{"id":"tt1","type":"movie","name":"Night Signal","trailers":[{"source":"clipClip123","type":"Clip"},{"source":"trailer1234","type":"Trailer"},{"source":"not a yt id","type":"Trailer"}],"trailerStreams":[{"title":"Night Signal","ytId":"trailer1234"},{"title":"Night Signal","ytId":"stream12345"}]}]}""",
+            ),
+        )
+
+        val item = (client.catalog(
+            server.url("/manifest.json").toString(),
+            "fixture.provider",
+            CatalogQuery("movie", "featured"),
+        ) as ProviderResult.Success).value.single()
+
+        assertEquals(listOf("trailer1234", "clipClip123", "stream12345"), item.trailerYtIds)
+    }
+
+    @Test
     fun `preview extension aliases fill missing artwork`() = runTest {
         server.enqueue(
             jsonResponse(
