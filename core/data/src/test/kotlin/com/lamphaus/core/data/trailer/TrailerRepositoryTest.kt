@@ -45,6 +45,19 @@ class TrailerRepositoryTest {
     }
 
     @Test
+    fun `a stream that failed to play is extracted again`() = runTest {
+        val source = TrailerSource("https://v.googlevideo.com/videoplayback?expire=${nowMillis / 1000 + 21_600}")
+        val extractor = FakeTrailerExtractor(mapOf("bbbbbbbbbbb" to source))
+        val repository = TrailerRepository(extractor) { nowMillis }
+        repository.source(listOf("bbbbbbbbbbb"), maxHeight = 720)
+
+        repository.forget(source)
+
+        assertEquals(source, repository.source(listOf("bbbbbbbbbbb"), maxHeight = 720))
+        assertEquals(listOf("bbbbbbbbbbb", "bbbbbbbbbbb"), extractor.requests)
+    }
+
+    @Test
     fun `no ids resolves to nothing`() = runTest {
         val repository = TrailerRepository(FakeTrailerExtractor(emptyMap())) { nowMillis }
 

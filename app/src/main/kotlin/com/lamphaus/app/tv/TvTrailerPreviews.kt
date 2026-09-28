@@ -37,17 +37,18 @@ internal object TvTrailerPreviewTokens {
 }
 
 /**
- * One muted trailer player shared by every Spotlight card. It exists only
- * while previews are on and the TV activity is started, so playback and
- * other apps get the decoders back as soon as Home stops.
+ * Spotlight trailer previews, available only while previews are on and the
+ * TV activity is started. Each trailer gets its own muted player, released
+ * the moment the trailer stops: a player kept across cards could get stuck
+ * and leave every later card silent until previews were switched off and on,
+ * and a released player also gives playback and other apps the decoder back.
  */
 @Stable
 internal class TvTrailerPreviews(
     private val context: Context,
     private val resolve: suspend (MediaPreview) -> TrailerSource?,
+    private val forget: (TrailerSource) -> Unit,
 ) {
-    private var trailerPlayer: TrailerPlayer? = null
-
     suspend fun source(media: MediaPreview): TrailerSource? = try {
         resolve(media)
     } catch (error: CancellationException) {
@@ -56,14 +57,11 @@ internal class TvTrailerPreviews(
         null
     }
 
-    fun player(): TrailerPlayer =
-        trailerPlayer ?: TrailerPlayer(context, TvTrailerPreviewTokens.maxVideoHeight, withSound = false)
-            .also { trailerPlayer = it }
+    fun newPlayer(): TrailerPlayer =
+        TrailerPlayer(context, TvTrailerPreviewTokens.maxVideoHeight, withSound = false)
 
-    fun release() {
-        trailerPlayer?.release()
-        trailerPlayer = null
-    }
+    /** A stream that failed is not reused; the next focus extracts it again. */
+    fun failed(source: TrailerSource) = forget(source)
 }
 
 internal val LocalTvTrailerPreviews = staticCompositionLocalOf<TvTrailerPreviews?> { null }
@@ -76,10 +74,12 @@ internal val LocalTvTrailerPreviews = staticCompositionLocalOf<TvTrailerPreviews
 internal fun rememberTvTrailerPreviews(
     enabled: Boolean,
     resolve: suspend (MediaPreview, Int) -> TrailerSource?,
+    forget: (TrailerSource) -> Unit,
 ): TvTrailerPreviews? {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val currentResolve by rememberUpdatedState(resolve)
+    val currentForget by rememberUpdatedState(forget)
     val reducedMotion = rememberReducedMotion()
     var started by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
     DisposableEffect(lifecycle) {
@@ -94,13 +94,13 @@ internal fun rememberTvTrailerPreviews(
         onDispose { lifecycle.removeObserver(observer) }
     }
     if (!enabled || !started || reducedMotion) return null
-    val previews = remember(context) {
-        TvTrailerPreviews(context) { media -> currentResolve(media, TvTrailerPreviewTokens.maxVideoHeight) }
+    return remember(context) {
+        TvTrailerPreviews(
+            context,
+            resolve = { media -> currentResolve(media, TvTrailerPreviewTokens.maxVideoHeight) },
+            forget = { source -> currentForget(source) },
+        )
     }
-    DisposableEffect(previews) {
-        onDispose(previews::release)
-    }
-    return previews
 }
 
 /** The trailer inside a focused Spotlight card; it fades in on its first frame. */
@@ -111,16 +111,16 @@ internal fun TvSpotlightTrailer(
     onEnded: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val trailerPlayer = remember(previews) { previews.player() }
+    val trailerPlayer = remember(previews, source) { previews.newPlayer() }
     var firstFrame by remember(source) { mutableStateOf(false) }
     val alpha by animateFloatAsState(
         targetValue = if (firstFrame) 1f else 0f,
         animationSpec = tween(TvTrailerPreviewTokens.fadeInMillis),
         label = "spotlight trailer fade",
     )
-    DisposableEffect(trailerPlayer, source) {
+    DisposableEffect(trailerPlayer) {
         trailerPlayer.play(source)
-        onDispose(trailerPlayer::stop)
+        onDispose(trailerPlayer::release)
     }
     TrailerVideo(
         player = trailerPlayer.player,
@@ -130,5 +130,9 @@ internal fun TvSpotlightTrailer(
         crop = true,
         onFirstFrame = { firstFrame = true },
         onEnded = onEnded,
+        onError = {
+            previews.failed(source)
+            onEnded()
+        },
     )
 }

@@ -36,6 +36,11 @@ class TrailerRepository(
         return null
     }
 
+    /** Drops [source] from the cache, so the next request extracts its id again. */
+    fun forget(source: TrailerSource) {
+        resolved.entries.removeIf { it.value.source == source }
+    }
+
     private data class Resolved(val source: TrailerSource, val expiresAtMillis: Long)
 
     internal companion object {

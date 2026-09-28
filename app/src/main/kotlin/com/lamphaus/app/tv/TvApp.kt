@@ -962,6 +962,7 @@ private fun TvSignedIn(
     val trailerPreviews = rememberTvTrailerPreviews(
         enabled = state.trailers == true && state.tvHomeLayout == TvHomeLayout.SPOTLIGHT,
         resolve = { media, maxHeight -> viewModel.trailerSource(media, maxHeight) },
+        forget = viewModel::forgetTrailerSource,
     )
     CompositionLocalProvider(
         LocalTvContentAccent provides ambient,

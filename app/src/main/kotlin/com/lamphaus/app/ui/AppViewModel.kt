@@ -1981,6 +1981,9 @@ class AppViewModel(
         return container.trailerRepository.source(ids, maxHeight, refresh)
     }
 
+    /** A resolved stream that failed to play is extracted afresh next time. */
+    fun forgetTrailerSource(source: TrailerSource) = container.trailerRepository.forget(source)
+
     private suspend fun trailerIds(media: MediaPreview): List<String> {
         media.trailerYtIds.takeIf { it.isNotEmpty() }?.let { return it }
         val detail = state.value.selectedDetail?.takeIf { it.preview.stableKey == media.stableKey }

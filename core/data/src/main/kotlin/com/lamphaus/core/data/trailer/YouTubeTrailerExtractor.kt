@@ -86,6 +86,10 @@ class YouTubeTrailerExtractor(
         }
     } catch (_: TimeoutCancellationException) {
         null
+    } catch (error: CancellationException) {
+        // Must precede IllegalStateException, which it extends: a card that
+        // lost focus cancels its extraction, and that is not a failed extraction.
+        throw error
     } catch (_: IOException) {
         null
     } catch (_: SerializationException) {
