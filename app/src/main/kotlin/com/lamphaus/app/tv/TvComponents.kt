@@ -96,6 +96,9 @@ import androidx.tv.material3.Text
 import androidx.core.text.HtmlCompat
 import com.lamphaus.app.R
 import androidx.compose.runtime.rememberCoroutineScope
+import com.lamphaus.app.ui.upNextEpisodeLabel
+import com.lamphaus.app.ui.upNextBadgeText
+import com.lamphaus.app.ui.UpNextItem
 import com.lamphaus.app.ui.ProfileAvatarArt
 import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.ContentMenuOrigin
@@ -668,6 +671,8 @@ internal fun TvContinueWatchingCard(
     modifier: Modifier = Modifier,
     onFocused: () -> Unit = {},
     onMenuRequest: ((FocusRequester) -> Unit)? = null,
+    /** Present for an up-next card: the series' following episode replaces the progress. */
+    upNext: UpNextItem? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -676,11 +681,15 @@ internal fun TvContinueWatchingCard(
     val defaultMenuRequest = menuEnvironment.onRequest?.let { request ->
         { focus: FocusRequester ->
             request(
-                ContentMenuTarget(
-                    media = media,
-                    progress = progress,
-                    origin = ContentMenuOrigin.CONTINUE_WATCHING,
-                ),
+                if (upNext != null) {
+                    ContentMenuTarget(media = media, episode = upNext.episode, origin = ContentMenuOrigin.CONTINUE_WATCHING)
+                } else {
+                    ContentMenuTarget(
+                        media = media,
+                        progress = progress,
+                        origin = ContentMenuOrigin.CONTINUE_WATCHING,
+                    )
+                },
                 focus,
             )
         }
@@ -696,13 +705,20 @@ internal fun TvContinueWatchingCard(
     // it in the layer block, which skips recomposition entirely.
     val ambient = LocalTvContentAccent.current
     val primary = MaterialTheme.colorScheme.primary
-    val title = progress.episodeLabel ?: media.name
+    val upNextLabel = upNext?.let { upNextEpisodeLabel(it.episode) }
+    val upNextBadge = upNext?.let { upNextBadgeText(it) }
+    val title = upNextLabel ?: progress.episodeLabel ?: media.name
     val percent = (progress.fraction * 100).toInt()
-    val cardDescription = stringResource(R.string.media_card_description_progress, title, percent)
+    val cardDescription = if (upNext != null) {
+        stringResource(R.string.up_next_card_description, media.name, upNextLabel.orEmpty(), upNextBadge.orEmpty())
+    } else {
+        stringResource(R.string.media_card_description_progress, title, percent)
+    }
     val remainingMillis = (progress.durationMillis - progress.positionMillis).coerceAtLeast(0)
     val hours = remainingMillis / 3_600_000
     val minutes = (remainingMillis % 3_600_000) / 60_000
     val timeLeft = when {
+        upNext != null -> null
         hours > 0 -> "$hours h $minutes min"
         minutes > 0 -> "$minutes min"
         else -> null
@@ -766,9 +782,9 @@ internal fun TvContinueWatchingCard(
                         ),
                     ),
             )
-            timeLeft?.let { left ->
+            (upNextBadge ?: timeLeft?.let { stringResource(R.string.continue_watching_time_left, it) })?.let { badge ->
                 Text(
-                    text = stringResource(R.string.continue_watching_time_left, left),
+                    text = badge,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(7.dp)
@@ -779,7 +795,7 @@ internal fun TvContinueWatchingCard(
                     color = Color.White,
                 )
             }
-            if (progress.completed) {
+            if (progress.completed && upNext == null) {
                 SelectionCheckmark(
                     selected = true,
                     selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -797,19 +813,21 @@ internal fun TvContinueWatchingCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Box(
-                Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .height(7.dp)
-                    .background(Color.Black.copy(alpha = 0.55f)),
-            ) {
+            if (upNext == null) {
                 Box(
                     Modifier
-                        .fillMaxWidth(progress.fraction)
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
                         .height(7.dp)
-                        .background(TvFocusTokens.beam),
-                )
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress.fraction)
+                            .height(7.dp)
+                            .background(TvFocusTokens.beam),
+                    )
+                }
             }
         }
     }

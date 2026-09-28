@@ -1,6 +1,5 @@
 package com.lamphaus.app.player
 
-import android.text.format.DateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,7 +38,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.releaseCountdownText
+import com.lamphaus.app.ui.ReleaseKind
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.hasAired
@@ -190,9 +190,7 @@ private fun statusText(
     progress: NextEpisodeProgress,
     failureMessage: String?,
 ): String? = when {
-    !aired -> episode.releasedAtEpochMillis
-        ?.let { DateUtils.formatDateTime(LocalContext.current, it, DateUtils.FORMAT_SHOW_DATE) }
-        ?.let { stringResource(R.string.next_episode_unaired_with_date, it) }
+    !aired -> releaseCountdownText(episode.releasedAtEpochMillis, ReleaseKind.EPISODE)
     progress is NextEpisodeProgress.Searching -> stringResource(R.string.next_episode_finding_source)
     progress is NextEpisodeProgress.Starting ->
         stringResource(R.string.next_episode_playing_via, progress.sourceName, progress.secondsLeft)

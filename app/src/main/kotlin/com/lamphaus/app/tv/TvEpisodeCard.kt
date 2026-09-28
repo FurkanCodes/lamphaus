@@ -38,6 +38,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.episodeAirDateText
 import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.ContentMenuTarget
 import com.lamphaus.app.ui.NextUpKind
@@ -51,8 +52,6 @@ import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.WatchProgress
-import java.text.DateFormat
-import java.util.Date
 
 /**
  * An episode in the details row (TV-TOK-01 landscape card).
@@ -246,9 +245,8 @@ internal fun TvEpisodeDetailLine(
     } else {
         episode.title
     }
-    val airDate = remember(episode.releasedAtEpochMillis) {
-        episode.releasedAtEpochMillis?.let { DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it)) }
-    }
+    // Unaired: "Airs in 3 days"; aired: the date (Nuvio's air-date badge).
+    val airDate = episodeAirDateText(episode.releasedAtEpochMillis)
     val minutesLeft = progress?.takeIf(WatchProgress::isResumable)?.let { row ->
         ((row.durationMillis - row.positionMillis).coerceAtLeast(0) / 60_000).toInt().coerceAtLeast(1)
     }

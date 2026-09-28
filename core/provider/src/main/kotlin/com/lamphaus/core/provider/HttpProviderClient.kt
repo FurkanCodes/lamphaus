@@ -586,6 +586,7 @@ class HttpProviderClient(
             providerIds = setOf(providerId),
             posterShape = string("posterShape") ?: catalogPosterShape,
             trailerYtIds = trailerYtIds(),
+            releasedAtEpochMillis = string("released")?.toEpochMillisOrNull(),
         )
     }
 
@@ -794,7 +795,12 @@ class HttpProviderClient(
         else -> MediaType.UNKNOWN
     }
     private fun String.qualityHint(): String? = QUALITY.find(this)?.value?.uppercase()
-    private fun String.toEpochMillisOrNull(): Long? = runCatching { java.time.Instant.parse(this).toEpochMilli() }.getOrNull()
+    /** ISO instants, or a bare `yyyy-MM-dd` date taken as that day's start in UTC. */
+    private fun String.toEpochMillisOrNull(): Long? =
+        runCatching { java.time.Instant.parse(trim()).toEpochMilli() }.getOrNull()
+            ?: runCatching {
+                java.time.LocalDate.parse(trim().take(10)).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+            }.getOrNull()
     private fun String.toRuntimeMinutes(): Int? {
         val hours = Regex("(\\d+)\\s*h", RegexOption.IGNORE_CASE).find(this)?.groupValues?.get(1)?.toIntOrNull() ?: 0
         val minutes = Regex("(\\d+)\\s*m", RegexOption.IGNORE_CASE).find(this)?.groupValues?.get(1)?.toIntOrNull()

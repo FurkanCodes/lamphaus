@@ -99,6 +99,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 import coil3.compose.AsyncImage
+import com.lamphaus.app.ui.upNextEpisodeLabel
+import com.lamphaus.app.ui.upNextBadgeText
+import com.lamphaus.app.ui.withUpNext
+import com.lamphaus.app.ui.UpNextKind
+import com.lamphaus.app.ui.UpNextItem
 import com.lamphaus.app.ui.MediaArtwork
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -169,9 +174,10 @@ internal fun MobileHomeScreen(
     // Progress is synced with the Supabase watch_progress table both ways
     // (player writes -> Room + cloud; cloud -> Room on sign-in), so this row
     // follows whatever was last watched on any device.
-    val continueWatching = remember(state.progress, allMedia) {
-        continueWatchingItems(state.progress, allMedia)
+    val continueWatching = remember(state.progress, allMedia, state.upNext) {
+        withUpNext(continueWatchingItems(state.progress, allMedia), state.upNext)
     }
+    val upNextByKey = remember(state.upNext) { state.upNext.associateBy { it.media.stableKey } }
     val progressByVideo = remember(state.progress) { state.progress.associateBy { it.videoId } }
     val completedVideoIds = remember(state.progress) {
         state.progress.filter { it.completed }.mapTo(mutableSetOf()) { it.videoId }
@@ -237,6 +243,7 @@ internal fun MobileHomeScreen(
                 item(key = "continue-watching") {
                     MobileContinueWatchingRow(
                         continueWatching,
+                        upNextByKey,
                         onMedia,
                         restoreMediaKey,
                         onFocusRestored,
@@ -744,6 +751,7 @@ private fun HeroIconAction(
 @Composable
 private fun MobileContinueWatchingRow(
     items: List<Pair<MediaPreview, WatchProgress>>,
+    upNextByKey: Map<String, UpNextItem>,
     onMedia: (MediaPreview, String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
@@ -773,6 +781,7 @@ private fun MobileContinueWatchingRow(
                     onOpenMenu,
                     onMenuAction,
                     modifier = Modifier.mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored),
+                    upNext = upNextByKey[media.stableKey],
                 )
             }
         }
@@ -788,21 +797,34 @@ private fun MobileContinueWatchingCard(
     onOpenMenu: (ContentMenuTarget) -> Unit,
     onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
     modifier: Modifier = Modifier,
+    /** Present for an up-next card: the series' following episode replaces the progress. */
+    upNext: UpNextItem? = null,
 ) {
-    val target = ContentMenuTarget(
-        media = media,
-        progress = progress,
-        origin = ContentMenuOrigin.CONTINUE_WATCHING,
-    )
+    val target = if (upNext != null) {
+        ContentMenuTarget(media = media, episode = upNext.episode, origin = ContentMenuOrigin.CONTINUE_WATCHING)
+    } else {
+        ContentMenuTarget(
+            media = media,
+            progress = progress,
+            origin = ContentMenuOrigin.CONTINUE_WATCHING,
+        )
+    }
     val haptics = LocalHapticFeedback.current
     val context = androidx.compose.ui.platform.LocalContext.current
-    val title = progress.episodeLabel ?: media.name
+    val upNextLabel = upNext?.let { upNextEpisodeLabel(it.episode) }
+    val upNextBadge = upNext?.let { upNextBadgeText(it) }
+    val title = upNextLabel ?: progress.episodeLabel ?: media.name
     val percent = (progress.fraction * 100).roundToInt()
-    val description = stringResource(R.string.media_card_description_progress, title, percent)
+    val description = if (upNext != null) {
+        stringResource(R.string.up_next_card_description, media.name, upNextLabel.orEmpty(), upNextBadge.orEmpty())
+    } else {
+        stringResource(R.string.media_card_description_progress, title, percent)
+    }
     val remainingMillis = (progress.durationMillis - progress.positionMillis).coerceAtLeast(0)
     val hours = remainingMillis / 3_600_000
     val minutes = (remainingMillis % 3_600_000) / 60_000
     val timeLeft = when {
+        upNext != null -> null
         hours > 0 -> "$hours h $minutes min"
         minutes > 0 -> "$minutes min"
         else -> null
@@ -843,19 +865,22 @@ private fun MobileContinueWatchingCard(
                     Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.6f)),
                 ),
             )
-            Box(
-                Modifier
-                    .align(Alignment.Center)
-                    .size(42.dp)
-                    .background(Color.Black.copy(alpha = 0.42f), CircleShape)
-                    .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
+            // An upcoming episode cannot play yet, so it shows no play mark.
+            if (upNext?.kind != UpNextKind.UPCOMING) {
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .size(42.dp)
+                        .background(Color.Black.copy(alpha = 0.42f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                }
             }
-            timeLeft?.let { left ->
+            (upNextBadge ?: timeLeft?.let { stringResource(R.string.continue_watching_time_left, it) })?.let { badge ->
                 Text(
-                    text = stringResource(R.string.continue_watching_time_left, left),
+                    text = badge,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 8.dp, bottom = 10.dp),
@@ -863,7 +888,7 @@ private fun MobileContinueWatchingCard(
                     color = Color.White,
                 )
             }
-            if (progress.completed) {
+            if (progress.completed && upNext == null) {
                 SelectionCheckmark(
                     selected = true,
                     selectedContainerColor = MaterialTheme.colorScheme.primary,
@@ -871,19 +896,21 @@ private fun MobileContinueWatchingCard(
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
                 )
             }
-            Box(
-                Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .background(Color.White.copy(alpha = 0.22f)),
-            ) {
+            if (upNext == null) {
                 Box(
                     Modifier
-                        .fillMaxWidth(progress.fraction)
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
                         .height(3.dp)
-                        .background(MobileTokens.accent),
-                )
+                        .background(Color.White.copy(alpha = 0.22f)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(progress.fraction)
+                            .height(3.dp)
+                            .background(MobileTokens.accent),
+                    )
+                }
             }
         }
         Column(Modifier.padding(horizontal = 2.dp)) {
@@ -893,7 +920,7 @@ private fun MobileContinueWatchingCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            progress.episodeLabel?.let {
+            (upNextLabel ?: progress.episodeLabel)?.let {
                 Text(
                     text = it,
                     style = MaterialTheme.typography.labelMedium,

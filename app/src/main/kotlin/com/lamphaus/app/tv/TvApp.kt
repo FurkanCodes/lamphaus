@@ -1,5 +1,9 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.withUpNext
+import com.lamphaus.app.ui.UpNextItem
+import com.lamphaus.app.ui.releaseCountdownText
+import com.lamphaus.app.ui.ReleaseKind
 import com.lamphaus.app.ui.CatalogBrowseState
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -1097,9 +1101,14 @@ private fun TvHome(
     val sections = remember(state.sections, catalogType) { homeSectionsOfType(state.sections, catalogType) }
     val heroItems = remember(sections) { firstDistinctMedia(sections, limit = 5) }
     val featured = featuredSelection ?: heroItems.firstOrNull()
-    val continueWatching = remember(state.progress, sections) {
-        continueWatchingItemsFromSections(state.progress, sections)
+    // Up next follows the page's catalog type: series only on Series and Home.
+    val upNext = remember(state.upNext, catalogType) {
+        state.upNext.filter { catalogType == null || it.media.rawType.equals(catalogType, ignoreCase = true) }
     }
+    val continueWatching = remember(state.progress, sections, upNext) {
+        withUpNext(continueWatchingItemsFromSections(state.progress, sections), upNext)
+    }
+    val upNextByKey = remember(upNext) { upNext.associateBy { it.media.stableKey } }
     LaunchedEffect(focusedCandidate) {
         focusedCandidate?.let {
             delay(TvMotionTokens.heroUpdateDelayMillis)
@@ -1206,6 +1215,7 @@ private fun TvHome(
                 item("continue-watching") {
                     TvSpotlightContinueWatchingRow(
                         items = continueWatching,
+                        upNextByKey = upNextByKey,
                         contentHasFocus = contentHasFocus,
                         onMedia = onMedia,
                         onFocused = onFocused,
@@ -1218,6 +1228,7 @@ private fun TvHome(
                 item("continue-watching") {
                     TvContinueWatchingRow(
                         items = continueWatching,
+                        upNextByKey = upNextByKey,
                         onMedia = onMedia,
                         onFocused = { focusedCandidate = it; onFocused(it) },
                         restoreMediaKey = restoreMediaKey,
@@ -1403,6 +1414,7 @@ private fun TvCatalogItemsLoadingSkeleton(
 @Composable
 private fun TvContinueWatchingRow(
     items: List<Pair<MediaPreview, WatchProgress>>,
+    upNextByKey: Map<String, UpNextItem>,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
     restoreMediaKey: String?,
@@ -1431,6 +1443,7 @@ private fun TvContinueWatchingRow(
                 TvContinueWatchingCard(
                     media = media,
                     progress = progress,
+                    upNext = upNextByKey[media.stableKey],
                     onClick = { onMedia(media) },
                     onFocused = { onFocused(media) },
                     modifier = Modifier
@@ -1654,7 +1667,8 @@ private fun TvMetadataLine(
     onSelectRating: ((RatingSourceScore) -> Unit)? = null,
 ) {
     val values = buildList {
-        presentation.year?.let { add(it.toString()) }
+        (releaseCountdownText(presentation.upcomingReleaseMillis, ReleaseKind.TITLE) ?: presentation.year?.toString())
+            ?.let(::add)
         presentation.contentRating?.let(::add)
         presentation.runtimeMinutes?.let { add(stringResource(R.string.minutes_format, it)) }
         if (includeGenres && presentation.genres.isNotEmpty()) add(presentation.genres.joinToString(", "))
@@ -3643,6 +3657,14 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 description = stringResource(R.string.trailer_previews_description),
                 checked = state.trailers == true,
                 onCheckedChange = viewModel::setTrailersEnabled,
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.hide_unreleased),
+                description = stringResource(R.string.hide_unreleased_description),
+                checked = state.hideUnreleased,
+                onCheckedChange = viewModel::setHideUnreleased,
             )
         }
         item { TvStreamBadgeSettings(state, viewModel) }

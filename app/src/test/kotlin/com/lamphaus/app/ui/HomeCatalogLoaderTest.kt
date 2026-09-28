@@ -28,6 +28,24 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeCatalogLoaderTest {
     @Test
+    fun `hide unreleased leaves titles that are not out yet out of rows`() = runTest {
+        val providers = providers(1)
+        val now = System.currentTimeMillis()
+        val released = media("released").copy(releasedAtEpochMillis = now - 86_400_000)
+        val upcoming = media("upcoming").copy(releasedAtEpochMillis = now + 86_400_000)
+        val client = FakeProviderClient(
+            manifests = providers.associate { it.manifestUrl to manifest(it) },
+            catalogHandler = { _, _, _ -> ProviderResult.Success(listOf(released, upcoming)) },
+        )
+        val resolved = mutableListOf<CatalogSection>()
+
+        HomeCatalogLoader(client, providers, currentYear = 2026, hideUnreleased = true)
+            .loadNextWindow(childFilterEnabled = false, onPrepared = {}, onResolved = resolved::add)
+
+        assertEquals(listOf("released"), resolved.single().items.map(MediaPreview::id))
+    }
+
+    @Test
     fun `first window prepares four ordered placeholders and resolves completion immediately`() = runTest {
         val providers = providers(50)
         val gates = providers.associate { provider ->

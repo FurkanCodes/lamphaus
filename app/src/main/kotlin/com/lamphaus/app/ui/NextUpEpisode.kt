@@ -1,6 +1,7 @@
 package com.lamphaus.app.ui
 
 import com.lamphaus.core.model.Episode
+import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.hasAired
 
@@ -65,4 +66,86 @@ internal fun nextUpEpisode(
     }
     val start = ordered.firstOrNull(::isPlayableRegular) ?: ordered.first()
     return NextUpEpisode(start, NextUpKind.START)
+}
+
+/** How a Continue Watching "up next" card presents the following episode. */
+enum class UpNextKind {
+    /** Aired before the viewer finished the previous one: simply the next episode. */
+    NEXT,
+
+    /** Aired after the viewer finished the previous one (Nuvio's "New episode"). */
+    NEW,
+
+    /** Not out yet but soon: the card counts down to it. */
+    UPCOMING,
+}
+
+/** A series the viewer finished an episode of, with the episode that follows. */
+data class UpNextItem(
+    val media: MediaPreview,
+    val episode: Episode,
+    val kind: UpNextKind,
+    /** The finished episode's progress row; orders the row and keys dismissal. */
+    val lastWatched: WatchProgress,
+) {
+    val dismissalKey: String get() = upNextDismissalKey(lastWatched)
+}
+
+internal fun upNextDismissalKey(lastWatched: WatchProgress): String = "${lastWatched.mediaKey}|${lastWatched.videoId}"
+
+/** Only recent viewing earns an up-next card, and only this many series are looked up. */
+internal const val UP_NEXT_RECENT_MILLIS = 60L * 24 * 60 * 60 * 1000
+internal const val UP_NEXT_MAX_SERIES = 20
+
+/** An unaired episode shows up only when it airs within this window. */
+internal const val UP_NEXT_UPCOMING_WINDOW_MILLIS = 30L * 24 * 60 * 60 * 1000
+
+/**
+ * The latest finished episode of each recently watched series that has no
+ * resumable episode (Continue Watching already shows that one) and was not
+ * dismissed, most recent first.
+ */
+internal fun upNextCandidates(
+    progress: List<WatchProgress>,
+    dismissed: Set<String>,
+    nowEpochMillis: Long,
+): List<WatchProgress> {
+    val resumableKeys = progress.filter(WatchProgress::isResumable).mapTo(HashSet()) { it.mediaKey }
+    return progress.asSequence()
+        .filter { it.completed && it.mediaKey.startsWith("series:") && it.preview != null }
+        .filter { nowEpochMillis - it.updatedAtEpochMillis <= UP_NEXT_RECENT_MILLIS }
+        .groupBy(WatchProgress::mediaKey)
+        .values
+        .map { rows -> rows.maxBy(WatchProgress::updatedAtEpochMillis) }
+        .filter { it.mediaKey !in resumableKeys && upNextDismissalKey(it) !in dismissed }
+        .sortedByDescending(WatchProgress::updatedAtEpochMillis)
+        .take(UP_NEXT_MAX_SERIES)
+}
+
+/**
+ * The regular episode after [lastWatched] that the viewer has not finished.
+ * Aired, it is next up ("New episode" when it aired after the viewer finished
+ * the previous one); unaired, it counts down when it airs within the window.
+ */
+internal fun upNextAfter(
+    media: MediaPreview,
+    lastWatched: WatchProgress,
+    episodes: List<Episode>,
+    completedVideoIds: Set<String>,
+    nowEpochMillis: Long,
+): UpNextItem? {
+    val ordered = episodes.distinctBy(Episode::id)
+        .filter { it.season != 0 }
+        .sortedWith(compareBy<Episode> { it.season ?: Int.MAX_VALUE }.thenBy { it.episode ?: Int.MAX_VALUE }.thenBy(Episode::id))
+    val index = ordered.indexOfFirst { it.id == lastWatched.videoId }
+    if (index < 0) return null
+    val next = ordered.drop(index + 1).firstOrNull { it.id !in completedVideoIds } ?: return null
+    val released = next.releasedAtEpochMillis
+    val kind = when {
+        next.hasAired(nowEpochMillis) ->
+            if (released != null && released > lastWatched.updatedAtEpochMillis) UpNextKind.NEW else UpNextKind.NEXT
+        released != null && released - nowEpochMillis <= UP_NEXT_UPCOMING_WINDOW_MILLIS -> UpNextKind.UPCOMING
+        else -> return null
+    }
+    return UpNextItem(media, next, kind, lastWatched)
 }

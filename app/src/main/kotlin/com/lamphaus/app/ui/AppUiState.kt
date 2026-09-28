@@ -13,6 +13,7 @@ import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.hasAired
 import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.PairingSession
 import com.lamphaus.core.model.PlaybackRequest
@@ -154,7 +155,8 @@ fun ContentMenuTarget.menuActions(): List<ContentMenuAction> = buildList {
     when {
         origin == ContentMenuOrigin.CONTINUE_WATCHING -> {
             add(if (progress?.completed == true) ContentMenuAction.MarkUnwatched else ContentMenuAction.MarkWatched)
-            add(ContentMenuAction.StartFromBeginning)
+            // An upcoming up-next episode cannot be played yet.
+            if (episode?.hasAired() != false) add(ContentMenuAction.StartFromBeginning)
             add(ContentMenuAction.RemoveFromContinueWatching)
         }
         episode != null -> {
@@ -280,6 +282,27 @@ private fun continueWatchingItems(
         .toList()
 }
 
+/**
+ * Continue Watching with each series' "up next" episode added: watchable
+ * cards by recency, then upcoming episodes by how soon they air. An up-next
+ * card carries the finished episode's progress row; [upNextByKey] tells the
+ * card to present the following episode instead.
+ */
+internal fun withUpNext(
+    resumable: List<Pair<MediaPreview, WatchProgress>>,
+    upNext: List<UpNextItem>,
+): List<Pair<MediaPreview, WatchProgress>> {
+    if (upNext.isEmpty()) return resumable
+    val resumableKeys = resumable.mapTo(HashSet()) { (media) -> media.stableKey }
+    val fresh = upNext.filter { it.media.stableKey !in resumableKeys }
+    val (upcoming, watchable) = fresh.partition { it.kind == UpNextKind.UPCOMING }
+    val ready = (resumable + watchable.map { it.media to it.lastWatched })
+        .sortedByDescending { (_, progress) -> progress.updatedAtEpochMillis }
+    return ready + upcoming
+        .sortedBy { it.episode.releasedAtEpochMillis ?: Long.MAX_VALUE }
+        .map { it.media to it.lastWatched }
+}
+
 /** Unfinished rows removed when a title leaves Continue Watching. */
 internal fun continueWatchingRemovalRows(
     progress: List<WatchProgress>,
@@ -322,6 +345,11 @@ data class AppUiState(
     val tvHomeLayout: TvHomeLayout = TvHomeLayout.CLASSIC,
     /** Device-local trailer choice; null means the platform default (mobile on, TV off). */
     val trailers: Boolean? = null,
+    /** Device-local: not-yet-released titles are left out of Home and Discover rows. */
+    val hideUnreleased: Boolean = false,
+    /** Series whose next episode follows one the viewer finished (Continue Watching "up next"). */
+    val upNext: List<UpNextItem> = emptyList(),
+    val upNextDismissed: Set<String> = emptySet(),
     /** Imported Nuvio-compatible stream badges; null when none are imported. */
     val streamBadges: com.lamphaus.core.data.repository.StreamBadgeImport? = null,
     val streamBadgesImporting: Boolean = false,
@@ -362,6 +390,7 @@ data class AppUiState(
         backgroundArtworkEnabled = backgroundArtworkEnabled,
         tvHomeLayout = tvHomeLayout,
         trailers = trailers,
+        hideUnreleased = hideUnreleased,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,
