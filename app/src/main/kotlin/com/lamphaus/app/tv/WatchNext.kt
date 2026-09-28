@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.tvprovider.media.tv.PreviewChannelHelper
 import androidx.tvprovider.media.tv.TvContractCompat
 import androidx.tvprovider.media.tv.WatchNextProgram
@@ -108,19 +109,17 @@ internal class WatchNextPublisher(context: Context) {
         runCatching {
             val existing = existingPrograms()
             val wanted = entries.associateBy(WatchNextEntry::mediaKey)
-            existing.forEach { (key, program) ->
+            existing.forEach { (key, row) ->
                 val entry = wanted[key]
-                val removedByViewer = !program.isBrowsable
-                val stillRemoved = removedByViewer && entry != null &&
-                    entry.engagedAtMillis <= program.lastEngagementTimeUtcMillis
-                if (entry == null || (removedByViewer && !stillRemoved)) delete(program.id)
+                val stillRemoved = !row.browsable && entry != null && entry.engagedAtMillis <= row.engagedAtMillis
+                if (entry == null || (!row.browsable && !stillRemoved)) delete(row.id)
             }
             val kept = existingPrograms()
             wanted.values.forEach { entry ->
                 val current = kept[entry.mediaKey]
                 when {
                     current == null -> helper.publishWatchNextProgram(program(entry))
-                    current.isBrowsable -> helper.updateWatchNextProgram(program(entry), current.id)
+                    current.browsable -> helper.updateWatchNextProgram(program(entry), current.id)
                 }
             }
         }
@@ -128,11 +127,18 @@ internal class WatchNextPublisher(context: Context) {
 
     suspend fun clear() = publish(emptyList())
 
-    @SuppressLint("RestrictedApi")
-    private fun existingPrograms(): Map<String, WatchNextProgram> {
+    /** One of this app's rows as the system holds it; false [browsable] means the viewer removed it. */
+    private data class PublishedRow(val id: Long, val browsable: Boolean, val engagedAtMillis: Long)
+
+    private fun existingPrograms(): Map<String, PublishedRow> {
         val cursor = context.contentResolver.query(
             TvContractCompat.WatchNextPrograms.CONTENT_URI,
-            WatchNextProgram.PROJECTION,
+            arrayOf(
+                TvContractCompat.WatchNextPrograms._ID,
+                TvContractCompat.WatchNextPrograms.COLUMN_INTERNAL_PROVIDER_ID,
+                TvContractCompat.WatchNextPrograms.COLUMN_BROWSABLE,
+                TvContractCompat.WatchNextPrograms.COLUMN_LAST_ENGAGEMENT_TIME_UTC_MILLIS,
+            ),
             null,
             null,
             null,
@@ -140,8 +146,8 @@ internal class WatchNextPublisher(context: Context) {
         return cursor.use {
             buildMap {
                 while (it.moveToNext()) {
-                    val program = WatchNextProgram.fromCursor(it)
-                    program.internalProviderId?.let { key -> put(key, program) }
+                    val key = it.getString(1) ?: continue
+                    put(key, PublishedRow(id = it.getLong(0), browsable = it.getInt(2) != 0, engagedAtMillis = it.getLong(3)))
                 }
             }
         }
@@ -151,6 +157,8 @@ internal class WatchNextPublisher(context: Context) {
         context.contentResolver.delete(TvContractCompat.buildWatchNextProgramUri(id), null, null)
     }
 
+    // The builder's setters are inherited from a @RestrictTo base builder, so
+    // lint flags the documented Watch Next calls; reading rows uses public columns.
     @SuppressLint("RestrictedApi")
     private fun program(entry: WatchNextEntry): WatchNextProgram {
         val builder = WatchNextProgram.Builder()
@@ -177,7 +185,7 @@ internal class WatchNextPublisher(context: Context) {
             builder.setLastPlaybackPositionMillis(entry.positionMillis.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
         }
         entry.artUrl?.let { url ->
-            builder.setPosterArtUri(Uri.parse(url))
+            builder.setPosterArtUri(url.toUri())
             builder.setPosterArtAspectRatio(
                 if (entry.artIsPoster) TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3
                 else TvContractCompat.PreviewPrograms.ASPECT_RATIO_16_9,
@@ -187,12 +195,12 @@ internal class WatchNextPublisher(context: Context) {
     }
 
     /** An explicit intent for [TvActivity] carrying the title to open. */
-    private fun openUri(mediaKey: String): Uri = Uri.parse(
+    private fun openUri(mediaKey: String): Uri =
         Intent(context, TvActivity::class.java)
             .setAction(Intent.ACTION_VIEW)
             .setData(watchNextUri(mediaKey))
-            .toUri(Intent.URI_INTENT_SCHEME),
-    )
+            .toUri(Intent.URI_INTENT_SCHEME)
+            .toUri()
 
     companion object {
         private const val SCHEME = "lamphaus"
