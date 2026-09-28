@@ -43,6 +43,7 @@ import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.NextEpisodeSourcePolicy
+import com.lamphaus.core.model.closenessLabel
 import com.lamphaus.core.model.PlaybackSegment
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSettings
@@ -126,11 +127,10 @@ class PlayerActivity : ComponentActivity() {
     private var displayModeSwitchInFlight = false
 
     /**
-     * Set once a fresh player took over the shared session (next episode or
-     * another source): this screen must no longer pause, stop, reset the
-     * display, or save progress, all of which now belong to the new player.
+     * The next episode or another source, started once this player has fully
+     * closed: the browse screen launches it like a source picked by hand.
      */
-    private var handedOff = false
+    private var pendingNextPlayback: PlaybackRequest? = null
     private var deviceConfigJob: Job? = null
     private var attachedPlayerView: android.view.View? = null
     private var audioRouteFingerprint: String? = null
@@ -317,18 +317,9 @@ class PlayerActivity : ComponentActivity() {
                                 playerReadyDeferred?.complete(false)
                                 firstFrameDeferred?.complete(false)
                                 displayModeSwitchInFlight = false
-                                // During the next-episode hand-off the output stays matched.
-                                if (nextEpisodeProgressState.value == NextEpisodeProgress.Idle) {
-                                    displayModeController?.restore()
-                                }
+                                displayModeController?.restore()
                                 saveProgress(final = true, naturalEnd = true)
                             }
-                        }
-
-                        override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                            // The only transition is the next-episode switch; keep the output mode.
-                            displayModeSwitchInFlight = false
-                            displayModeController?.resetForNextItem()
                         }
 
                         override fun onEvents(player: Player, events: Player.Events) {
@@ -518,7 +509,7 @@ class PlayerActivity : ComponentActivity() {
                         nextEpisodeProgressState.value = NextEpisodeProgress.Starting(next.sourceName, secondsLeft)
                         delay(1_000)
                     }
-                    switchPlayback(current, next.request)
+                    switchPlayback(next.request)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -640,8 +631,9 @@ class PlayerActivity : ComponentActivity() {
             startPositionMillis = position,
             sourceProviderId = source.providerId,
             sourceBingeGroup = source.bingeGroup,
+            sourceLabel = source.closenessLabel(),
         )
-        switchPlayback(current, next)
+        switchPlayback(next)
     }
 
     private suspend fun resolveNextPlayback(current: PlaybackRequest): NextPlayback? {
@@ -693,6 +685,7 @@ class PlayerActivity : ComponentActivity() {
             stream = NextCandidate::stream,
             preferredProviderId = current.sourceProviderId,
             preferredBingeGroup = current.sourceBingeGroup,
+            currentLabel = current.sourceLabel,
         ) ?: return null
         val source = selected.stream
         val subtitles = loadSubtitlesForNext(media, next, source, resolvedProviders)
@@ -710,6 +703,7 @@ class PlayerActivity : ComponentActivity() {
             nextEpisode = current.episodeQueue.nextEpisodeAfter(next),
             sourceProviderId = source.providerId,
             sourceBingeGroup = source.bingeGroup,
+            sourceLabel = source.closenessLabel(),
         )
         val providerName = selected.providerName
             ?: resolvedProviders.firstOrNull { it.subscription.id == source.providerId }?.subscription?.displayName
@@ -760,15 +754,14 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * The next episode, or another source, is a new playback: it opens a fresh
-     * player exactly like the first one, so it takes the same proven start and
-     * display-match path instead of inheriting this session's state. This
-     * screen then leaves the shared session, display, and progress to it.
+     * The next episode, or another source, is a new playback, exactly like a
+     * source picked on the sources screen. This player closes normally first:
+     * it saves progress, stops its stream, and restores the display. Only
+     * then, from [onDestroy], does the browse screen start the new player, so
+     * nothing of this session (shared player, output mode) leaks into it.
      */
-    private fun switchPlayback(current: PlaybackRequest, next: PlaybackRequest) {
-        saveProgress(final = true)
-        handedOff = true
-        startActivity(intent(this, next))
+    private fun switchPlayback(next: PlaybackRequest) {
+        pendingNextPlayback = next
         finish()
     }
 
@@ -825,10 +818,6 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        if (handedOff) {
-            super.onStop()
-            return
-        }
         saveProgress(final = true)
         // A TV mode switch briefly stops the activity. Do not pause the source
         // in that window or the display match looks like a three-second crash.
@@ -862,7 +851,7 @@ class PlayerActivity : ComponentActivity() {
                 ?.unregisterAudioDeviceCallback(callback)
         }
         audioDeviceCallback = null
-        if (!handedOff) displayModeController?.restore()
+        displayModeController?.restore()
         surfaceFrameRateHost?.release()
         surfaceFrameRateHost = null
         displayTickJob?.cancel()
@@ -895,6 +884,8 @@ class PlayerActivity : ComponentActivity() {
         controllerFuture = null
         controllerState.value = null
         super.onDestroy()
+        pendingNextPlayback?.let { next -> container.pendingPlayback.value = next }
+        pendingNextPlayback = null
     }
 
     /**
@@ -1149,8 +1140,9 @@ class PlayerActivity : ComponentActivity() {
      * silently dropping the save.
      */
     private fun saveProgress(final: Boolean, naturalEnd: Boolean = false) {
-        // The session now plays the new player's item; its position is not ours.
-        if (handedOff) return
+        // Another player's item in the shared session is not ours to save.
+        val sessionItemId = controller?.currentMediaItem?.mediaId
+        if (sessionItemId != null && sessionItemId != request?.videoId) return
         val playback = request ?: run {
             Log.d(PROGRESS_LOG_TAG, "save skipped: no playback request")
             return

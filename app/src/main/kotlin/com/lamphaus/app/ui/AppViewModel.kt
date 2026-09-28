@@ -49,6 +49,7 @@ import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.nextEpisodeAfter
 import com.lamphaus.core.model.enrichmentMediaKey
 import com.lamphaus.core.model.playbackQueueFrom
+import com.lamphaus.core.model.closenessLabel
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
@@ -1740,6 +1741,7 @@ class AppViewModel(
                                 episodeQueue = episodeQueue,
                                 sourceProviderId = source.providerId,
                                 sourceBingeGroup = source.bingeGroup,
+                                sourceLabel = source.closenessLabel(),
                             ),
                             sourcePicker = null,
                         )

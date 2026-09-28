@@ -22,6 +22,7 @@ import com.lamphaus.app.isTelevision
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.isSafeExternalUri
 import com.lamphaus.app.player.PlayerActivity
+import com.lamphaus.app.player.launchPendingPlayback
 import android.content.Intent
 import androidx.core.content.edit
 import androidx.core.net.toUri
@@ -70,6 +71,7 @@ class MobileActivity : ComponentActivity() {
         // Update checks never delay first display; the coordinator schedules
         // them asynchronously (plan §4, SHR-ARC-10).
         (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
+        launchPendingPlayback((application as LamphausApplication).container)
         setContent {
             MobileApp(
                 viewModel = viewModel,

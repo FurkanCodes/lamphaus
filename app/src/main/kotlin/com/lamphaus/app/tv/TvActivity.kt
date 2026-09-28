@@ -16,6 +16,7 @@ import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.isTelevision
 import com.lamphaus.app.mobile.MobileActivity
 import com.lamphaus.app.player.PlayerActivity
+import com.lamphaus.app.player.launchPendingPlayback
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.isSafeExternalUri
 
@@ -55,6 +56,7 @@ class TvActivity : ComponentActivity() {
             }
         })
         (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
+        launchPendingPlayback((application as LamphausApplication).container)
         setContent {
             TvApp(
                 viewModel = viewModel,
