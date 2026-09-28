@@ -48,7 +48,7 @@ import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.nextEpisodeAfter
 import com.lamphaus.core.model.enrichmentMediaKey
-import com.lamphaus.core.model.playbackQueueFrom
+import com.lamphaus.core.model.playbackQueueAround
 import com.lamphaus.core.model.closenessLabel
 import com.lamphaus.core.model.isUnreleased
 import com.lamphaus.core.model.Profile
@@ -1725,7 +1725,7 @@ class AppViewModel(
                         ?.takeIf { it.preview.stableKey == picker.media.stableKey }
                         ?.episodes
                         .orEmpty()
-                        .playbackQueueFrom(episode)
+                        .playbackQueueAround(episode)
                         .map { queued ->
                             // Stills stay: the next-episode card shows them. Only the
                             // long synopses are dropped to keep the launch data small.

@@ -33,6 +33,27 @@ class PlaybackModelsTest {
     }
 
     @Test
+    fun `player episode list keeps a bounded window around the current episode`() {
+        val episodes = (1..10).map { Episode("series:1:$it", "E$it", season = 1, episode = it) }
+
+        val window = episodes.shuffled().playbackQueueAround(episodes[4], before = 2, after = 3)
+
+        assertEquals(listOf(3, 4, 5, 6, 7, 8), window.map { it.episode })
+        assertEquals(episodes, episodes.playbackQueueAround(episodes[0]))
+        assertTrue(episodes.playbackQueueAround(Episode("unknown", "Unknown")).isEmpty())
+    }
+
+    @Test
+    fun `still watching asks after three automatic starts in a row`() {
+        var streak = 0
+        repeat(3) { streak = AutoPlayPolicy.nextStreak(streak, automatic = true) }
+
+        assertTrue(AutoPlayPolicy.shouldAskStillWatching(streak))
+        assertFalse(AutoPlayPolicy.shouldAskStillWatching(2))
+        assertEquals(0, AutoPlayPolicy.nextStreak(streak, automatic = false))
+    }
+
+    @Test
     fun `missing current episode has no implicit next episode`() {
         assertNull(listOf(first, second).nextEpisodeAfter(Episode("unknown", "Unknown")))
     }
