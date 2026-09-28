@@ -108,6 +108,8 @@ import com.lamphaus.app.ui.orderedRatingScores
 import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.core.model.DetailEnrichment
+import com.lamphaus.app.ui.recapEpisodeTitle
+import com.lamphaus.app.ui.seriesRecap
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
@@ -146,6 +148,7 @@ internal fun MobileDetailScreen(
     onOpenMedia: (MediaPreview) -> Unit,
     progress: List<WatchProgress>,
     onOpenMenu: (ContentMenuTarget) -> Unit,
+    recapEnabled: Boolean = true,
     trailersEnabled: Boolean = false,
     resolveTrailer: suspend (media: MediaPreview, maxHeight: Int, refresh: Boolean) -> TrailerSource? = { _, _, _ -> null },
 ) {
@@ -172,6 +175,9 @@ internal fun MobileDetailScreen(
     )
     val seasons = remember(detail) { detail.episodes.mapNotNull { it.season }.distinct().sorted() }
     val resumeEpisode = detail.episodes.firstOrNull { it.id == resumeProgress?.videoId }
+    val recap = remember(detail.episodes, progress, watchedEpisodeIds, recapEnabled) {
+        if (recapEnabled) seriesRecap(detail.episodes, progress, watchedEpisodeIds) else null
+    }
     // The viewer's pick, if any; the default follows the episodes as they load
     // (the detail can arrive before its episode list).
     var pickedSeason by rememberSaveable(detail.preview.stableKey) { mutableStateOf<Int?>(null) }
@@ -236,6 +242,11 @@ internal fun MobileDetailScreen(
                         trailersEnabled && detail.preview.trailerYtIds.isNotEmpty()
                     },
                 )
+            }
+            recap?.let { episode ->
+                constrained("recap", section(2)) {
+                    DetailRecap(episode)
+                }
             }
             constrained("synopsis", section(2)) {
                 DetailSynopsis(detail)
@@ -616,6 +627,32 @@ private fun LabeledAction(
     ) {
         Icon(icon, null, tint = if (highlighted) MobileTokens.accent else MobileTokens.textPrimary, modifier = Modifier.size(26.dp))
         Text(label, style = MaterialTheme.typography.labelMedium, color = MobileTokens.textMuted, maxLines = 1)
+    }
+}
+
+/** "Previously": the last finished episode, for a viewer returning to a series (SHR-PROD-13). */
+@Composable
+private fun DetailRecap(episode: Episode) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            stringResource(R.string.recap_heading),
+            style = MaterialTheme.typography.labelLarge,
+            color = MobileTokens.accent,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(
+            recapEpisodeTitle(episode),
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+            color = MobileTokens.textPrimary,
+        )
+        Text(
+            episode.overview.orEmpty(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MobileTokens.textMuted,
+        )
     }
 }
 

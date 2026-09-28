@@ -152,7 +152,7 @@ fun MobileApp(
             LocalArtworkResolver provides artworkResolver,
             LocalStreamBadges provides streamBadges,
             LocalSourceFit provides remember(state.playbackCapabilities, state.devicePlaybackConfig) {
-                SourceFitAdvisor(state.playbackCapabilities, state.devicePlaybackConfig)
+                SourceFitAdvisor(state.playbackCapabilities.takeIf { state.sourceFit }, state.devicePlaybackConfig)
             },
         ) {
         val snackbar = remember { SnackbarHostState() }
@@ -596,6 +596,7 @@ private fun MobileSignedInApp(
                 onOpenMedia = viewModel::loadDetail,
                 progress = state.progress,
                 onOpenMenu = viewModel::openContentMenu,
+                recapEnabled = state.seriesRecap,
                 // Unset means on for phones and tablets.
                 trailersEnabled = state.trailers != false,
                 resolveTrailer = viewModel::trailerSource,

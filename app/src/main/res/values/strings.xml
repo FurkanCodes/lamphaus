@@ -59,6 +59,13 @@
     <string name="add_to_library">Add to Library</string>
     <string name="minutes_format">%1$d min</string>
     <string name="episode_format">S%1$d · E%2$d</string>
+    <string name="recap_heading">Previously</string>
+    <string name="series_recap_setting">Previously</string>
+    <string name="series_recap_setting_description">When you return to a series after three weeks, its page recaps the last episode you finished</string>
+    <string name="source_fit_setting">How sources play</string>
+    <string name="source_fit_setting_description">Source cards say whether a source plays natively on this device or what changes, such as Dolby Vision playing as HDR10</string>
+    <string name="title_pages">Title pages</string>
+    <string name="recap_episode_format">%1$s  %2$s</string>
     <string name="season_format">Season %1$d</string>
     <string name="episode_number_format">Episode %1$d</string>
     <string name="directors">Directors</string>

@@ -154,6 +154,8 @@ import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.app.ui.StreamBadgeRow
 import com.lamphaus.app.ui.StreamBadgeMatcher
 import com.lamphaus.app.ui.LocalStreamBadges
+import com.lamphaus.app.ui.recapEpisodeTitle
+import com.lamphaus.app.ui.seriesRecap
 import com.lamphaus.app.ui.LocalSourceFit
 import com.lamphaus.app.ui.SourceFitAdvisor
 import com.lamphaus.app.ui.sourceFitLabel
@@ -273,7 +275,7 @@ fun TvApp(
             LocalAccountPhotoUrl provides (state.account as? AccountState.SignedIn)?.avatarUrl,
             LocalStreamBadges provides remember(state.streamBadges) { StreamBadgeMatcher(state.streamBadges) },
             LocalSourceFit provides remember(state.playbackCapabilities, state.devicePlaybackConfig) {
-                SourceFitAdvisor(state.playbackCapabilities, state.devicePlaybackConfig)
+                SourceFitAdvisor(state.playbackCapabilities.takeIf { state.sourceFit }, state.devicePlaybackConfig)
             },
         ) {
         LaunchedEffect(state.playbackRequest) {
@@ -876,6 +878,7 @@ private fun TvSignedIn(
             watchedEpisodeIds = watchedEpisodeIds,
             spoilerProtection = state.spoilerProtection,
             progress = state.progress,
+            recapEnabled = state.seriesRecap,
             onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
             onOpenMedia = openMedia,
             onFocusedMedia = { lastFocusedMedia = it },
@@ -2578,6 +2581,30 @@ private fun TvSourceMediaSummary(
         }
     }
 }
+/** "Previously": the last finished episode, for a viewer returning to a series (SHR-PROD-13). */
+@Composable
+private fun TvSeriesRecap(episode: Episode) {
+    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(R.string.recap_heading),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Text(
+            text = recapEpisodeTitle(episode),
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TvExpandableText(
+            text = episode.overview.orEmpty(),
+            collapsedLines = 3,
+            // Below the actions, so Down continues to the episodes (TV-NAV-05).
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun TvDetailScreen(
     detail: MediaDetail?,
@@ -2587,6 +2614,7 @@ private fun TvDetailScreen(
     watchedEpisodeIds: Set<String>,
     spoilerProtection: SpoilerProtectionSettings,
     progress: List<WatchProgress>,
+    recapEnabled: Boolean,
     onPlay: (Episode?) -> Unit,
     onOpenMedia: (MediaPreview) -> Unit,
     onFocusedMedia: (MediaPreview) -> Unit,
@@ -2627,6 +2655,9 @@ private fun TvDetailScreen(
     // Play action resumes or starts it (SHR-PROD-02).
     val nextUp = remember(detail.episodes, progress, watchedEpisodeIds) {
         nextUpEpisode(detail.episodes, progress, watchedEpisodeIds)
+    }
+    val recap = remember(detail.episodes, progress, watchedEpisodeIds, recapEnabled) {
+        if (recapEnabled) seriesRecap(detail.episodes, progress, watchedEpisodeIds) else null
     }
     val nextUpSeason = nextUp?.episode?.season?.takeIf { it in seasonNumbers }
     var selectedSeason by remember(detail.preview.stableKey, seasonNumbers) {
@@ -2742,6 +2773,9 @@ private fun TvDetailScreen(
                             modifier = Modifier.tvRowItem(actionRow, 2),
                             onClick = onEditArtwork,
                         )
+                    }
+                    recap?.let { episode ->
+                        TvSeriesRecap(episode)
                     }
                     TvExpandablePeopleSection(
                         labelRes = R.string.directors,
@@ -3692,6 +3726,22 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 description = stringResource(R.string.hide_unreleased_description),
                 checked = state.hideUnreleased,
                 onCheckedChange = viewModel::setHideUnreleased,
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.series_recap_setting),
+                description = stringResource(R.string.series_recap_setting_description),
+                checked = state.seriesRecap,
+                onCheckedChange = viewModel::setSeriesRecap,
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.source_fit_setting),
+                description = stringResource(R.string.source_fit_setting_description),
+                checked = state.sourceFit,
+                onCheckedChange = viewModel::setSourceFit,
             )
         }
         item { TvStreamBadgeSettings(state, viewModel) }
