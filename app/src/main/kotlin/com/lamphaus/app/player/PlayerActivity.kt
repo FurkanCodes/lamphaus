@@ -126,11 +126,11 @@ class PlayerActivity : ComponentActivity() {
     private var displayModeSwitchInFlight = false
 
     /**
-     * Set while the next episode replaces the previous one: a late "ended"
-     * from the previous item must not fail the new item's startup or reset the
-     * display, so it is ignored until the new item reports buffering or ready.
+     * Set once a fresh player took over the shared session (next episode or
+     * another source): this screen must no longer pause, stop, reset the
+     * display, or save progress, all of which now belong to the new player.
      */
-    private var awaitingNextItem = false
+    private var handedOff = false
     private var deviceConfigJob: Job? = null
     private var attachedPlayerView: android.view.View? = null
     private var audioRouteFingerprint: String? = null
@@ -310,13 +310,6 @@ class PlayerActivity : ComponentActivity() {
                         }
 
                         override fun onPlaybackStateChanged(playbackState: Int) {
-                            if (awaitingNextItem) {
-                                if (playbackState == Player.STATE_BUFFERING || playbackState == Player.STATE_READY) {
-                                    awaitingNextItem = false
-                                } else if (playbackState == Player.STATE_ENDED) {
-                                    return
-                                }
-                            }
                             if (playbackState == Player.STATE_READY) {
                                 playerReadyDeferred?.complete(true)
                             }
@@ -766,38 +759,17 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The next episode, or another source, is a new playback: it opens a fresh
+     * player exactly like the first one, so it takes the same proven start and
+     * display-match path instead of inheriting this session's state. This
+     * screen then leaves the shared session, display, and progress to it.
+     */
     private fun switchPlayback(current: PlaybackRequest, next: PlaybackRequest) {
         saveProgress(final = true)
-        PlaybackHeaderRegistry.end(current.source.uri, current.source.subtitles.map { it.url })
-        PlaybackHeaderRegistry.begin(next.source.uri, next.source.headers)
-        next.source.subtitles.forEach { subtitle ->
-            PlaybackHeaderRegistry.put(subtitle.url, subtitle.headers)
-        }
-        request = next
-        requestState.value = next
-        playbackStartupPhaseState.value = PlaybackStartupPhase.LOADING
-        lastSavedPositionMillis = -1L
-        nextEpisodeMessageState.value = null
-        nextEpisodeDismissedVideoId.value = null
-        matchedDisplayModeState.value = null
-        loadSegments(next, playbackSettingsState.value)
-        // Keep the matched output; the next item is evaluated fresh.
-        displayMatchDeferred?.cancel()
-        displayMatchDeferred = null
-        displayModeSwitchInFlight = false
-        displayModeController?.resetForNextItem()
-        startupJob?.cancel()
-        startupErrorJob?.cancel()
-        playerReadyDeferred = null
-        firstFrameDeferred = null
-        controller?.apply {
-            awaitingNextItem = true
-            // Stop first so no ready/ended/error state of the previous item can
-            // be read as the new item's.
-            stop()
-            setMediaItem(next.toMediaItem(), next.startPositionMillis)
-            prepareAndStartPlayback(this, next)
-        }
+        handedOff = true
+        startActivity(intent(this, next))
+        finish()
     }
 
     override fun onUserLeaveHint() {
@@ -853,6 +825,10 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        if (handedOff) {
+            super.onStop()
+            return
+        }
         saveProgress(final = true)
         // A TV mode switch briefly stops the activity. Do not pause the source
         // in that window or the display match looks like a three-second crash.
@@ -886,7 +862,7 @@ class PlayerActivity : ComponentActivity() {
                 ?.unregisterAudioDeviceCallback(callback)
         }
         audioDeviceCallback = null
-        displayModeController?.restore()
+        if (!handedOff) displayModeController?.restore()
         surfaceFrameRateHost?.release()
         surfaceFrameRateHost = null
         displayTickJob?.cancel()
@@ -1173,6 +1149,8 @@ class PlayerActivity : ComponentActivity() {
      * silently dropping the save.
      */
     private fun saveProgress(final: Boolean, naturalEnd: Boolean = false) {
+        // The session now plays the new player's item; its position is not ours.
+        if (handedOff) return
         val playback = request ?: run {
             Log.d(PROGRESS_LOG_TAG, "save skipped: no playback request")
             return
