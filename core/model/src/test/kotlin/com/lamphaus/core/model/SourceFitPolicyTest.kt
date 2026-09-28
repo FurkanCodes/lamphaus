@@ -146,6 +146,8 @@ class SourceFitPolicyTest {
         assertEquals(true, SourceFitPolicy.evaluate(remux, speakers, config)?.native)
         val forcedDecode = config.copy(audioOutputMode = AudioOutputMode.FORCE_DECODE)
         assertEquals(true, SourceFitPolicy.evaluate(remux, dolbyVisionTv, forcedDecode)?.native)
+        val nightListening = config.copy(nightListening = true)
+        assertEquals(true, SourceFitPolicy.evaluate(remux, dolbyVisionTv, nightListening)?.native)
     }
 
     @Test

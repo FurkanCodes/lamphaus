@@ -135,7 +135,7 @@ object SourceFitPolicy {
 
         // Decoding is the normal path without a receiver (phone speakers, TV
         // speakers); it is only news when a receiver takes other bitstreams.
-        val receiver = config.audioOutputMode != AudioOutputMode.FORCE_DECODE &&
+        val receiver = config.audioOutputMode != AudioOutputMode.FORCE_DECODE && !config.nightListening &&
             PASSTHROUGH_FORMATS.any { AudioRoutePolicy.routeSupports(capabilities, it) }
         val audioPasses = traits.audio != EncodedAudioFormat.NONE && receiver && passes(capabilities, traits.audio)
         if (traits.audio != EncodedAudioFormat.NONE && receiver && !audioPasses) {

@@ -3493,6 +3493,14 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
         item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.night_listening_setting),
+                description = stringResource(R.string.night_listening_setting_description),
+                checked = device.nightListening,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(nightListening = it)) },
+            )
+        }
+        item {
             TvSettingsChoiceRow(
                 title = "Dolby Vision",
                 description = PlaybackEngineOptions.DOLBY_VISION_DESCRIPTION,

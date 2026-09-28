@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.lamphaus.core.model.AudioOutputMode
 import com.lamphaus.core.player.audio.DelayAudioProcessor
+import com.lamphaus.core.player.audio.NightListeningAudioProcessor
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -75,10 +76,11 @@ object Media3EngineFactory {
         // carry the bitstream; FORCE_DECODE restricts capabilities to PCM.
         // FORCE_PASSTHROUGH still respects actual capability — a device
         // cannot carry a format it cannot carry.
-        val audioCapabilities = when (config.audioOutputMode) {
-            AudioOutputMode.FORCE_DECODE -> AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES
-            AudioOutputMode.AUTO, AudioOutputMode.FORCE_PASSTHROUGH ->
-                AudioCapabilities.getCapabilities(context)
+        // Night listening shapes decoded PCM, so it decodes like FORCE_DECODE.
+        val audioCapabilities = when {
+            config.nightListening || config.audioOutputMode == AudioOutputMode.FORCE_DECODE ->
+                AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES
+            else -> AudioCapabilities.getCapabilities(context)
         }
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
@@ -117,7 +119,7 @@ object Media3EngineFactory {
             ): AudioSink =
                 DefaultAudioSink.Builder(context)
                     .setAudioCapabilities(audioCapabilities)
-                    .setAudioProcessors(audioProcessors(config.downmixMode))
+                    .setAudioProcessors(audioProcessors(config.downmixMode, config.nightListening))
                     .setEnableAudioTrackPlaybackParams(true)
                     .build()
         }
@@ -209,14 +211,16 @@ object Media3EngineFactory {
      * Decoded audio passes through the optional stereo fold-down, then the
      * route delay. Bitstream passthrough bypasses both (it cannot be mixed).
      */
-    private fun audioProcessors(downmixMode: DownmixMode): Array<AudioProcessor> {
-        if (downmixMode != DownmixMode.STEREO) return arrayOf(audioDelayProcessor)
+    /** Night listening runs first, so its dialogue lift reaches the centre channel before any downmix. */
+    private fun audioProcessors(downmixMode: DownmixMode, nightListening: Boolean): Array<AudioProcessor> {
+        val night = listOfNotNull(NightListeningAudioProcessor().takeIf { nightListening })
+        if (downmixMode != DownmixMode.STEREO) return (night + audioDelayProcessor).toTypedArray()
         val downmix = ChannelMixingAudioProcessor().apply {
             StereoDownmix.supportedChannelCounts.forEach { channels ->
                 putChannelMixingMatrix(ChannelMixingMatrix(channels, 2, StereoDownmix.coefficients(channels)))
             }
         }
-        return arrayOf(downmix, audioDelayProcessor)
+        return (night + downmix + audioDelayProcessor).toTypedArray()
     }
 
     /**

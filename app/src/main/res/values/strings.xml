@@ -68,6 +68,8 @@
     <string name="fits_tonight_title">Ends before %1$s</string>
     <string name="fits_tonight_subtitle">Movies you can finish tonight</string>
     <string name="fits_tonight_setting">Fits tonight</string>
+    <string name="night_listening_setting">Night listening</string>
+    <string name="night_listening_setting_description">Evens out loud and quiet moments and lifts dialogue. Audio is decoded on this device while it is on</string>
     <string name="fits_tonight_setting_description">In the evening, Home shows movies that end before your chosen time, and series show the time left in the season</string>
     <string name="bedtime_setting">Ends before</string>
     <string name="bedtime_setting_description">The time Fits tonight plans around</string>
