@@ -355,6 +355,8 @@ data class AppUiState(
     val fitsTonight: Boolean = true,
     /** Device-local "Ends before" time, in minutes after midnight. */
     val bedtimeMinutes: Int = DEFAULT_BEDTIME_MINUTES,
+    /** Device-local: Continue watching on the Google TV home screen (TV-HOME-01). */
+    val googleTvHome: Boolean = true,
     /** Series whose next episode follows one the viewer finished (Continue Watching "up next"). */
     val upNext: List<UpNextItem> = emptyList(),
     val upNextDismissed: Set<String> = emptySet(),
@@ -405,6 +407,7 @@ data class AppUiState(
         seriesRecap = seriesRecap,
         fitsTonight = fitsTonight,
         bedtimeMinutes = bedtimeMinutes,
+        googleTvHome = googleTvHome,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,

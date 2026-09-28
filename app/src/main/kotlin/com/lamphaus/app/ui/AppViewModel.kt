@@ -212,6 +212,7 @@ class AppViewModel(
                     seriesRecap = settings.seriesRecap,
                     fitsTonight = settings.fitsTonight,
                     bedtimeMinutes = settings.bedtimeMinutes ?: DEFAULT_BEDTIME_MINUTES,
+                    googleTvHome = settings.googleTvHome,
                     upNextDismissed = settings.upNextDismissed,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
@@ -277,6 +278,7 @@ class AppViewModel(
                         seriesRecap = snapshot.seriesRecap,
                         fitsTonight = snapshot.fitsTonight,
                         bedtimeMinutes = snapshot.bedtimeMinutes,
+                        googleTvHome = snapshot.googleTvHome,
                         upNextDismissed = snapshot.upNextDismissed,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
@@ -1977,6 +1979,27 @@ class AppViewModel(
         container.preferences.setFitsTonight(enabled)
     }
 
+    fun setGoogleTvHome(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setGoogleTvHome(enabled)
+    }
+
+    /**
+     * Opens the title behind a Google TV home card (TV-HOME-01). A cold launch
+     * waits briefly for progress to load; the title comes from the progress
+     * snapshot the card was published from.
+     */
+    fun openWatchNext(mediaKey: String) {
+        viewModelScope.launch {
+            val media = withTimeoutOrNull(WATCH_NEXT_OPEN_WAIT_MILLIS) {
+                state.map { current ->
+                    current.progress.firstOrNull { it.mediaKey == mediaKey }?.preview
+                        ?: current.upNext.firstOrNull { it.media.stableKey == mediaKey }?.media
+                }.filterNotNull().first()
+            } ?: return@launch
+            loadDetail(media)
+        }
+    }
+
     fun setBedtimeMinutes(minutes: Int) = viewModelScope.launch {
         container.preferences.setBedtimeMinutes(minutes)
     }
@@ -2913,6 +2936,7 @@ class AppViewModel(
         val seriesRecap: Boolean,
         val fitsTonight: Boolean,
         val bedtimeMinutes: Int,
+        val googleTvHome: Boolean,
         val upNextDismissed: Set<String>,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
@@ -2922,6 +2946,7 @@ class AppViewModel(
 
     companion object {
         private const val MAX_DISCOVERED_PROVIDERS = 50
+        private const val WATCH_NEXT_OPEN_WAIT_MILLIS = 10_000L
         private const val UP_NEXT_SETTLE_MILLIS = 800L
         private const val SERIES_EPISODES_TTL_MILLIS = 6L * 60 * 60 * 1000
         private const val PAIRING_POLL_MILLIS = 3_000L

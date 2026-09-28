@@ -60,6 +60,8 @@ data class UserSettings(
     val fitsTonight: Boolean = true,
     /** Device-local "Ends before" time for Fits tonight, in minutes after midnight; null is the default. */
     val bedtimeMinutes: Int? = null,
+    /** Device-local: Continue watching on the Google TV home screen (TV-HOME-01). */
+    val googleTvHome: Boolean = true,
     /** Up-next cards the viewer removed, as `mediaKey|finishedVideoId`; a newer finish shows it again. */
     val upNextDismissed: Set<String> = emptySet(),
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
@@ -103,6 +105,7 @@ class UserPreferences(private val context: Context) {
             seriesRecap = values[SERIES_RECAP] ?: true,
             fitsTonight = values[FITS_TONIGHT] ?: true,
             bedtimeMinutes = values[BEDTIME_MINUTES],
+            googleTvHome = values[GOOGLE_TV_HOME] ?: true,
             upNextDismissed = values[UP_NEXT_DISMISSED].orEmpty(),
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
@@ -237,6 +240,13 @@ class UserPreferences(private val context: Context) {
     }
 
     /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setGoogleTvHome(enabled: Boolean) {
+        context.dataStore.edit {
+            it[GOOGLE_TV_HOME] = enabled
+        }
+    }
+
     suspend fun setBedtimeMinutes(minutes: Int) {
         context.dataStore.edit {
             it[BEDTIME_MINUTES] = minutes.mod(24 * 60)
@@ -340,6 +350,7 @@ class UserPreferences(private val context: Context) {
         val SOURCE_FIT = booleanPreferencesKey("source_fit")
         val SERIES_RECAP = booleanPreferencesKey("series_recap")
         val FITS_TONIGHT = booleanPreferencesKey("fits_tonight")
+        val GOOGLE_TV_HOME = booleanPreferencesKey("google_tv_home")
         val BEDTIME_MINUTES = intPreferencesKey("bedtime_minutes")
         val UP_NEXT_DISMISSED = stringSetPreferencesKey("up_next_dismissed")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")

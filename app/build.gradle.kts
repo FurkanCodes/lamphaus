@@ -172,6 +172,7 @@ dependencies {
     implementation(project(":core:player"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.tvprovider)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

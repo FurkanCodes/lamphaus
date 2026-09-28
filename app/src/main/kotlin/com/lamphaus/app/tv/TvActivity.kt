@@ -57,10 +57,14 @@ class TvActivity : ComponentActivity() {
         })
         (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
         launchPendingPlayback((application as LamphausApplication).container)
+        // TV-HOME-01: a Google TV home card opens its title (once, not on recreation).
+        val watchNextKey = WatchNextPublisher.mediaKeyFrom(intent)
+        if (savedInstanceState == null) watchNextKey?.let(viewModel::openWatchNext)
         setContent {
             TvApp(
                 viewModel = viewModel,
                 initialSearch = intent?.getStringExtra(SearchManager.QUERY),
+                fromHomeScreen = watchNextKey != null,
                 onPlay = { startActivity(PlayerActivity.intent(this, it)) },
                 onExternalPlay = ::openExternalPlayback,
                 updateViewModel = updateViewModel,
@@ -80,6 +84,7 @@ class TvActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        WatchNextPublisher.mediaKeyFrom(intent)?.let(viewModel::openWatchNext)
     }
 
     override fun onStart() {
