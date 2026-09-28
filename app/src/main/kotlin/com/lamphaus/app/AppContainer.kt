@@ -98,6 +98,7 @@ class AppContainer(context: Context) {
         (applicationContext.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
             ?.isLowRamDevice == true
     val skipRepository = IntroDbSkipRepository()
+    val trailerRepository = com.lamphaus.core.data.trailer.TrailerRepository()
 
     /**
      * Application-lifetime scope for work that must outlive any single screen.

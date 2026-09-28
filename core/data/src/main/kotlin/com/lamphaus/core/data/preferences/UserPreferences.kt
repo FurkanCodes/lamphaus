@@ -43,6 +43,11 @@ data class UserSettings(
     val backgroundArtwork: Boolean? = null,
     /** Device-local TV Home layout name; null means the default (classic). */
     val tvHomeLayout: String? = null,
+    /**
+     * Device-local trailer choice. Null means the platform default: the
+     * mobile Trailer button is on, TV Spotlight previews are opt-in.
+     */
+    val trailers: Boolean? = null,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playback: PlaybackSettings = PlaybackSettings(),
@@ -78,6 +83,7 @@ class UserPreferences(private val context: Context) {
             localOnlyArtworkKeys = values[LOCAL_ONLY_ARTWORK_KEYS] ?: false,
             backgroundArtwork = values[BACKGROUND_ARTWORK],
             tvHomeLayout = values[TV_HOME_LAYOUT],
+            trailers = values[TRAILERS],
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -163,6 +169,13 @@ class UserPreferences(private val context: Context) {
     suspend fun setTvHomeLayout(name: String) {
         context.dataStore.edit {
             it[TV_HOME_LAYOUT] = name
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setTrailers(enabled: Boolean) {
+        context.dataStore.edit {
+            it[TRAILERS] = enabled
         }
     }
 
@@ -256,6 +269,7 @@ class UserPreferences(private val context: Context) {
         val LOCAL_ONLY_ARTWORK_KEYS = booleanPreferencesKey("local_only_artwork_keys")
         val BACKGROUND_ARTWORK = booleanPreferencesKey("background_artwork")
         val TV_HOME_LAYOUT = stringPreferencesKey("tv_home_layout")
+        val TRAILERS = booleanPreferencesKey("trailers")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")
         val SPOILER_BLUR_EPISODE_ARTWORK = booleanPreferencesKey("spoiler_blur_episode_artwork")

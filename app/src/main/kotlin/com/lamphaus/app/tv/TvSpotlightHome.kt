@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,8 +83,12 @@ import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
+import com.lamphaus.core.model.TrailerSource
 import com.lamphaus.core.model.WatchProgress
 import kotlin.math.roundToInt
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 
 /*
  * Spotlight Home (TV-CNT-03): no hero. The focused row pins below the top
@@ -488,6 +493,19 @@ internal fun TvSpotlightCard(
     val primary = MaterialTheme.colorScheme.primary
     val meta = media.spotlightMetaText()
     val cardDescription = if (meta.isEmpty()) media.name else "${media.name}, $meta"
+    // TV-CNT-04: once focus rests on the card, its trailer plays muted in
+    // the still; moving focus, leaving Home or the trailer ending stops it.
+    val trailerPreviews = LocalTvTrailerPreviews.current
+    var trailer by remember { mutableStateOf<TrailerSource?>(null) }
+    LaunchedEffect(focused, trailerPreviews, media.stableKey) {
+        trailer = null
+        if (!focused || trailerPreviews == null) return@LaunchedEffect
+        coroutineScope {
+            val source = async { trailerPreviews.source(media) }
+            delay(TvTrailerPreviewTokens.startDelayMillis)
+            trailer = source.await()
+        }
+    }
     val expansion by animateFloatAsState(
         targetValue = if (focused) 1f else 0f,
         animationSpec = if (reducedMotion) snap() else tween(TvMotionTokens.focusDurationMillis),
@@ -546,6 +564,13 @@ internal fun TvSpotlightCard(
             if (focused) {
                 TvSpotlightStill(
                     media = media,
+                    trailer = trailer?.let { source ->
+                        trailerPreviews?.let { previews ->
+                            @Composable {
+                                TvSpotlightTrailer(previews, source, onEnded = { trailer = null })
+                            }
+                        }
+                    },
                     modifier = Modifier
                         .wrapContentSize(Alignment.TopStart, unbounded = true)
                         .size(TvLayoutTokens.spotlightExpandedWidth, TvLayoutTokens.posterHeight)
@@ -568,7 +593,11 @@ internal fun TvSpotlightCard(
 }
 
 @Composable
-private fun TvSpotlightStill(media: MediaPreview, modifier: Modifier = Modifier) {
+private fun TvSpotlightStill(
+    media: MediaPreview,
+    modifier: Modifier = Modifier,
+    trailer: (@Composable () -> Unit)? = null,
+) {
     val resolver = LocalArtworkResolver.current
     val resolved = remember(media, resolver) { resolver.resolve(media).media }
     var logoFailed by remember(resolved.logoUrl) { mutableStateOf(false) }
@@ -579,6 +608,7 @@ private fun TvSpotlightStill(media: MediaPreview, modifier: Modifier = Modifier)
             contentScale = ContentScale.Crop,
             preferBackdrop = true,
         )
+        trailer?.invoke()
         Box(
             Modifier
                 .fillMaxSize()

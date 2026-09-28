@@ -60,6 +60,7 @@ dependencies {
     implementation(libs.supabase.realtime)
     implementation(libs.supabase.functions)
     implementation(libs.ktor.client.okhttp)
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -100,5 +100,6 @@ class ProviderAggregator(
         rating = rating ?: other.rating,
         posterShape = posterShape ?: other.posterShape,
         providerIds = providerIds + other.providerIds,
+        trailerYtIds = (trailerYtIds + other.trailerYtIds).distinct(),
     )
 }

@@ -86,6 +86,14 @@
     <string name="home_layout_spotlight">Spotlight</string>
     <string name="home_layout_classic_description">A large featured title at the top, with poster rows below.</string>
     <string name="home_layout_spotlight_description">No featured banner. The selected title widens in its row, and its details appear underneath.</string>
+    <string name="trailer_previews">Trailer previews</string>
+    <string name="trailer_previews_description">In Spotlight Home, plays a muted trailer in the selected title after a few seconds on this TV.</string>
+    <string name="trailer">Trailer</string>
+    <string name="trailers">Trailers</string>
+    <string name="trailer_button">Trailer button</string>
+    <string name="trailers_description">Adds a Trailer action to title pages on this device.</string>
+    <string name="trailer_unavailable">This trailer can\'t be played right now.</string>
+    <string name="trailer_title_format">%1$s trailer</string>
     <string name="media_type_movie">Movie</string>
     <string name="media_type_series">Series</string>
     <string name="spoiler_protection">Spoiler protection</string>

@@ -320,6 +320,8 @@ data class AppUiState(
     /** Effective TV background artwork choice (see [effectiveBackgroundArtwork]). */
     val backgroundArtworkEnabled: Boolean = true,
     val tvHomeLayout: TvHomeLayout = TvHomeLayout.CLASSIC,
+    /** Device-local trailer choice; null means the platform default (mobile on, TV off). */
+    val trailers: Boolean? = null,
     /** Imported Nuvio-compatible stream badges; null when none are imported. */
     val streamBadges: com.lamphaus.core.data.repository.StreamBadgeImport? = null,
     val streamBadgesImporting: Boolean = false,
@@ -359,6 +361,7 @@ data class AppUiState(
         localOnlyArtworkKeys = localOnlyArtworkKeys,
         backgroundArtworkEnabled = backgroundArtworkEnabled,
         tvHomeLayout = tvHomeLayout,
+        trailers = trailers,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,

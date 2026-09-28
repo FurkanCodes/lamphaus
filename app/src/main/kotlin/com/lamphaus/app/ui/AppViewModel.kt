@@ -42,6 +42,7 @@ import com.lamphaus.core.model.PlaybackSource
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.SubtitleTrack
+import com.lamphaus.core.model.TrailerSource
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
@@ -166,6 +167,12 @@ class AppViewModel(
             size > 24
     }
 
+    /** Trailer ids found in provider metadata for catalog items that had none. Main-confined. */
+    private val trailerIdsByKey = object : LinkedHashMap<String, List<String>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>): Boolean =
+            size > 200
+    }
+
     init {
         viewModelScope.launch {
             container.streamBadgeRepository.rules.collect { rules ->
@@ -190,6 +197,7 @@ class AppViewModel(
                     localOnlyArtworkKeys = settings.localOnlyArtworkKeys,
                     backgroundArtwork = settings.backgroundArtwork,
                     tvHomeLayout = settings.tvHomeLayout,
+                    trailers = settings.trailers,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
                     playbackSettings = settings.playback,
@@ -248,6 +256,7 @@ class AppViewModel(
                             container.isLowRamDevice,
                         ),
                         tvHomeLayout = TvHomeLayout.fromName(snapshot.tvHomeLayout),
+                        trailers = snapshot.trailers,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
                         playbackSettings = snapshot.playbackSettings,
@@ -1902,6 +1911,53 @@ class AppViewModel(
         container.preferences.setTvHomeLayout(layout.name)
     }
 
+    fun setTrailersEnabled(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setTrailers(enabled)
+    }
+
+    /**
+     * A playable trailer for [media], at most [maxHeight] tall. Trailer ids
+     * come from the catalog item, then the loaded detail, then the first
+     * provider whose metadata names any; the repository resolves the stream.
+     * [refresh] is a viewer's retry and skips the cached result.
+     */
+    suspend fun trailerSource(media: MediaPreview, maxHeight: Int, refresh: Boolean = false): TrailerSource? {
+        val ids = trailerIds(media)
+        if (ids.isEmpty()) return null
+        return container.trailerRepository.source(ids, maxHeight, refresh)
+    }
+
+    private suspend fun trailerIds(media: MediaPreview): List<String> {
+        media.trailerYtIds.takeIf { it.isNotEmpty() }?.let { return it }
+        val detail = state.value.selectedDetail?.takeIf { it.preview.stableKey == media.stableKey }
+            ?: recentlyLoadedDetails[media.stableKey]
+        detail?.preview?.trailerYtIds?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (media.id.startsWith("fixture:")) return emptyList()
+        trailerIdsByKey[media.stableKey]?.let { return it }
+        val providers = state.value.providers
+            .filter(ProviderSubscription::enabled)
+            .sortedWith(
+                compareBy<ProviderSubscription> { if (it.id in media.providerIds) 0 else 1 }
+                    .thenBy(ProviderSubscription::sortOrder)
+                    .thenBy(ProviderSubscription::id),
+            )
+        for (provider in providers) {
+            val manifest = container.providerClient.manifest(provider.manifestUrl)
+            if (manifest !is ProviderResult.Success ||
+                !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)
+            ) {
+                continue
+            }
+            val meta = container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
+            val ids = (meta as? ProviderResult.Success<MediaDetail>)?.value?.preview?.trailerYtIds.orEmpty()
+            if (ids.isNotEmpty()) {
+                trailerIdsByKey[media.stableKey] = ids
+                return ids
+            }
+        }
+        return emptyList()
+    }
+
     fun setKenBurnsEnabled(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setKenBurnsEnabled(enabled)
         pushSyncedSettings()
@@ -2726,6 +2782,7 @@ class AppViewModel(
         val localOnlyArtworkKeys: Boolean,
         val backgroundArtwork: Boolean?,
         val tvHomeLayout: String?,
+        val trailers: Boolean?,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
         val playbackSettings: PlaybackSettings,
@@ -2825,6 +2882,7 @@ internal fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
     ratingSource = ratingSource ?: other.ratingSource,
     providerIds = providerIds + other.providerIds,
     posterShape = posterShape ?: other.posterShape,
+    trailerYtIds = (trailerYtIds + other.trailerYtIds).distinct(),
 )
 
 private fun sourceIdentity(source: StreamCandidate): String = listOfNotNull(

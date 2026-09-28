@@ -48,6 +48,7 @@ import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -111,6 +112,7 @@ import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PersonCredit
 import com.lamphaus.core.model.SpoilerProtectionSettings
+import com.lamphaus.core.model.TrailerSource
 import com.lamphaus.core.model.WatchProgress
 import kotlin.math.roundToInt
 
@@ -143,8 +145,18 @@ internal fun MobileDetailScreen(
     onOpenMedia: (MediaPreview) -> Unit,
     progress: List<WatchProgress>,
     onOpenMenu: (ContentMenuTarget) -> Unit,
+    trailersEnabled: Boolean = false,
+    resolveTrailer: suspend (media: MediaPreview, maxHeight: Int, refresh: Boolean) -> TrailerSource? = { _, _, _ -> null },
 ) {
     if (detail == null) return
+    var trailerOpen by rememberSaveable(detail.preview.stableKey) { mutableStateOf(false) }
+    if (trailerOpen) {
+        MobileTrailerDialog(
+            media = detail.preview,
+            resolve = resolveTrailer,
+            onDismiss = { trailerOpen = false },
+        )
+    }
     val artworkResolver = LocalArtworkResolver.current
     val preview = remember(detail.preview, artworkResolver) { artworkResolver.resolve(detail.preview).media }
     val reducedMotion = rememberReducedMotion()
@@ -219,6 +231,9 @@ internal fun MobileDetailScreen(
                     onLibrary = onLibrary,
                     onEditArtwork = onEditArtwork,
                     onOpenMenu = { onOpenMenu(menuTarget) },
+                    onTrailer = { trailerOpen = true }.takeIf {
+                        trailersEnabled && detail.preview.trailerYtIds.isNotEmpty()
+                    },
                 )
             }
             constrained("synopsis", section(2)) {
@@ -520,6 +535,7 @@ private fun DetailActions(
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
     onOpenMenu: () -> Unit,
+    onTrailer: (() -> Unit)?,
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
@@ -573,6 +589,7 @@ private fun DetailActions(
                 highlighted = inLibrary,
                 onClick = onLibrary,
             )
+            onTrailer?.let { LabeledAction(Icons.Outlined.Movie, stringResource(R.string.trailer), onClick = it) }
             LabeledAction(Icons.Outlined.Edit, stringResource(R.string.detail_artwork), onClick = onEditArtwork)
             LabeledAction(Icons.Outlined.MoreHoriz, stringResource(R.string.content_menu_more), onClick = onOpenMenu)
         }

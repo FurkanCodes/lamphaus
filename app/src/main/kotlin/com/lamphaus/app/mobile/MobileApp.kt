@@ -591,6 +591,9 @@ private fun MobileSignedInApp(
                 onOpenMedia = viewModel::loadDetail,
                 progress = state.progress,
                 onOpenMenu = viewModel::openContentMenu,
+                // Unset means on for phones and tablets.
+                trailersEnabled = state.trailers != false,
+                resolveTrailer = viewModel::trailerSource,
             )
         }
         settingsOpen -> {
