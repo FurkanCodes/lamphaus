@@ -22,6 +22,8 @@ data class PlaybackSettings(
     val nextEpisodeThresholdMode: NextEpisodeThresholdMode = NextEpisodeThresholdMode.PERCENTAGE,
     val nextEpisodeThresholdPercent: Float = 98f,
     val nextEpisodeThresholdMinutesBeforeEnd: Float = 2f,
+    /** At an episode's end the next one starts after the card's countdown (Nuvio). */
+    val autoPlayNextEpisode: Boolean = true,
 )
 
 @Serializable
@@ -60,6 +62,8 @@ data class PlaybackRequest(
     val sourceBingeGroup: String? = null,
     /** The playing source's name, title and file, used to find the closest next-episode source. */
     val sourceLabel: String? = null,
+    /** Episodes started automatically in a row before this one; any choice by the viewer resets it. */
+    val autoPlayStreak: Int = 0,
     /** Catalog item snapshot, persisted with watch progress for Continue Watching. */
     val preview: MediaPreview? = null,
 )
@@ -88,6 +92,19 @@ fun List<Episode>.playbackQueueFrom(current: Episode?, maximumSize: Int = 50): L
     val currentIndex = ordered.indexOfFirst { it.id == current.id }
     if (currentIndex < 0) return emptyList()
     return ordered.drop(currentIndex).take(maximumSize)
+}
+
+/**
+ * Episodes around [current] for the in-player episode list: up to [before]
+ * earlier ones, [current], and up to [after] later ones, in playback order.
+ * Bounded so the launch request stays small for long-running series.
+ */
+fun List<Episode>.playbackQueueAround(current: Episode?, before: Int = 25, after: Int = 50): List<Episode> {
+    if (current == null) return emptyList()
+    val ordered = playbackOrder()
+    val currentIndex = ordered.indexOfFirst { it.id == current.id }
+    if (currentIndex < 0) return emptyList()
+    return ordered.subList((currentIndex - before).coerceAtLeast(0), (currentIndex + after + 1).coerceAtMost(ordered.size))
 }
 
 private fun List<Episode>.playbackOrder(): List<Episode> = distinctBy(Episode::id).sortedWith(

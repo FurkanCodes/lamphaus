@@ -126,6 +126,17 @@
     <string name="next_episode_description">Offer the next episode near the end of playback.</string>
     <string name="next_episode_source_unavailable">The next episode has no playable source from your installed add-ons.</string>
     <string name="next_episode_close">Close</string>
+    <string name="auto_play_next">Auto-play next episode</string>
+    <string name="auto_play_next_description">At the end of an episode, start the next one after a short countdown. After three in a row, playback asks if you are still watching.</string>
+    <string name="player_episodes">Episodes</string>
+    <string name="episode_source_unavailable">No playable source for this episode.</string>
+    <string name="still_watching_title">Still watching?</string>
+    <plurals name="still_watching_body">
+        <item quantity="one">Playback stops in %d second.</item>
+        <item quantity="other">Playback stops in %d seconds.</item>
+    </plurals>
+    <string name="still_watching_continue">Continue watching</string>
+    <string name="still_watching_stop">Stop</string>
     <string name="next_episode_finding_source">Finding source…</string>
     <string name="next_episode_skip_credits">Skip credits</string>
     <string name="next_episode_unaired">Not yet released</string>

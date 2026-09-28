@@ -107,6 +107,7 @@ class UserPreferences(private val context: Context) {
                 thresholdMode = values[PLAYBACK_NEXT_EPISODE_MODE],
                 thresholdPercent = values[PLAYBACK_NEXT_EPISODE_PERCENT],
                 thresholdMinutes = values[PLAYBACK_NEXT_EPISODE_MINUTES],
+                autoPlayNext = values[PLAYBACK_AUTO_PLAY_NEXT],
             ),
             devicePlayback = devicePlaybackConfigFromKeys(
                 engine = values[PLAYBACK_ENGINE],
@@ -227,6 +228,7 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_NEXT_EPISODE_MODE] = settings.nextEpisodeThresholdMode.name
             it[PLAYBACK_NEXT_EPISODE_PERCENT] = settings.nextEpisodeThresholdPercent
             it[PLAYBACK_NEXT_EPISODE_MINUTES] = settings.nextEpisodeThresholdMinutesBeforeEnd
+            it[PLAYBACK_AUTO_PLAY_NEXT] = settings.autoPlayNextEpisode
         }
     }
 
@@ -303,6 +305,7 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_NEXT_EPISODE_MODE = stringPreferencesKey("playback_next_episode_mode")
         val PLAYBACK_NEXT_EPISODE_PERCENT = floatPreferencesKey("playback_next_episode_percent")
         val PLAYBACK_NEXT_EPISODE_MINUTES = floatPreferencesKey("playback_next_episode_minutes")
+        val PLAYBACK_AUTO_PLAY_NEXT = booleanPreferencesKey("playback_auto_play_next")
         val PLAYBACK_ENGINE = stringPreferencesKey("playback_engine")
         val PLAYBACK_DOLBY_VISION = stringPreferencesKey("playback_dolby_vision")
         val PLAYBACK_FRAME_RATE_MATCHING = stringPreferencesKey("playback_frame_rate_matching")
@@ -327,6 +330,7 @@ internal fun playbackSettingsFromKeys(
     thresholdMode: String?,
     thresholdPercent: Float?,
     thresholdMinutes: Float?,
+    autoPlayNext: Boolean? = null,
 ): PlaybackSettings = PlaybackSettings(
     skipIntroEnabled = skipIntro ?: true,
     skipEndingEnabled = skipEnding ?: true,
@@ -337,6 +341,7 @@ internal fun playbackSettingsFromKeys(
     nextEpisodeThresholdPercent = NextEpisodePolicy.clampedPercent(thresholdPercent ?: 98f),
     nextEpisodeThresholdMinutesBeforeEnd =
         NextEpisodePolicy.clampedMinutesBeforeEnd(thresholdMinutes ?: 2f),
+    autoPlayNextEpisode = autoPlayNext ?: true,
 )
 
 /**

@@ -3296,6 +3296,16 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
             Text(stringResource(R.string.playback), style = MaterialTheme.typography.headlineSmall)
         }
         item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.auto_play_next),
+                description = stringResource(R.string.auto_play_next_description),
+                checked = state.playbackSettings.autoPlayNextEpisode,
+                onCheckedChange = {
+                    viewModel.setPlaybackSettings(state.playbackSettings.copy(autoPlayNextEpisode = it))
+                },
+            )
+        }
+        item {
             TvSettingsChoiceRow(
                 title = "Default audio",
                 description = "Original first, then your preferred language",

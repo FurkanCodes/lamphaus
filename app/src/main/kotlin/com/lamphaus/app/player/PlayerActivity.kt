@@ -43,6 +43,7 @@ import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.NextEpisodeSourcePolicy
+import com.lamphaus.core.model.AutoPlayPolicy
 import com.lamphaus.core.model.closenessLabel
 import com.lamphaus.core.model.PlaybackSegment
 import com.lamphaus.core.model.PlaybackRequest
@@ -101,6 +102,11 @@ class PlayerActivity : ComponentActivity() {
     private val nextEpisodeMessageState = mutableStateOf<String?>(null)
     private val spoilerProtectionState = mutableStateOf(SpoilerProtectionSettings())
     private val nextEpisodeDismissedVideoId = mutableStateOf<String?>(null)
+    /** Seconds left on "Still watching?"; null while it is not shown. */
+    private val stillWatchingState = mutableStateOf<Int?>(null)
+    private var stillWatchingJob: Job? = null
+    private val episodeSwitchState = mutableStateOf<EpisodeSwitchState?>(null)
+    private var episodeSwitchJob: Job? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var request: PlaybackRequest? = null
     private var progressPulseJob: Job? = null
@@ -242,6 +248,11 @@ class PlayerActivity : ComponentActivity() {
                     sources = playerSourcesState.value,
                     onLoadSources = ::loadPlayerSources,
                     onSelectSource = ::selectPlayerSource,
+                    stillWatchingSecondsLeft = stillWatchingState.value,
+                    onStillWatchingContinue = ::continueWatching,
+                    onStillWatchingStop = ::stopWatching,
+                    episodeSwitch = episodeSwitchState.value,
+                    onSelectEpisode = ::selectEpisode,
                     nextEpisodeMessage = nextEpisodeMessageState.value,
                     spoilerProtection = spoilerProtectionState.value,
                     nextEpisodeDismissed =
@@ -319,6 +330,7 @@ class PlayerActivity : ComponentActivity() {
                                 displayModeSwitchInFlight = false
                                 displayModeController?.restore()
                                 saveProgress(final = true, naturalEnd = true)
+                                onEpisodeEnded()
                             }
                         }
 
@@ -492,7 +504,12 @@ class PlayerActivity : ComponentActivity() {
         player.trackSelectionParameters = parameters.build()
     }
 
-    private fun playNextEpisode() {
+    /**
+     * Starts the next episode on the source closest to this one. [automatic]
+     * is the end-of-episode auto-play: it extends the auto-play streak that
+     * "Still watching?" counts, while the viewer's own press resets it.
+     */
+    private fun playNextEpisode(automatic: Boolean = false) {
         if (nextEpisodeProgressState.value != NextEpisodeProgress.Idle || request?.nextEpisode == null) return
         if (request?.nextEpisode?.hasAired() == false) return
         nextEpisodeProgressState.value = NextEpisodeProgress.Searching
@@ -500,7 +517,8 @@ class PlayerActivity : ComponentActivity() {
         nextEpisodeResolutionJob = lifecycleScope.launch {
             try {
                 val current = request
-                val next = current?.let { resolveNextPlayback(it) }
+                val target = current?.nextEpisode
+                val next = if (current != null && target != null) resolvePlaybackFor(current, target) else null
                 if (current == null || next == null) {
                     nextEpisodeMessageState.value = getString(R.string.next_episode_source_unavailable)
                 } else {
@@ -509,7 +527,9 @@ class PlayerActivity : ComponentActivity() {
                         nextEpisodeProgressState.value = NextEpisodeProgress.Starting(next.sourceName, secondsLeft)
                         delay(1_000)
                     }
-                    switchPlayback(next.request)
+                    switchPlayback(
+                        next.request.copy(autoPlayStreak = AutoPlayPolicy.nextStreak(current.autoPlayStreak, automatic)),
+                    )
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -517,6 +537,76 @@ class PlayerActivity : ComponentActivity() {
                 nextEpisodeMessageState.value = getString(R.string.next_episode_source_unavailable)
             } finally {
                 nextEpisodeProgressState.value = NextEpisodeProgress.Idle
+            }
+        }
+    }
+
+    /**
+     * End of an episode (PLY-AUTO-01): with auto-play on and the card not
+     * dismissed, the next aired episode starts after the card's countdown;
+     * after [AutoPlayPolicy.STILL_WATCHING_AFTER] automatic starts in a row
+     * the viewer is asked first.
+     */
+    private fun onEpisodeEnded() {
+        val current = request ?: return
+        val next = current.nextEpisode ?: return
+        val settings = playbackSettingsState.value
+        if (!settings.nextEpisodeEnabled || !settings.autoPlayNextEpisode || !next.hasAired()) return
+        if (nextEpisodeDismissedVideoId.value == current.videoId || pictureInPictureState.value) return
+        if (AutoPlayPolicy.shouldAskStillWatching(current.autoPlayStreak)) {
+            askStillWatching()
+        } else {
+            playNextEpisode(automatic = true)
+        }
+    }
+
+    private fun askStillWatching() {
+        stillWatchingJob?.cancel()
+        stillWatchingJob = lifecycleScope.launch {
+            for (secondsLeft in AutoPlayPolicy.STILL_WATCHING_TIMEOUT_SECONDS downTo 1) {
+                stillWatchingState.value = secondsLeft
+                delay(1_000)
+            }
+            stillWatchingState.value = null
+            finish()
+        }
+    }
+
+    /** "Continue": the viewer is here, so the next episode starts and the streak resets. */
+    private fun continueWatching() {
+        stillWatchingJob?.cancel()
+        stillWatchingState.value = null
+        playNextEpisode(automatic = false)
+    }
+
+    private fun stopWatching() {
+        stillWatchingJob?.cancel()
+        stillWatchingState.value = null
+        finish()
+    }
+
+    /**
+     * An episode picked in the player's episode list starts like the next
+     * episode: on the closest source, as a fresh playback. The list shows
+     * the search and any failure next to the chosen episode.
+     */
+    private fun selectEpisode(episode: Episode) {
+        val current = request ?: return
+        if (episode.id == current.videoId || !episode.hasAired()) return
+        episodeSwitchJob?.cancel()
+        episodeSwitchState.value = EpisodeSwitchState(episode.id)
+        episodeSwitchJob = lifecycleScope.launch {
+            val next = try {
+                resolvePlaybackFor(current, episode)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (next == null) {
+                episodeSwitchState.value = EpisodeSwitchState(episode.id, failed = true)
+            } else {
+                switchPlayback(next.request.copy(autoPlayStreak = 0))
             }
         }
     }
@@ -636,9 +726,8 @@ class PlayerActivity : ComponentActivity() {
         switchPlayback(next)
     }
 
-    private suspend fun resolveNextPlayback(current: PlaybackRequest): NextPlayback? {
+    private suspend fun resolvePlaybackFor(current: PlaybackRequest, next: Episode): NextPlayback? {
         val media = current.preview ?: return null
-        val next = current.nextEpisode ?: return null
         val resolvedProviders = resolvedPlaybackProviders()
         fun playable(streams: List<StreamCandidate>, providerName: String?) = streams.mapNotNull { source ->
             val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal

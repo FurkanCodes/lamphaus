@@ -205,7 +205,7 @@ internal val PlayerFont = FontFamily(
     Font(R.font.inter_semi_bold, FontWeight.SemiBold),
 )
 
-internal enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, DISPLAY, MORE, INFO, SOURCES }
+internal enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, DISPLAY, MORE, INFO, SOURCES, EPISODES }
 
 internal enum class PlaybackStartupPhase { LOADING, READY, FAILED }
 
@@ -276,6 +276,11 @@ internal fun PlaybackScreen(
     sources: PlayerSourcesState = PlayerSourcesState(),
     onLoadSources: () -> Unit = {},
     onSelectSource: (PlayerSourceOption) -> Unit = {},
+    stillWatchingSecondsLeft: Int? = null,
+    onStillWatchingContinue: () -> Unit = {},
+    onStillWatchingStop: () -> Unit = {},
+    episodeSwitch: EpisodeSwitchState? = null,
+    onSelectEpisode: (com.lamphaus.core.model.Episode) -> Unit = {},
 ) {
     val nextEpisodeLoading = nextEpisodeProgress != NextEpisodeProgress.Idle
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
@@ -525,6 +530,8 @@ internal fun PlaybackScreen(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || player == null || startupLoading) return@onPreviewKeyEvent false
+                // "Still watching?" owns the remote: its buttons take Select and the D-pad.
+                if (stillWatchingSecondsLeft != null) return@onPreviewKeyEvent false
                 // Any key is interaction: it restarts the auto-hide and pause-overlay timers.
                 interactionVersion++
                 if (cueFocused && !controlsVisible && event.key in CUE_KEYS) return@onPreviewKeyEvent false
@@ -994,7 +1001,16 @@ internal fun PlaybackScreen(
         }
 
         panel?.takeUnless { inPictureInPicture || loadingSurfaceVisible }?.let { activePanel ->
-            if (activePanel == PlayerPanel.SOURCES) {
+            if (activePanel == PlayerPanel.EPISODES) {
+                PlayerEpisodesPanel(
+                    episodes = request.episodeQueue,
+                    currentVideoId = request.videoId,
+                    switch = episodeSwitch,
+                    isTelevision = isTelevision,
+                    onSelect = onSelectEpisode,
+                    onClose = ::closePanel,
+                )
+            } else if (activePanel == PlayerPanel.SOURCES) {
                 LaunchedEffect(Unit) { onLoadSources() }
                 PlayerSourcesPanel(
                     state = sources,
@@ -1054,12 +1070,13 @@ internal fun PlaybackScreen(
                     onResizeMode = { resizeMode = it },
                     onPanel = { panelParent = panel; panel = it },
                     onOpenExternally = onOpenExternally,
+                    showEpisodes = request.episodeQueue.size > 1,
                 )
             }
         }
 
         AnimatedVisibility(
-            visible = pauseOverlayVisible,
+            visible = pauseOverlayVisible && stillWatchingSecondsLeft == null,
             enter = fadeIn(tween(if (reducedMotion) 0 else 220)),
             exit = fadeOut(tween(if (reducedMotion) 0 else 160)),
         ) {
@@ -1076,6 +1093,16 @@ internal fun PlaybackScreen(
                 request = request,
                 isTelevision = isTelevision,
                 modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // Topmost: nothing else may cover or take input from the prompt.
+        stillWatchingSecondsLeft?.takeUnless { inPictureInPicture }?.let { secondsLeft ->
+            StillWatchingPrompt(
+                secondsLeft = secondsLeft,
+                isTelevision = isTelevision,
+                onContinue = onStillWatchingContinue,
+                onStop = onStillWatchingStop,
             )
         }
     }
@@ -1404,6 +1431,7 @@ private fun PlayerSettingsPanel(
     onResizeMode: (Int) -> Unit,
     onPanel: (PlayerPanel) -> Unit,
     onOpenExternally: () -> Unit,
+    showEpisodes: Boolean = false,
 ) {
     val firstFocus = remember(panel) { FocusRequester() }
     val title = stringResource(when (panel) {
@@ -1414,6 +1442,7 @@ private fun PlayerSettingsPanel(
         PlayerPanel.MORE -> R.string.player_more
         PlayerPanel.INFO -> R.string.player_info
         PlayerPanel.SOURCES -> R.string.player_sources
+        PlayerPanel.EPISODES -> R.string.player_episodes
     })
     val options = when (panel) {
         PlayerPanel.AUDIO -> snapshot.tracks.options(C.TRACK_TYPE_AUDIO)
@@ -1493,15 +1522,21 @@ private fun PlayerSettingsPanel(
                 }
             }
             PlayerPanel.MORE -> LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                if (showEpisodes) {
+                    item {
+                        PlayerChoiceRow(stringResource(R.string.player_episodes), null, false,
+                            Modifier.focusRequester(firstFocus), actionRole = Role.Button) { onPanel(PlayerPanel.EPISODES) }
+                    }
+                }
                 item {
                     PlayerChoiceRow(stringResource(R.string.player_speed), "${snapshot.speed}×", false,
-                        Modifier.focusRequester(firstFocus), actionRole = Role.Button) { onPanel(PlayerPanel.SPEED) }
+                        if (showEpisodes) Modifier else Modifier.focusRequester(firstFocus), actionRole = Role.Button) { onPanel(PlayerPanel.SPEED) }
                 }
                 item { PlayerChoiceRow(stringResource(R.string.player_display), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.DISPLAY) } }
                 item { PlayerChoiceRow(stringResource(R.string.player_info), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.INFO) } }
                 item { PlayerChoiceRow(stringResource(R.string.player_external), null, false, actionRole = Role.Button, onClick = onOpenExternally) }
             }
-            PlayerPanel.INFO, PlayerPanel.SOURCES -> Unit
+            PlayerPanel.INFO, PlayerPanel.SOURCES, PlayerPanel.EPISODES -> Unit
         }
     }
 }
@@ -2687,7 +2722,7 @@ private fun PlayerErrorPanel(
 }
 
 @Composable
-private fun PlayerTextButton(
+internal fun PlayerTextButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,

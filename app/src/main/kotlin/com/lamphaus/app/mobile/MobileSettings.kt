@@ -320,6 +320,17 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     },
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                // Depends on the next-episode card (MOB-SET-05).
+                PlaybackSettingRow(
+                    title = stringResource(R.string.auto_play_next),
+                    description = stringResource(R.string.auto_play_next_description),
+                    checked = playback.autoPlayNextEpisode,
+                    enabled = playback.nextEpisodeEnabled,
+                    onCheckedChange = {
+                        viewModel.setPlaybackSettings(playback.copy(autoPlayNextEpisode = it))
+                    },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 NextEpisodeThresholdControls(
                     playback = playback,
                     onUpdate = viewModel::setPlaybackSettings,
@@ -586,11 +597,12 @@ private fun PlaybackSettingRow(
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(description) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = onCheckedChange) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) },
         modifier = Modifier.semantics(mergeDescendants = true) {},
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
