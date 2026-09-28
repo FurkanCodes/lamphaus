@@ -102,6 +102,8 @@ data class MediaPreview(
     val trailerYtIds: List<String> = emptyList(),
     /** Full release (or premiere) date from the provider's `released`; [releaseYear] alone lacks the day. */
     val releasedAtEpochMillis: Long? = null,
+    /** Running time from the provider's `runtime`, when its catalog names one. */
+    val runtimeMinutes: Int? = null,
 ) {
     val stableKey: String get() = "${rawType.lowercase()}:$id"
 }

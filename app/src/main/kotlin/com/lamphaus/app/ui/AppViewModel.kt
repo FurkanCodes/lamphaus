@@ -210,6 +210,8 @@ class AppViewModel(
                     hideUnreleased = settings.hideUnreleased,
                     sourceFit = settings.sourceFit,
                     seriesRecap = settings.seriesRecap,
+                    fitsTonight = settings.fitsTonight,
+                    bedtimeMinutes = settings.bedtimeMinutes ?: DEFAULT_BEDTIME_MINUTES,
                     upNextDismissed = settings.upNextDismissed,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
@@ -273,6 +275,8 @@ class AppViewModel(
                         hideUnreleased = snapshot.hideUnreleased,
                         sourceFit = snapshot.sourceFit,
                         seriesRecap = snapshot.seriesRecap,
+                        fitsTonight = snapshot.fitsTonight,
+                        bedtimeMinutes = snapshot.bedtimeMinutes,
                         upNextDismissed = snapshot.upNextDismissed,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
@@ -1969,6 +1973,14 @@ class AppViewModel(
         container.preferences.setSeriesRecap(enabled)
     }
 
+    fun setFitsTonight(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setFitsTonight(enabled)
+    }
+
+    fun setBedtimeMinutes(minutes: Int) = viewModelScope.launch {
+        container.preferences.setBedtimeMinutes(minutes)
+    }
+
     /**
      * A playable trailer for [media], at most [maxHeight] tall. Trailer ids
      * come from the catalog item, then the loaded detail, then the first
@@ -2899,6 +2911,8 @@ class AppViewModel(
         val hideUnreleased: Boolean,
         val sourceFit: Boolean,
         val seriesRecap: Boolean,
+        val fitsTonight: Boolean,
+        val bedtimeMinutes: Int,
         val upNextDismissed: Set<String>,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,

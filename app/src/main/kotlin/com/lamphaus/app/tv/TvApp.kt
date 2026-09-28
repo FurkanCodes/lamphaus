@@ -99,6 +99,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
@@ -154,6 +155,11 @@ import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.app.ui.StreamBadgeRow
 import com.lamphaus.app.ui.StreamBadgeMatcher
 import com.lamphaus.app.ui.LocalStreamBadges
+import com.lamphaus.app.ui.rememberFitsTonightSection
+import com.lamphaus.app.ui.BEDTIME_OPTIONS
+import com.lamphaus.app.ui.bedtimeLabel
+import com.lamphaus.app.ui.seasonTimeLeft
+import com.lamphaus.app.ui.seasonTimeLeftText
 import com.lamphaus.app.ui.recapEpisodeTitle
 import com.lamphaus.app.ui.seriesRecap
 import com.lamphaus.app.ui.LocalSourceFit
@@ -879,6 +885,7 @@ private fun TvSignedIn(
             spoilerProtection = state.spoilerProtection,
             progress = state.progress,
             recapEnabled = state.seriesRecap,
+            seasonTimeLeftEnabled = state.fitsTonight,
             onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
             onOpenMedia = openMedia,
             onFocusedMedia = { lastFocusedMedia = it },
@@ -1125,8 +1132,15 @@ private fun TvHome(
             featuredSelection = it
         }
     }
-    val visibleHomeSections = remember(sections) {
-        sections.filter(CatalogSection::isRenderableHomeCatalogSection)
+    // SHR-PROD-14: movies only, so Home and Movies, never Series.
+    val fitsTonight = rememberFitsTonightSection(
+        sections = sections,
+        completedVideoIds = LocalTvContentMenuEnvironment.current.completedVideoIds,
+        enabled = state.fitsTonight && catalogType != "series",
+        bedtimeMinutes = state.bedtimeMinutes,
+    )
+    val visibleHomeSections = remember(sections, fitsTonight) {
+        listOfNotNull(fitsTonight) + sections.filter(CatalogSection::isRenderableHomeCatalogSection)
     }
     // TV-CNT-03 pins the focused row to the top, so the row above is always
     // fully off-screen and the row after next appears on every move. Keep
@@ -2616,6 +2630,7 @@ private fun TvDetailScreen(
     spoilerProtection: SpoilerProtectionSettings,
     progress: List<WatchProgress>,
     recapEnabled: Boolean,
+    seasonTimeLeftEnabled: Boolean,
     onPlay: (Episode?) -> Unit,
     onOpenMedia: (MediaPreview) -> Unit,
     onFocusedMedia: (MediaPreview) -> Unit,
@@ -2787,15 +2802,35 @@ private fun TvDetailScreen(
             }
             if (detail.episodes.isNotEmpty()) {
                 item("episodes-title") {
-                    Text(
-                        text = stringResource(R.string.episodes),
+                    val timeLeftSeason = if (showSeasonChips) selectedSeason else seasonNumbers.singleOrNull()
+                    val timeLeft = remember(detail, timeLeftSeason, progress, watchedEpisodeIds, seasonTimeLeftEnabled) {
+                        if (seasonTimeLeftEnabled) {
+                            seasonTimeLeft(detail.episodes, timeLeftSeason, progress, watchedEpisodeIds, detail.runtimeMinutes)
+                        } else {
+                            null
+                        }
+                    }
+                    Column(
                         modifier = Modifier.padding(
                             start = TvLayoutTokens.screenHorizontalPadding,
                             end = TvLayoutTokens.screenHorizontalPadding,
                             bottom = if (showSeasonChips) 12.dp else 16.dp,
                         ),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.episodes),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        // SHR-PROD-14: what is left of the season on view.
+                        timeLeft?.let {
+                            Text(
+                                text = seasonTimeLeftText(it),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                 }
                 if (showSeasonChips) {
                     item("season-filters") {
@@ -3728,6 +3763,25 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 checked = state.hideUnreleased,
                 onCheckedChange = viewModel::setHideUnreleased,
             )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.fits_tonight_setting),
+                description = stringResource(R.string.fits_tonight_setting_description),
+                checked = state.fitsTonight,
+                onCheckedChange = viewModel::setFitsTonight,
+            )
+        }
+        if (state.fitsTonight) {
+            item {
+                val context = LocalContext.current
+                TvSettingsChoiceRow(
+                    title = stringResource(R.string.bedtime_setting),
+                    description = stringResource(R.string.bedtime_setting_description),
+                    value = bedtimeLabel(context, state.bedtimeMinutes),
+                    onClick = { viewModel.setBedtimeMinutes(PlaybackEngineOptions.next(BEDTIME_OPTIONS, state.bedtimeMinutes)) },
+                )
+            }
         }
         item {
             TvSettingsToggleRow(

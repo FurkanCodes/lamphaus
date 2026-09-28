@@ -597,6 +597,7 @@ private fun MobileSignedInApp(
                 progress = state.progress,
                 onOpenMenu = viewModel::openContentMenu,
                 recapEnabled = state.seriesRecap,
+                seasonTimeLeftEnabled = state.fitsTonight,
                 // Unset means on for phones and tablets.
                 trailersEnabled = state.trailers != false,
                 resolveTrailer = viewModel::trailerSource,

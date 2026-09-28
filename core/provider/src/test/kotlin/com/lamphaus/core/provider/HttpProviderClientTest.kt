@@ -198,6 +198,23 @@ class HttpProviderClientTest {
     }
 
     @Test
+    fun `catalog previews carry running time in any common format`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"metas":[{"id":"tt1","type":"movie","name":"A","runtime":"2h 46min"},{"id":"tt2","type":"movie","name":"B","runtime":"95 min"},{"id":"tt3","type":"movie","name":"C"}]}""",
+            ),
+        )
+
+        val items = (client.catalog(
+            server.url("/manifest.json").toString(),
+            "fixture.provider",
+            CatalogQuery("movie", "featured"),
+        ) as ProviderResult.Success).value
+
+        assertEquals(listOf(166, 95, null), items.map { it.runtimeMinutes })
+    }
+
+    @Test
     fun `catalog previews carry full release dates including date only values`() = runTest {
         server.enqueue(
             jsonResponse(

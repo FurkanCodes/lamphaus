@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -55,6 +56,10 @@ data class UserSettings(
     val sourceFit: Boolean = true,
     /** Device-local: a series' details page recaps the last finished episode (SHR-PROD-13). */
     val seriesRecap: Boolean = true,
+    /** Device-local: Home's "Fits tonight" row and season time left (SHR-PROD-14). */
+    val fitsTonight: Boolean = true,
+    /** Device-local "Ends before" time for Fits tonight, in minutes after midnight; null is the default. */
+    val bedtimeMinutes: Int? = null,
     /** Up-next cards the viewer removed, as `mediaKey|finishedVideoId`; a newer finish shows it again. */
     val upNextDismissed: Set<String> = emptySet(),
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
@@ -96,6 +101,8 @@ class UserPreferences(private val context: Context) {
             hideUnreleased = values[HIDE_UNRELEASED] ?: false,
             sourceFit = values[SOURCE_FIT] ?: true,
             seriesRecap = values[SERIES_RECAP] ?: true,
+            fitsTonight = values[FITS_TONIGHT] ?: true,
+            bedtimeMinutes = values[BEDTIME_MINUTES],
             upNextDismissed = values[UP_NEXT_DISMISSED].orEmpty(),
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
@@ -221,6 +228,20 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setFitsTonight(enabled: Boolean) {
+        context.dataStore.edit {
+            it[FITS_TONIGHT] = enabled
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setBedtimeMinutes(minutes: Int) {
+        context.dataStore.edit {
+            it[BEDTIME_MINUTES] = minutes.mod(24 * 60)
+        }
+    }
+
 
     suspend fun setDiagnostics(consent: DiagnosticsConsent) {
         context.dataStore.edit {
@@ -316,6 +337,8 @@ class UserPreferences(private val context: Context) {
         val HIDE_UNRELEASED = booleanPreferencesKey("hide_unreleased")
         val SOURCE_FIT = booleanPreferencesKey("source_fit")
         val SERIES_RECAP = booleanPreferencesKey("series_recap")
+        val FITS_TONIGHT = booleanPreferencesKey("fits_tonight")
+        val BEDTIME_MINUTES = intPreferencesKey("bedtime_minutes")
         val UP_NEXT_DISMISSED = stringSetPreferencesKey("up_next_dismissed")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")

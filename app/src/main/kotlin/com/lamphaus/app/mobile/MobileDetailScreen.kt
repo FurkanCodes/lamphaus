@@ -108,7 +108,10 @@ import com.lamphaus.app.ui.orderedRatingScores
 import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.core.model.DetailEnrichment
+import com.lamphaus.app.ui.SeasonTimeLeft
 import com.lamphaus.app.ui.recapEpisodeTitle
+import com.lamphaus.app.ui.seasonTimeLeft
+import com.lamphaus.app.ui.seasonTimeLeftText
 import com.lamphaus.app.ui.seriesRecap
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
@@ -149,6 +152,7 @@ internal fun MobileDetailScreen(
     progress: List<WatchProgress>,
     onOpenMenu: (ContentMenuTarget) -> Unit,
     recapEnabled: Boolean = true,
+    seasonTimeLeftEnabled: Boolean = true,
     trailersEnabled: Boolean = false,
     resolveTrailer: suspend (media: MediaPreview, maxHeight: Int, refresh: Boolean) -> TrailerSource? = { _, _, _ -> null },
 ) {
@@ -253,7 +257,14 @@ internal fun MobileDetailScreen(
             }
             if (detail.episodes.isNotEmpty()) {
                 constrained("episodes-header", section(3)) {
-                    EpisodesHeader(seasons, selectedSeason, onSeason = { pickedSeason = it })
+                    val timeLeft = remember(detail, selectedSeason, progress, watchedEpisodeIds, seasonTimeLeftEnabled) {
+                        if (seasonTimeLeftEnabled) {
+                            seasonTimeLeft(detail.episodes, selectedSeason, progress, watchedEpisodeIds, detail.runtimeMinutes)
+                        } else {
+                            null
+                        }
+                    }
+                    EpisodesHeader(seasons, selectedSeason, timeLeft, onSeason = { pickedSeason = it })
                 }
                 visibleEpisodes.forEach { episode ->
                     constrained("episode:${episode.id}", section(4), contentType = "episode") {
@@ -707,16 +718,26 @@ private fun CreditLine(label: String, value: String) {
 }
 
 @Composable
-private fun EpisodesHeader(seasons: List<Int>, selected: Int?, onSeason: (Int) -> Unit) {
+private fun EpisodesHeader(seasons: List<Int>, selected: Int?, timeLeft: SeasonTimeLeft?, onSeason: (Int) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(top = 32.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            stringResource(R.string.episodes),
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-            modifier = Modifier.weight(1f).semantics { heading() },
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.episodes),
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.semantics { heading() },
+            )
+            // SHR-PROD-14: what is left of the season on view.
+            timeLeft?.let {
+                Text(
+                    seasonTimeLeftText(it),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MobileTokens.textMuted,
+                )
+            }
+        }
         if (seasons.size > 1 && selected != null) {
             var open by remember { mutableStateOf(false) }
             Box {
