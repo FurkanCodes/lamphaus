@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material.icons.outlined.Visibility
@@ -110,6 +111,7 @@ internal enum class SettingsSection(
     PROFILES(R.string.profiles, Icons.Outlined.Person),
     ADDONS(R.string.addons, Icons.Outlined.Extension),
     PLAYBACK(R.string.playback, Icons.Outlined.PlayCircle),
+    BROWSING(R.string.browsing, Icons.Outlined.GridView),
     PAIRED_DEVICES(R.string.paired_devices, Icons.Outlined.Tv),
     SPOILER_PROTECTION(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ARTWORK(R.string.artwork, Icons.Outlined.Image),
@@ -149,6 +151,7 @@ internal fun MobileSettingsScreen(
             SettingsSection.PROFILES -> SettingsProfilesPage(state, viewModel)
             SettingsSection.ADDONS -> SettingsAddonsPage(state, viewModel)
             SettingsSection.PLAYBACK -> SettingsPlaybackPage(state, viewModel)
+            SettingsSection.BROWSING -> SettingsBrowsingPage(state, viewModel)
             SettingsSection.PAIRED_DEVICES -> SettingsPairedDevicesPage(state, viewModel)
             SettingsSection.SPOILER_PROTECTION -> SettingsSpoilerPage(state, viewModel)
             SettingsSection.ARTWORK -> SettingsArtworkPage(state, viewModel)
@@ -285,17 +288,6 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                )
-            }
-        }
-        item {
-            SettingsCard(stringResource(R.string.trailers)) {
-                PlaybackSettingRow(
-                    title = stringResource(R.string.trailer_button),
-                    description = stringResource(R.string.trailers_description),
-                    // Unset means on for phones and tablets.
-                    checked = state.trailers != false,
-                    onCheckedChange = viewModel::setTrailersEnabled,
                 )
             }
         }
@@ -559,6 +551,34 @@ private fun NextEpisodeThresholdControls(
 
 private fun thresholdValueLabel(value: Float): String =
     java.lang.String.format(Locale.getDefault(), if (value % 1f == 0f) "%.0f" else "%.1f", value)
+
+/** What browsing shows: trailers on title pages and unreleased titles in rows. */
+@Composable
+private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
+    SettingsPage(title = stringResource(R.string.browsing)) {
+        item {
+            SettingsCard(stringResource(R.string.trailers)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.trailer_button),
+                    description = stringResource(R.string.trailers_description),
+                    // Unset means on for phones and tablets.
+                    checked = state.trailers != false,
+                    onCheckedChange = viewModel::setTrailersEnabled,
+                )
+            }
+        }
+        item {
+            SettingsCard(stringResource(R.string.home_and_discover)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.hide_unreleased),
+                    description = stringResource(R.string.hide_unreleased_description),
+                    checked = state.hideUnreleased,
+                    onCheckedChange = viewModel::setHideUnreleased,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun PlaybackSettingRow(

@@ -71,6 +71,9 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.UpNextItem
+import com.lamphaus.app.ui.releaseCountdownText
+import com.lamphaus.app.ui.ReleaseKind
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.ContentMenuTarget
@@ -168,9 +171,10 @@ private fun SpotlightRowScrolling(content: @Composable () -> Unit) {
 internal fun spotlightMetaParts(
     presentation: MediaMetadataPresentation,
     typeLabel: String?,
+    releaseText: String? = null,
 ): List<String> = buildList {
     if (presentation.genres.isNotEmpty()) add(presentation.genres.joinToString(", "))
-    presentation.year?.let { add(it.toString()) }
+    (releaseText ?: presentation.year?.toString())?.let(::add)
     typeLabel?.let(::add)
     presentation.contentRating?.let(::add)
     presentation.ratingText?.let { add("★ $it") }
@@ -184,7 +188,8 @@ private fun MediaPreview.spotlightMetaText(): String {
         else -> null
     }
     val presentation = remember(this) { metadataPresentation(maxGenres = 2) }
-    return spotlightMetaParts(presentation, typeLabel).joinToString("  •  ")
+    val releaseText = releaseCountdownText(presentation.upcomingReleaseMillis, ReleaseKind.TITLE)
+    return spotlightMetaParts(presentation, typeLabel, releaseText).joinToString("  •  ")
 }
 
 @Composable
@@ -268,6 +273,7 @@ internal fun TvSpotlightRow(
 @Composable
 internal fun TvSpotlightContinueWatchingRow(
     items: List<Pair<MediaPreview, WatchProgress>>,
+    upNextByKey: Map<String, UpNextItem> = emptyMap(),
     contentHasFocus: Boolean,
     onMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit,
@@ -294,6 +300,7 @@ internal fun TvSpotlightContinueWatchingRow(
                     TvContinueWatchingCard(
                         media = media,
                         progress = progress,
+                        upNext = upNextByKey[media.stableKey],
                         onClick = { onMedia(media) },
                         onFocused = {
                             focusedMedia = media

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.NextEpisodePolicy
@@ -48,6 +49,10 @@ data class UserSettings(
      * mobile Trailer button is on, TV Spotlight previews are opt-in.
      */
     val trailers: Boolean? = null,
+    /** Device-local: leave not-yet-released titles out of Home and Discover rows. */
+    val hideUnreleased: Boolean = false,
+    /** Up-next cards the viewer removed, as `mediaKey|finishedVideoId`; a newer finish shows it again. */
+    val upNextDismissed: Set<String> = emptySet(),
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playback: PlaybackSettings = PlaybackSettings(),
@@ -84,6 +89,8 @@ class UserPreferences(private val context: Context) {
             backgroundArtwork = values[BACKGROUND_ARTWORK],
             tvHomeLayout = values[TV_HOME_LAYOUT],
             trailers = values[TRAILERS],
+            hideUnreleased = values[HIDE_UNRELEASED] ?: false,
+            upNextDismissed = values[UP_NEXT_DISMISSED].orEmpty(),
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -179,6 +186,20 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /** Device-local. Keeps the newest entries so the set cannot grow without bound. */
+    suspend fun dismissUpNext(key: String) {
+        context.dataStore.edit {
+            it[UP_NEXT_DISMISSED] = (it[UP_NEXT_DISMISSED].orEmpty() + key).toList().takeLast(200).toSet()
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setHideUnreleased(enabled: Boolean) {
+        context.dataStore.edit {
+            it[HIDE_UNRELEASED] = enabled
+        }
+    }
+
 
     suspend fun setDiagnostics(consent: DiagnosticsConsent) {
         context.dataStore.edit {
@@ -270,6 +291,8 @@ class UserPreferences(private val context: Context) {
         val BACKGROUND_ARTWORK = booleanPreferencesKey("background_artwork")
         val TV_HOME_LAYOUT = stringPreferencesKey("tv_home_layout")
         val TRAILERS = booleanPreferencesKey("trailers")
+        val HIDE_UNRELEASED = booleanPreferencesKey("hide_unreleased")
+        val UP_NEXT_DISMISSED = stringSetPreferencesKey("up_next_dismissed")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")
         val SPOILER_BLUR_EPISODE_ARTWORK = booleanPreferencesKey("spoiler_blur_episode_artwork")

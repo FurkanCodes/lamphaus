@@ -101,5 +101,6 @@ class ProviderAggregator(
         posterShape = posterShape ?: other.posterShape,
         providerIds = providerIds + other.providerIds,
         trailerYtIds = (trailerYtIds + other.trailerYtIds).distinct(),
+        releasedAtEpochMillis = releasedAtEpochMillis ?: other.releasedAtEpochMillis,
     )
 }

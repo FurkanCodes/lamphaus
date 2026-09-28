@@ -100,6 +100,8 @@ data class MediaPreview(
     val posterShape: String? = null,
     /** YouTube video ids of the title's trailers, best first (provider `trailers`/`trailerStreams`). */
     val trailerYtIds: List<String> = emptyList(),
+    /** Full release (or premiere) date from the provider's `released`; [releaseYear] alone lacks the day. */
+    val releasedAtEpochMillis: Long? = null,
 ) {
     val stableKey: String get() = "${rawType.lowercase()}:$id"
 }

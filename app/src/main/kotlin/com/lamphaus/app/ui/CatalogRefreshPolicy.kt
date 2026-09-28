@@ -90,6 +90,7 @@ internal data class CatalogRefreshFingerprint(
     val userId: String,
     val childFilterEnabled: Boolean,
     val providers: List<CatalogProviderFingerprint>,
+    val hideUnreleased: Boolean = false,
 )
 
 internal class CatalogRefreshGate {

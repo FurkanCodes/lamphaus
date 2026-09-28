@@ -11,6 +11,8 @@ data class MediaMetadataPresentation(
     val contentRating: String?,
     val ratingText: String?,
     val genres: List<String>,
+    /** Release date of a title that is not out yet; shown as a countdown in place of the year. */
+    val upcomingReleaseMillis: Long? = null,
 )
 
 internal fun MediaPreview.metadataPresentation(
@@ -22,6 +24,7 @@ internal fun MediaPreview.metadataPresentation(
     contentRating = contentRating.cleanMetadataValue(),
     ratingText = rating.metadataRatingText(),
     genres = genres.cleanMetadataValues(maxGenres),
+    upcomingReleaseMillis = releasedAtEpochMillis?.takeIf { it > System.currentTimeMillis() },
 )
 
 internal fun MediaDetail.metadataPresentation(maxGenres: Int = 2): MediaMetadataPresentation =

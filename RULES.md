@@ -31,6 +31,9 @@ Existing implementation is not evidence that a conflicting pattern is approved. 
 - **SHR-PROD-06 — Privacy by default.** Communal-room and lock-screen surfaces reveal the minimum necessary information. Provider credentials, URLs, queries, tokens, stream locations, and sensitive account data never enter diagnostics or analytics.
 - **SHR-PROD-07 — Localizable copy.** User-facing text comes from string resources, supports pluralization and RTL, and remains clear with longer translations. Do not embed copy in code or imagery.
 - **SHR-PROD-08 — Color-managed art.** Product fixture artwork and authored assets use sRGB. Runtime content accents are contrast-clamped before they affect text, controls, or focus indicators.
+- **SHR-PROD-09 — Release dates.** Unaired episodes and unreleased titles say when they arrive: "Airs/Releases today", "tomorrow", "in N days" up to seven days, then the date. Once out, episodes show their air date and titles their year. An unaired episode never plays.
+- **SHR-PROD-10 — Up next.** For each series the viewer finished an episode of in the last 60 days, Continue Watching adds the following regular episode: "Up next", "New episode" when it aired after that finish, or its countdown when it airs within 30 days. Upcoming cards follow the watchable ones, soonest first. Removing an up-next card hides it until the viewer finishes another episode; it never deletes progress.
+- **SHR-PROD-11 — Hide unreleased.** A device-local setting, off by default (TV Appearance, mobile Browsing), leaves unreleased titles out of Home and Discover rows. Search always finds them.
 
 ## 3. Shared vocabulary
 
@@ -240,7 +243,7 @@ Existing implementation is not evidence that a conflicting pattern is approved. 
 - **PLY-PIP-02 — Entry.** Enter PiP when leaving active playback only if continued watching matches user intent. Do not force PiP at an episode end or when it creates extra work to stop playback.
 - **PLY-PIP-03 — One player.** Selecting new content while PiP is active reuses the existing playback activity/session and returns it fullscreen rather than launching a competing player.
 - **PLY-PIP-04 — Smooth transition.** On Android 12+, use auto-enter for qualifying video playback and keep `sourceRectHint` synchronized with the visible video bounds. Disable seamless resizing for non-video content.
-- **PLY-TRL-01 — Mobile trailers.** A title page shows a labeled Trailer action when a provider names a trailer and Settings → Playback → Trailer button is on (device-local, on by default). It opens a full-screen dialog that plays the trailer with sound, keeps standard pause and scrub controls reachable without gestures, dismisses with Close or Back, stays inside safe-drawing insets, pauses when the app stops, and keeps failures local with a retry. Trailers never start on their own on mobile.
+- **PLY-TRL-01 — Mobile trailers.** A title page shows a labeled Trailer action when a provider names a trailer and Settings → Browsing → Trailer button is on (device-local, on by default). It opens a full-screen dialog that plays the trailer with sound, keeps standard pause and scrub controls reachable without gestures, dismisses with Close or Back, stays inside safe-drawing insets, pauses when the app stops, and keeps failures local with a retry. Trailers never start on their own on mobile.
 - **PLY-PIP-05 — Controls.** Maintain an active media session so play/pause/next/previous appear where applicable. Add custom actions only when essential and recognizable at PiP size.
 
 ## 16. TV baseline and mobile/TV boundary

@@ -1,6 +1,7 @@
 package com.lamphaus.app.ui
 
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.isUnreleased
 import com.lamphaus.core.model.ProviderCatalog
 import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderSubscription
@@ -29,6 +30,8 @@ internal class HomeCatalogLoader(
     private val currentYear: Int,
     maxConcurrency: Int = HOME_CATALOG_MAX_CONCURRENCY,
     private val logger: (String) -> Unit = {},
+    /** Leave titles that are not out yet out of every row (the viewer's setting). */
+    private val hideUnreleased: Boolean = false,
 ) {
     private sealed interface Target {
         val section: CatalogSection
@@ -273,7 +276,8 @@ internal class HomeCatalogLoader(
                     firstCatalogPage(
                         target.section,
                         result.value,
-                        filterForChildProfile(result.value, childFilterEnabled),
+                        filterForChildProfile(result.value, childFilterEnabled)
+                            .let { items -> if (hideUnreleased) items.filterNot { it.isUnreleased() } else items },
                     ).copy(initialLoading = false)
                 }
 

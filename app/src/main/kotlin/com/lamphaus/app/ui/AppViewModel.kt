@@ -50,6 +50,7 @@ import com.lamphaus.core.model.nextEpisodeAfter
 import com.lamphaus.core.model.enrichmentMediaKey
 import com.lamphaus.core.model.playbackQueueFrom
 import com.lamphaus.core.model.closenessLabel
+import com.lamphaus.core.model.isUnreleased
 import com.lamphaus.core.model.Profile
 import com.lamphaus.core.model.PairingSession
 import java.util.UUID
@@ -168,6 +169,12 @@ class AppViewModel(
             size > 24
     }
 
+    /** Episodes looked up for Continue Watching "up next", with when they were fetched. Main-confined. */
+    private val episodesByKey = object : LinkedHashMap<String, Pair<Long, List<Episode>>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<Episode>>>): Boolean =
+            size > 50
+    }
+
     /** Trailer ids found in provider metadata for catalog items that had none. Main-confined. */
     private val trailerIdsByKey = object : LinkedHashMap<String, List<String>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>): Boolean =
@@ -175,6 +182,7 @@ class AppViewModel(
     }
 
     init {
+        observeUpNext()
         viewModelScope.launch {
             container.streamBadgeRepository.rules.collect { rules ->
                 mutableState.update { it.copy(streamBadges = rules) }
@@ -199,6 +207,8 @@ class AppViewModel(
                     backgroundArtwork = settings.backgroundArtwork,
                     tvHomeLayout = settings.tvHomeLayout,
                     trailers = settings.trailers,
+                    hideUnreleased = settings.hideUnreleased,
+                    upNextDismissed = settings.upNextDismissed,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
                     playbackSettings = settings.playback,
@@ -258,6 +268,8 @@ class AppViewModel(
                         ),
                         tvHomeLayout = TvHomeLayout.fromName(snapshot.tvHomeLayout),
                         trailers = snapshot.trailers,
+                        hideUnreleased = snapshot.hideUnreleased,
+                        upNextDismissed = snapshot.upNextDismissed,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
                         playbackSettings = snapshot.playbackSettings,
@@ -607,7 +619,8 @@ class AppViewModel(
             subscription.id,
             query,
         )) {
-            is ProviderResult.Success -> firstCatalogPage(section, result.value, filterForProfile(result.value))
+            // Search always finds unreleased titles; only browsing rows hide them.
+            is ProviderResult.Success -> firstCatalogPage(section, result.value, filterForProfile(result.value, hideUnreleased = false))
             is ProviderResult.Failure -> section.copy(errorMessage = result.safeMessage, hasMore = false)
         }
     }
@@ -654,7 +667,11 @@ class AppViewModel(
                 is ProviderResult.Success -> mergeCatalogPage(
                     latest,
                     result.value,
-                    filterForProfile(result.value),
+                    // Search pages keep unreleased titles, like the first page.
+                    filterForProfile(
+                        result.value,
+                        hideUnreleased = state.value.hideUnreleased && !sectionId.startsWith("search:"),
+                    ),
                 )
                 is ProviderResult.Failure -> mergeCatalogPage(latest, null, errorMessage = result.safeMessage)
             }
@@ -945,6 +962,14 @@ class AppViewModel(
             }
             ContentMenuAction.RemoveFromContinueWatching -> {
                 val rows = continueWatchingRemovalRows(state.value.progress, target.media.stableKey)
+                val upNext = state.value.upNext.firstOrNull { it.media.stableKey == target.media.stableKey }
+                if (rows.isEmpty() && upNext != null) {
+                    // An up-next card has no progress to delete: hide it until the next finish.
+                    container.preferences.dismissUpNext(upNext.dismissalKey)
+                    dismissContentMenu()
+                    showMessage("Removed from Continue Watching.")
+                    return@launch
+                }
                 val videoIds = rows.map(WatchProgress::videoId)
                 container.libraryRepository.removeProgress(profileId, videoIds)
                 dismissContentMenu()
@@ -1917,6 +1942,11 @@ class AppViewModel(
         container.preferences.setTrailers(enabled)
     }
 
+    /** Home and Discover reload through the catalog refresh fingerprint. */
+    fun setHideUnreleased(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setHideUnreleased(enabled)
+    }
+
     /**
      * A playable trailer for [media], at most [maxHeight] tall. Trailer ids
      * come from the catalog item, then the loaded detail, then the first
@@ -1936,6 +1966,17 @@ class AppViewModel(
         detail?.preview?.trailerYtIds?.takeIf { it.isNotEmpty() }?.let { return it }
         if (media.id.startsWith("fixture:")) return emptyList()
         trailerIdsByKey[media.stableKey]?.let { return it }
+        val ids = providerMeta(media) { it.preview.trailerYtIds.isNotEmpty() }?.preview?.trailerYtIds.orEmpty()
+        if (ids.isNotEmpty()) trailerIdsByKey[media.stableKey] = ids
+        return ids
+    }
+
+    /**
+     * The first provider metadata for [media] that satisfies [wanted], asking
+     * the title's own add-ons first. Responses come from the provider cache
+     * when fresh, so repeated lookups stay cheap.
+     */
+    private suspend fun providerMeta(media: MediaPreview, wanted: (MediaDetail) -> Boolean): MediaDetail? {
         val providers = state.value.providers
             .filter(ProviderSubscription::enabled)
             .sortedWith(
@@ -1950,14 +1991,54 @@ class AppViewModel(
             ) {
                 continue
             }
-            val meta = container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
-            val ids = (meta as? ProviderResult.Success<MediaDetail>)?.value?.preview?.trailerYtIds.orEmpty()
-            if (ids.isNotEmpty()) {
-                trailerIdsByKey[media.stableKey] = ids
-                return ids
-            }
+            val meta = (container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
+                as? ProviderResult.Success<MediaDetail>)?.value
+            if (meta != null && wanted(meta)) return meta
         }
-        return emptyList()
+        return null
+    }
+
+    /** A series' episodes: the loaded detail, else provider metadata (kept for a few hours). */
+    private suspend fun seriesEpisodes(media: MediaPreview, nowEpochMillis: Long): List<Episode> {
+        (state.value.selectedDetail?.takeIf { it.preview.stableKey == media.stableKey }
+            ?: recentlyLoadedDetails[media.stableKey])
+            ?.episodes?.takeIf { it.isNotEmpty() }?.let { return it }
+        episodesByKey[media.stableKey]
+            ?.takeIf { (fetchedAt) -> nowEpochMillis - fetchedAt < SERIES_EPISODES_TTL_MILLIS }
+            ?.let { (_, episodes) -> return episodes }
+        val episodes = providerMeta(media) { it.episodes.isNotEmpty() }?.episodes.orEmpty()
+        episodesByKey[media.stableKey] = nowEpochMillis to episodes
+        return episodes
+    }
+
+    /**
+     * Continue Watching "up next" (Nuvio): for each series the viewer recently
+     * finished an episode of, the episode after it, counting down when it has
+     * not aired yet. Rebuilt whenever progress or dismissals change.
+     */
+    private fun observeUpNext() = viewModelScope.launch {
+        // Home's first rows take the add-on connections first (QA-08).
+        state.first { !it.initialContentLoading }
+        state.map { it.progress to it.upNextDismissed }
+            .distinctUntilChanged()
+            .collectLatest { (progress, dismissed) ->
+                // Progress lands in bursts (sync, playback pulses); settle first.
+                delay(UP_NEXT_SETTLE_MILLIS)
+                val now = System.currentTimeMillis()
+                val completed = progress.filter(WatchProgress::completed).mapTo(HashSet()) { it.videoId }
+                val items = coroutineScope {
+                    upNextCandidates(progress, dismissed, now).map { row ->
+                        async {
+                            val media = row.preview ?: return@async null
+                            runCatching { seriesEpisodes(media, now) }
+                                .onFailure { if (it is CancellationException) throw it }
+                                .getOrNull()
+                                ?.let { episodes -> upNextAfter(media, row, episodes, completed, now) }
+                        }
+                    }.awaitAll().filterNotNull()
+                }
+                mutableState.update { it.copy(upNext = items) }
+            }
     }
 
     fun setKenBurnsEnabled(enabled: Boolean) = viewModelScope.launch {
@@ -2133,6 +2214,7 @@ class AppViewModel(
                     )
                 }
                 .sortedWith(compareBy<CatalogProviderFingerprint> { it.sortOrder }.thenBy { it.id }),
+            hideUnreleased = current.hideUnreleased,
         )
         if (!catalogRefreshGate.shouldStart(fingerprint, force)) {
             homeLog("refresh skipped: fingerprint unchanged")
@@ -2188,6 +2270,7 @@ class AppViewModel(
                 providers = current.providers,
                 currentYear = Calendar.getInstance().get(Calendar.YEAR),
                 logger = ::homeLog,
+                hideUnreleased = fingerprint.hideUnreleased,
             )
             homeCatalogLoader = loader
             mutableState.update {
@@ -2475,7 +2558,10 @@ class AppViewModel(
         childFilterEnabled: Boolean = state.value.activeProfile?.let { profile ->
             profile.kind == ProfileKind.CHILD && profile.hideUnrated
         } == true,
-    ): List<MediaPreview> = if (childFilterEnabled) items.filter { !it.contentRating.isNullOrBlank() } else items
+        hideUnreleased: Boolean = state.value.hideUnreleased,
+    ): List<MediaPreview> = items
+        .let { if (childFilterEnabled) it.filter { item -> !item.contentRating.isNullOrBlank() } else it }
+        .let { if (hideUnreleased) it.filterNot { item -> item.isUnreleased() } else it }
 
 
     private suspend fun saveProvider(
@@ -2785,6 +2871,8 @@ class AppViewModel(
         val backgroundArtwork: Boolean?,
         val tvHomeLayout: String?,
         val trailers: Boolean?,
+        val hideUnreleased: Boolean,
+        val upNextDismissed: Set<String>,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
         val playbackSettings: PlaybackSettings,
@@ -2793,6 +2881,8 @@ class AppViewModel(
 
     companion object {
         private const val MAX_DISCOVERED_PROVIDERS = 50
+        private const val UP_NEXT_SETTLE_MILLIS = 800L
+        private const val SERIES_EPISODES_TTL_MILLIS = 6L * 60 * 60 * 1000
         private const val PAIRING_POLL_MILLIS = 3_000L
         private const val PAIRING_DEVICE_LABEL = "Living room TV"
         private const val DEVELOPMENT_SOURCE_ID = "lamphaus.dev.source"
@@ -2885,6 +2975,7 @@ internal fun MediaPreview.merge(other: MediaPreview): MediaPreview = copy(
     providerIds = providerIds + other.providerIds,
     posterShape = posterShape ?: other.posterShape,
     trailerYtIds = (trailerYtIds + other.trailerYtIds).distinct(),
+    releasedAtEpochMillis = releasedAtEpochMillis ?: other.releasedAtEpochMillis,
 )
 
 private fun sourceIdentity(source: StreamCandidate): String = listOfNotNull(

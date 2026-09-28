@@ -1,6 +1,5 @@
 package com.lamphaus.app.mobile
 
-import android.text.format.DateUtils
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -78,7 +77,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -94,6 +92,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.text.HtmlCompat
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.releaseCountdownText
+import com.lamphaus.app.ui.ReleaseKind
+import com.lamphaus.app.ui.episodeAirDateText
 import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.ContentMenuTarget
 import com.lamphaus.app.ui.LocalArtworkResolver
@@ -482,7 +483,8 @@ private fun DetailHeadline(
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             val parts = buildList {
-                presentation.year?.let { add(it.toString()) }
+                (releaseCountdownText(presentation.upcomingReleaseMillis, ReleaseKind.TITLE) ?: presentation.year?.toString())
+                    ?.let(::add)
                 presentation.runtimeMinutes?.let { add(runtimeText(it)) }
             }
             parts.forEachIndexed { index, part ->
@@ -733,10 +735,8 @@ internal fun EpisodeCard(
     val artworkHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched)
     val synopsisHidden = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched)
     val haptics = LocalHapticFeedback.current
-    val context = LocalContext.current
-    val airDate = episode.releasedAtEpochMillis?.let {
-        DateUtils.formatDateTime(context, it, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_YEAR)
-    }
+    // Unaired: "Airs in 3 days"; aired: the date (Nuvio's air-date badge).
+    val airDate = episodeAirDateText(episode.releasedAtEpochMillis)
     val watchedDescription = if (watched) stringResource(R.string.watched) else ""
     Column(
         Modifier

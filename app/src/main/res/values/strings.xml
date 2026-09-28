@@ -129,7 +129,26 @@
     <string name="next_episode_finding_source">Finding source…</string>
     <string name="next_episode_skip_credits">Skip credits</string>
     <string name="next_episode_unaired">Not yet released</string>
-    <string name="next_episode_unaired_with_date">Not yet released · %1$s</string>
+    <string name="airs_today">Airs today</string>
+    <string name="airs_tomorrow">Airs tomorrow</string>
+    <plurals name="airs_in_days">
+        <item quantity="one">Airs in %d day</item>
+        <item quantity="other">Airs in %d days</item>
+    </plurals>
+    <string name="airs_on_date">Airs %1$s</string>
+    <string name="releases_today">Releases today</string>
+    <string name="releases_tomorrow">Releases tomorrow</string>
+    <plurals name="releases_in_days">
+        <item quantity="one">Releases in %d day</item>
+        <item quantity="other">Releases in %d days</item>
+    </plurals>
+    <string name="releases_on_date">Releases %1$s</string>
+    <string name="new_episode">New episode</string>
+    <string name="up_next_card_description">%1$s, %2$s, %3$s</string>
+    <string name="hide_unreleased">Hide unreleased titles</string>
+    <string name="hide_unreleased_description">Leaves movies and series that are not out yet out of Home and Discover rows. Search still finds them.</string>
+    <string name="browsing">Browsing</string>
+    <string name="home_and_discover">Home and Discover</string>
     <string name="next_episode_threshold_description">For titles without credits timestamps, the card appears at this point.</string>
     <string name="next_episode_threshold_percentage">Percentage</string>
     <string name="next_episode_threshold_time_remaining">Time remaining</string>

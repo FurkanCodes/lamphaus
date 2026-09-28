@@ -198,6 +198,25 @@ class HttpProviderClientTest {
     }
 
     @Test
+    fun `catalog previews carry full release dates including date only values`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"metas":[{"id":"tt1","type":"movie","name":"Soon","released":"2026-10-12T00:00:00.000Z"},{"id":"tt2","type":"movie","name":"Later","released":"2027-01-05"},{"id":"tt3","type":"movie","name":"Unknown"}]}""",
+            ),
+        )
+
+        val items = (client.catalog(
+            server.url("/manifest.json").toString(),
+            "fixture.provider",
+            CatalogQuery("movie", "featured"),
+        ) as ProviderResult.Success).value
+
+        assertEquals(java.time.Instant.parse("2026-10-12T00:00:00Z").toEpochMilli(), items[0].releasedAtEpochMillis)
+        assertEquals(java.time.Instant.parse("2027-01-05T00:00:00Z").toEpochMilli(), items[1].releasedAtEpochMillis)
+        assertEquals(null, items[2].releasedAtEpochMillis)
+    }
+
+    @Test
     fun `preview extension aliases fill missing artwork`() = runTest {
         server.enqueue(
             jsonResponse(
