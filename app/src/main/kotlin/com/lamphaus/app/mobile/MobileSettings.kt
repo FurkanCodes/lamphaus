@@ -77,6 +77,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
@@ -91,6 +92,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.BEDTIME_OPTIONS
+import com.lamphaus.app.ui.bedtimeLabel
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.core.model.PairedDevice
@@ -566,6 +569,33 @@ private fun thresholdValueLabel(value: Float): String =
 /** What browsing shows: trailers and recaps on title pages, unreleased titles in rows, source details. */
 @Composable
 private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
+    val context = LocalContext.current
+    var bedtimeDialog by remember { mutableStateOf(false) }
+    if (bedtimeDialog) {
+        AlertDialog(
+            onDismissRequest = { bedtimeDialog = false },
+            title = { Text(stringResource(R.string.bedtime_setting)) },
+            text = {
+                Column {
+                    BEDTIME_OPTIONS.forEach { minutes ->
+                        ListItem(
+                            headlineContent = { Text(bedtimeLabel(context, minutes)) },
+                            trailingContent = { if (minutes == state.bedtimeMinutes) Text("✓") },
+                            modifier = Modifier.clickable(role = Role.RadioButton) {
+                                viewModel.setBedtimeMinutes(minutes)
+                                bedtimeDialog = false
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { bedtimeDialog = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
     SettingsPage(title = stringResource(R.string.browsing)) {
         item {
             SettingsCard(stringResource(R.string.trailers)) {
@@ -586,6 +616,20 @@ private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
                     checked = state.hideUnreleased,
                     onCheckedChange = viewModel::setHideUnreleased,
                 )
+                PlaybackSettingRow(
+                    title = stringResource(R.string.fits_tonight_setting),
+                    description = stringResource(R.string.fits_tonight_setting_description),
+                    checked = state.fitsTonight,
+                    onCheckedChange = viewModel::setFitsTonight,
+                )
+                if (state.fitsTonight) {
+                    PlaybackEngineChoiceRow(
+                        title = stringResource(R.string.bedtime_setting),
+                        description = stringResource(R.string.bedtime_setting_description),
+                        value = bedtimeLabel(context, state.bedtimeMinutes),
+                        onClick = { bedtimeDialog = true },
+                    )
+                }
             }
         }
         item {

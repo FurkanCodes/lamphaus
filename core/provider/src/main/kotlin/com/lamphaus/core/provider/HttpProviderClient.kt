@@ -587,6 +587,7 @@ class HttpProviderClient(
             posterShape = string("posterShape") ?: catalogPosterShape,
             trailerYtIds = trailerYtIds(),
             releasedAtEpochMillis = string("released")?.toEpochMillisOrNull(),
+            runtimeMinutes = string("runtime")?.toRuntimeMinutes()?.takeIf { it > 0 },
         )
     }
 

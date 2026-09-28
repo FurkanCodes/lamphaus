@@ -351,6 +351,10 @@ data class AppUiState(
     val sourceFit: Boolean = true,
     /** Device-local: series details recap the last finished episode (SHR-PROD-13). */
     val seriesRecap: Boolean = true,
+    /** Device-local: Home's "Fits tonight" row and season time left (SHR-PROD-14). */
+    val fitsTonight: Boolean = true,
+    /** Device-local "Ends before" time, in minutes after midnight. */
+    val bedtimeMinutes: Int = DEFAULT_BEDTIME_MINUTES,
     /** Series whose next episode follows one the viewer finished (Continue Watching "up next"). */
     val upNext: List<UpNextItem> = emptyList(),
     val upNextDismissed: Set<String> = emptySet(),
@@ -399,6 +403,8 @@ data class AppUiState(
         hideUnreleased = hideUnreleased,
         sourceFit = sourceFit,
         seriesRecap = seriesRecap,
+        fitsTonight = fitsTonight,
+        bedtimeMinutes = bedtimeMinutes,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,

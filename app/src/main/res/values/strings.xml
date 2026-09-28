@@ -65,6 +65,16 @@
     <string name="source_fit_setting">How sources play</string>
     <string name="source_fit_setting_description">Source cards say whether a source plays natively on this device or what changes, such as Dolby Vision playing as HDR10</string>
     <string name="title_pages">Title pages</string>
+    <string name="fits_tonight_title">Ends before %1$s</string>
+    <string name="fits_tonight_subtitle">Movies you can finish tonight</string>
+    <string name="fits_tonight_setting">Fits tonight</string>
+    <string name="fits_tonight_setting_description">In the evening, Home shows movies that end before your chosen time, and series show the time left in the season</string>
+    <string name="bedtime_setting">Ends before</string>
+    <string name="bedtime_setting_description">The time Fits tonight plans around</string>
+    <plurals name="season_time_left">
+        <item quantity="one">%1$d episode left · about %2$s</item>
+        <item quantity="other">%1$d episodes left · about %2$s</item>
+    </plurals>
     <string name="recap_episode_format">%1$s  %2$s</string>
     <string name="season_format">Season %1$d</string>
     <string name="episode_number_format">Episode %1$d</string>

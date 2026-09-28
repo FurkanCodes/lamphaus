@@ -99,6 +99,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 import coil3.compose.AsyncImage
+import com.lamphaus.app.ui.rememberFitsTonightSection
 import com.lamphaus.app.ui.upNextEpisodeLabel
 import com.lamphaus.app.ui.upNextBadgeText
 import com.lamphaus.app.ui.withUpNext
@@ -182,6 +183,14 @@ internal fun MobileHomeScreen(
     val completedVideoIds = remember(state.progress) {
         state.progress.filter { it.completed }.mapTo(mutableSetOf()) { it.videoId }
     }
+    // SHR-PROD-14: an evening row of movies that end before the chosen time.
+    val fitsTonight = rememberFitsTonightSection(
+        sections = state.sections,
+        completedVideoIds = completedVideoIds,
+        enabled = state.fitsTonight,
+        bedtimeMinutes = state.bedtimeMinutes,
+    )
+    val homeRows = remember(state.sections, fitsTonight) { listOfNotNull(fitsTonight) + state.sections }
     val listState = rememberLazyListState()
     LaunchedEffect(
         listState,
@@ -263,7 +272,7 @@ internal fun MobileHomeScreen(
             ) {
                 item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
             }
-            items(state.sections, key = CatalogSection::id) { section ->
+            items(homeRows, key = CatalogSection::id) { section ->
                 CatalogRow(
                     section,
                     onMedia,
