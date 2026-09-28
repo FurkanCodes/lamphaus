@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -114,20 +115,64 @@ private const val SpotlightDimmedAlpha = 0.5f
 
 /**
  * Scrolls so the focused child's leading edge lands [leadingEdgePx] from the
- * container's start. The lazy list clamps the distance at either end.
+ * container's start once [settling] width before it has gone. The lazy list
+ * clamps the distance at either end.
  */
 @OptIn(ExperimentalFoundationApi::class)
-internal class PinnedBringIntoViewSpec(private val leadingEdgePx: Float) : BringIntoViewSpec {
+internal class PinnedBringIntoViewSpec(
+    private val leadingEdgePx: Float,
+    private val settling: () -> Float = { 0f },
+) : BringIntoViewSpec {
     override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float =
-        offset - leadingEdgePx
+        offset - settling() - leadingEdgePx
+}
+
+/** A Spotlight card's laid-out width and the width it is animating to. */
+internal class SpotlightCardWidth {
+    var focused = false
+    var measuredPx = 0f
+    var posterPx = 0f
+    var expandedPx = 0f
+    val settledPx: Float get() = if (focused) expandedPx else posterPx
+}
+
+/**
+ * Tracks card widths so a row can pin the focused card where it will settle.
+ * Moving right, the card losing focus sits before the new one and narrows
+ * while the row scrolls; aiming at the settled position keeps the scroll
+ * target fixed, so the glide never overshoots and swings back (TV-MOT-01).
+ */
+internal class SpotlightRowWidths {
+    private val cards = HashMap<Int, SpotlightCardWidth>()
+
+    fun track(index: Int, card: SpotlightCardWidth) {
+        cards[index] = card
+    }
+
+    fun untrack(index: Int, card: SpotlightCardWidth) {
+        cards.remove(index, card)
+    }
+
+    /** Width the cards before the focused card have still to gain (negative) or give back. */
+    fun pendingBeforeFocused(): Float {
+        val focused = cards.entries.firstOrNull { it.value.focused }?.key ?: return 0f
+        var pending = 0f
+        for ((index, card) in cards) {
+            if (index < focused) pending += card.measuredPx - card.settledPx
+        }
+        return pending
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun rememberPinnedBringIntoViewSpec(leadingEdge: Dp): BringIntoViewSpec {
+private fun rememberPinnedBringIntoViewSpec(
+    leadingEdge: Dp,
+    settling: () -> Float = { 0f },
+): BringIntoViewSpec {
     val density = LocalDensity.current
-    return remember(density, leadingEdge) {
-        PinnedBringIntoViewSpec(with(density) { leadingEdge.toPx() })
+    return remember(density, leadingEdge, settling) {
+        PinnedBringIntoViewSpec(with(density) { leadingEdge.toPx() }, settling)
     }
 }
 
@@ -160,11 +205,14 @@ internal fun SpotlightColumnScrolling(enabled: Boolean, content: @Composable () 
 /** Pins the focused card at the row's start padding. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SpotlightRowScrolling(content: @Composable () -> Unit) {
+private fun SpotlightRowScrolling(content: @Composable (SpotlightRowWidths) -> Unit) {
+    val widths = remember { SpotlightRowWidths() }
+    val settling = remember(widths) { widths::pendingBeforeFocused }
     CompositionLocalProvider(
-        LocalBringIntoViewSpec provides rememberPinnedBringIntoViewSpec(TvLayoutTokens.screenHorizontalPadding),
-        content = content,
-    )
+        LocalBringIntoViewSpec provides rememberPinnedBringIntoViewSpec(TvLayoutTokens.screenHorizontalPadding, settling),
+    ) {
+        content(widths)
+    }
 }
 
 /** The meta line under the focused row: genres, year, type, content rating, rating. */
@@ -219,7 +267,7 @@ internal fun TvSpotlightRow(
         } else if (section.items.isNotEmpty() || section.hasMore || section.loadMoreError != null) {
             val showAction = section.loadMoreError != null || section.hasMore
             val trailing = rememberTrailingActionFocus(showAction, section.items.size)
-            SpotlightRowScrolling {
+            SpotlightRowScrolling { widths ->
                 LazyRow(
                     modifier = Modifier.tvRowFocus(row),
                     horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
@@ -228,6 +276,8 @@ internal fun TvSpotlightRow(
                     itemsIndexed(section.items, key = { _, media -> media.stableKey }) { index, media ->
                         TvSpotlightCard(
                             media = media,
+                            index = index,
+                            rowWidths = widths,
                             onClick = { onMedia(media) },
                             onFocused = {
                                 focusedMedia = media
@@ -480,8 +530,17 @@ internal fun TvSpotlightCard(
     onClick: () -> Unit,
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
+    index: Int = 0,
+    rowWidths: SpotlightRowWidths? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val width = remember { SpotlightCardWidth() }
+    if (rowWidths != null) {
+        DisposableEffect(rowWidths, index, width) {
+            rowWidths.track(index, width)
+            onDispose { rowWidths.untrack(index, width) }
+        }
+    }
     val scope = rememberCoroutineScope()
     val cardFocus = remember { FocusRequester() }
     val menuEnvironment = LocalTvContentMenuEnvironment.current
@@ -521,17 +580,17 @@ internal fun TvSpotlightCard(
     Box(
         modifier = modifier
             .layout { measurable, _ ->
-                val width = lerp(
-                    TvLayoutTokens.posterWidth.toPx(),
-                    TvLayoutTokens.spotlightExpandedWidth.toPx(),
-                    expansion,
-                ).roundToInt()
+                width.posterPx = TvLayoutTokens.posterWidth.toPx()
+                width.expandedPx = TvLayoutTokens.spotlightExpandedWidth.toPx()
+                val widthPx = lerp(width.posterPx, width.expandedPx, expansion).roundToInt()
+                width.measuredPx = widthPx.toFloat()
                 val height = TvLayoutTokens.posterHeight.roundToPx()
-                val placeable = measurable.measure(Constraints.fixed(width, height))
-                layout(width, height) { placeable.place(0, 0) }
+                val placeable = measurable.measure(Constraints.fixed(widthPx, height))
+                layout(widthPx, height) { placeable.place(0, 0) }
             }
             .onFocusChanged {
                 focused = it.isFocused
+                width.focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
             .tvSelectHoldMenu(holdTracker)
