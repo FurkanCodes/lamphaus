@@ -563,7 +563,7 @@ private fun NextEpisodeThresholdControls(
 private fun thresholdValueLabel(value: Float): String =
     java.lang.String.format(Locale.getDefault(), if (value % 1f == 0f) "%.0f" else "%.1f", value)
 
-/** What browsing shows: trailers on title pages and unreleased titles in rows. */
+/** What browsing shows: trailers and recaps on title pages, unreleased titles in rows, source details. */
 @Composable
 private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
     SettingsPage(title = stringResource(R.string.browsing)) {
@@ -585,6 +585,26 @@ private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
                     description = stringResource(R.string.hide_unreleased_description),
                     checked = state.hideUnreleased,
                     onCheckedChange = viewModel::setHideUnreleased,
+                )
+            }
+        }
+        item {
+            SettingsCard(stringResource(R.string.title_pages)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.series_recap_setting),
+                    description = stringResource(R.string.series_recap_setting_description),
+                    checked = state.seriesRecap,
+                    onCheckedChange = viewModel::setSeriesRecap,
+                )
+            }
+        }
+        item {
+            SettingsCard(stringResource(R.string.player_sources)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.source_fit_setting),
+                    description = stringResource(R.string.source_fit_setting_description),
+                    checked = state.sourceFit,
+                    onCheckedChange = viewModel::setSourceFit,
                 )
             }
         }

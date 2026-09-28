@@ -208,6 +208,8 @@ class AppViewModel(
                     tvHomeLayout = settings.tvHomeLayout,
                     trailers = settings.trailers,
                     hideUnreleased = settings.hideUnreleased,
+                    sourceFit = settings.sourceFit,
+                    seriesRecap = settings.seriesRecap,
                     upNextDismissed = settings.upNextDismissed,
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
@@ -269,6 +271,8 @@ class AppViewModel(
                         tvHomeLayout = TvHomeLayout.fromName(snapshot.tvHomeLayout),
                         trailers = snapshot.trailers,
                         hideUnreleased = snapshot.hideUnreleased,
+                        sourceFit = snapshot.sourceFit,
+                        seriesRecap = snapshot.seriesRecap,
                         upNextDismissed = snapshot.upNextDismissed,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
@@ -1566,6 +1570,7 @@ class AppViewModel(
 
     /** The route can change between visits (a receiver switched on), so each list re-reads it. */
     private fun refreshPlaybackCapabilities() {
+        if (!state.value.sourceFit) return
         viewModelScope.launch {
             val capabilities = container.playbackCapabilityProbe.capabilities()
             mutableState.update { it.copy(playbackCapabilities = capabilities) }
@@ -1954,6 +1959,14 @@ class AppViewModel(
     /** Home and Discover reload through the catalog refresh fingerprint. */
     fun setHideUnreleased(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setHideUnreleased(enabled)
+    }
+
+    fun setSourceFit(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setSourceFit(enabled)
+    }
+
+    fun setSeriesRecap(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setSeriesRecap(enabled)
     }
 
     /**
@@ -2881,6 +2894,8 @@ class AppViewModel(
         val tvHomeLayout: String?,
         val trailers: Boolean?,
         val hideUnreleased: Boolean,
+        val sourceFit: Boolean,
+        val seriesRecap: Boolean,
         val upNextDismissed: Set<String>,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,

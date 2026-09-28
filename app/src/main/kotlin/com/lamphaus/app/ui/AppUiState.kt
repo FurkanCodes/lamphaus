@@ -347,6 +347,10 @@ data class AppUiState(
     val trailers: Boolean? = null,
     /** Device-local: not-yet-released titles are left out of Home and Discover rows. */
     val hideUnreleased: Boolean = false,
+    /** Device-local: source cards say how each source will play here (SHR-PROD-12). */
+    val sourceFit: Boolean = true,
+    /** Device-local: series details recap the last finished episode (SHR-PROD-13). */
+    val seriesRecap: Boolean = true,
     /** Series whose next episode follows one the viewer finished (Continue Watching "up next"). */
     val upNext: List<UpNextItem> = emptyList(),
     val upNextDismissed: Set<String> = emptySet(),
@@ -393,6 +397,8 @@ data class AppUiState(
         tvHomeLayout = tvHomeLayout,
         trailers = trailers,
         hideUnreleased = hideUnreleased,
+        sourceFit = sourceFit,
+        seriesRecap = seriesRecap,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,

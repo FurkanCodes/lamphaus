@@ -51,6 +51,10 @@ data class UserSettings(
     val trailers: Boolean? = null,
     /** Device-local: leave not-yet-released titles out of Home and Discover rows. */
     val hideUnreleased: Boolean = false,
+    /** Device-local: source cards say how each source will play here (SHR-PROD-12). */
+    val sourceFit: Boolean = true,
+    /** Device-local: a series' details page recaps the last finished episode (SHR-PROD-13). */
+    val seriesRecap: Boolean = true,
     /** Up-next cards the viewer removed, as `mediaKey|finishedVideoId`; a newer finish shows it again. */
     val upNextDismissed: Set<String> = emptySet(),
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
@@ -90,6 +94,8 @@ class UserPreferences(private val context: Context) {
             tvHomeLayout = values[TV_HOME_LAYOUT],
             trailers = values[TRAILERS],
             hideUnreleased = values[HIDE_UNRELEASED] ?: false,
+            sourceFit = values[SOURCE_FIT] ?: true,
+            seriesRecap = values[SERIES_RECAP] ?: true,
             upNextDismissed = values[UP_NEXT_DISMISSED].orEmpty(),
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
@@ -201,6 +207,20 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setSourceFit(enabled: Boolean) {
+        context.dataStore.edit {
+            it[SOURCE_FIT] = enabled
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setSeriesRecap(enabled: Boolean) {
+        context.dataStore.edit {
+            it[SERIES_RECAP] = enabled
+        }
+    }
+
 
     suspend fun setDiagnostics(consent: DiagnosticsConsent) {
         context.dataStore.edit {
@@ -294,6 +314,8 @@ class UserPreferences(private val context: Context) {
         val TV_HOME_LAYOUT = stringPreferencesKey("tv_home_layout")
         val TRAILERS = booleanPreferencesKey("trailers")
         val HIDE_UNRELEASED = booleanPreferencesKey("hide_unreleased")
+        val SOURCE_FIT = booleanPreferencesKey("source_fit")
+        val SERIES_RECAP = booleanPreferencesKey("series_recap")
         val UP_NEXT_DISMISSED = stringSetPreferencesKey("up_next_dismissed")
         val PERFORMANCE = booleanPreferencesKey("performance_metrics")
         val SPOILER_PROTECTION_ENABLED = booleanPreferencesKey("spoiler_protection_enabled")

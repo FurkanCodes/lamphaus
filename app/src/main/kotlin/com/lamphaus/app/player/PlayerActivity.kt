@@ -663,12 +663,16 @@ class PlayerActivity : ComponentActivity() {
         playerSourcesVideoId = current.videoId
         playerSourcesState.value = PlayerSourcesState(loading = true)
         playerSourcesJob = lifecycleScope.launch {
-            val capabilities = container.playbackCapabilityProbe.capabilities()
+            val capabilities = if (container.preferences.settings.first().sourceFit) {
+                container.playbackCapabilityProbe.capabilities()
+            } else {
+                null
+            }
             val deviceConfig = Media3EngineFactory.deviceConfig
             fun playable(streams: List<StreamCandidate>, providerName: String?) = streams.mapNotNull { source ->
                 val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal
                 resolution?.let {
-                    val fit = SourceFitPolicy.evaluate(source.streamTraits(), capabilities, deviceConfig)
+                    val fit = capabilities?.let { SourceFitPolicy.evaluate(source.streamTraits(), it, deviceConfig) }
                     PlayerSourceOption(source, it.url, providerName, fit)
                 }
             }
