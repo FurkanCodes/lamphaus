@@ -358,6 +358,8 @@ data class AppUiState(
     val playbackSettings: PlaybackSettings = PlaybackSettings(),
     val profilePlaybackPreferences: ProfilePlaybackPreferences = ProfilePlaybackPreferences(),
     val devicePlaybackConfig: DevicePlaybackConfig = DevicePlaybackConfig(),
+    /** What this device and route can play, read when sources open; null until then. */
+    val playbackCapabilities: com.lamphaus.core.model.PlaybackCapabilities? = null,
     val pairedDevices: List<PairedDevice> = emptyList(),
     val initialContentLoading: Boolean = true,
     val refreshing: Boolean = false,
@@ -395,6 +397,7 @@ data class AppUiState(
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,
         devicePlaybackConfig = devicePlaybackConfig,
+        playbackCapabilities = playbackCapabilities,
         initialContentLoading = false,
     )
 }

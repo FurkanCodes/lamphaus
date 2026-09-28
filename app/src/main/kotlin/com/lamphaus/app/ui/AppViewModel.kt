@@ -1564,9 +1564,18 @@ class AppViewModel(
         }
     }
 
+    /** The route can change between visits (a receiver switched on), so each list re-reads it. */
+    private fun refreshPlaybackCapabilities() {
+        viewModelScope.launch {
+            val capabilities = container.playbackCapabilityProbe.capabilities()
+            mutableState.update { it.copy(playbackCapabilities = capabilities) }
+        }
+    }
+
     /** Loads every compatible stream provider. This intentionally does not select or launch a source. */
     fun openSources(media: MediaPreview, episode: Episode? = null, startFromBeginning: Boolean = false) {
         sourceJob?.cancel()
+        refreshPlaybackCapabilities()
         sourceJob = viewModelScope.launch {
             // Stress titles go through the real source picker so long, slow
             // source lists can be measured; other fixtures auto-play.

@@ -338,6 +338,17 @@
     <string name="source_type_video">Video</string>
     <string name="source_type_archive">Archive</string>
     <string name="source_type_usenet">Usenet</string>
+    <string name="source_fit_native">Plays natively</string>
+    <string name="source_fit_software_video">Software decoding, may stutter</string>
+    <string name="source_fit_dolby_vision_as_hdr10">Dolby Vision plays as HDR10</string>
+    <string name="source_fit_hdr_as_sdr">HDR shown as SDR</string>
+    <string name="source_fit_audio_decoded">%1$s decoded on this device</string>
+    <string name="audio_format_truehd" translatable="false">Dolby TrueHD</string>
+    <string name="audio_format_dts_hd" translatable="false">DTS-HD</string>
+    <string name="audio_format_dts" translatable="false">DTS</string>
+    <string name="audio_format_eac3_joc" translatable="false">Dolby Atmos</string>
+    <string name="audio_format_eac3" translatable="false">Dolby Digital Plus</string>
+    <string name="audio_format_ac3" translatable="false">Dolby Digital</string>
     <string name="open_with_external_player">Open with another player</string>
 
     <!-- Device management (M6) -->

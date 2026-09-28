@@ -60,6 +60,8 @@ import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.hasAired
 import com.lamphaus.core.model.nextEpisodeAfter
+import com.lamphaus.core.model.SourceFitPolicy
+import com.lamphaus.core.model.streamTraits
 import com.lamphaus.core.player.LamphausPlaybackService
 import com.lamphaus.core.player.Media3EngineFactory
 import com.lamphaus.core.player.PlaybackHeaderRegistry
@@ -661,9 +663,14 @@ class PlayerActivity : ComponentActivity() {
         playerSourcesVideoId = current.videoId
         playerSourcesState.value = PlayerSourcesState(loading = true)
         playerSourcesJob = lifecycleScope.launch {
+            val capabilities = container.playbackCapabilityProbe.capabilities()
+            val deviceConfig = Media3EngineFactory.deviceConfig
             fun playable(streams: List<StreamCandidate>, providerName: String?) = streams.mapNotNull { source ->
                 val resolution = resolveSource(source, BuildConfig.DEBUG) as? SourceResolution.Internal
-                resolution?.let { PlayerSourceOption(source, it.url, providerName) }
+                resolution?.let {
+                    val fit = SourceFitPolicy.evaluate(source.streamTraits(), capabilities, deviceConfig)
+                    PlayerSourceOption(source, it.url, providerName, fit)
+                }
             }
             try {
                 val embedded = playable(current.episode?.streams.orEmpty(), null)

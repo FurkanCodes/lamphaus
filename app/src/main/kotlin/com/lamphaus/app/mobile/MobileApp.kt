@@ -92,6 +92,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lamphaus.app.ui.StreamBadgeMatcher
 import com.lamphaus.app.ui.LocalStreamBadges
+import com.lamphaus.app.ui.LocalSourceFit
+import com.lamphaus.app.ui.SourceFitAdvisor
 import com.lamphaus.app.ui.isResumable
 import com.lamphaus.app.ui.rememberReducedMotion
 import kotlinx.coroutines.delay
@@ -149,6 +151,9 @@ fun MobileApp(
         CompositionLocalProvider(
             LocalArtworkResolver provides artworkResolver,
             LocalStreamBadges provides streamBadges,
+            LocalSourceFit provides remember(state.playbackCapabilities, state.devicePlaybackConfig) {
+                SourceFitAdvisor(state.playbackCapabilities, state.devicePlaybackConfig)
+            },
         ) {
         val snackbar = remember { SnackbarHostState() }
         LaunchedEffect(state.message) {

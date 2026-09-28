@@ -159,7 +159,13 @@ data class PlaybackCapabilities(
     val supportsSeamlessFrameRateSwitch: Boolean = false,
     val displayModes: List<DisplayModeCandidate> = emptyList(),
     val maxPcmChannelCount: Int = 2,
+    /** Tallest frame each hardware video decoder handles; absent codecs have none. */
+    val hardwareVideoMaxHeight: Map<VideoCodecFamily, Int> = emptyMap(),
+    /** Dolby Vision profiles (5, 7, 8, …) a hardware decoder on this device accepts. */
+    val dolbyVisionDecoderProfiles: Set<Int> = emptySet(),
 )
+
+enum class VideoCodecFamily { AVC, HEVC, AV1, VP9 }
 
 /** Diagnostic-safe snapshot of the active playback session (plan §6). */
 data class PlaybackSessionState(

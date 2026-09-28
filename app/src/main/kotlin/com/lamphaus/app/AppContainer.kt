@@ -98,6 +98,7 @@ class AppContainer(context: Context) {
         (applicationContext.getSystemService(android.content.Context.ACTIVITY_SERVICE) as? android.app.ActivityManager)
             ?.isLowRamDevice == true
     val skipRepository = IntroDbSkipRepository()
+    val playbackCapabilityProbe = com.lamphaus.core.player.PlaybackCapabilityProbe(context)
 
     /** Playback queued by a closing player (next episode, another source); see [launchPendingPlayback]. */
     val pendingPlayback = kotlinx.coroutines.flow.MutableStateFlow<com.lamphaus.core.model.PlaybackRequest?>(null)
