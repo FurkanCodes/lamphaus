@@ -239,14 +239,21 @@ fun TvApp(
     onPlay: (PlaybackRequest) -> Unit,
     onExternalPlay: (String) -> Unit,
     updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
+    /** Opened from a Google TV home card (TV-HOME-01), which goes straight to the title. */
+    fromHomeScreen: Boolean = false,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // TV-HOME-01: a signed-out TV leaves nothing on the home screen.
+    if (state.account is AccountState.SignedOut) {
+        val context = LocalContext.current
+        LaunchedEffect(Unit) { WatchNextPublisher(context).clear() }
+    }
     var menuReturnFocus by remember { mutableStateOf<FocusRequester?>(null) }
     var restoreMenuFocus by remember { mutableStateOf(false) }
     var suppressMenuOpeningKey by remember { mutableStateOf(false) }
     // The boot sequence plays over a cold start only; remove-animations and a
     // global-search launch go straight to content (TV-MOT-01).
-    val boot = rememberTvBootState(enabled = !rememberReducedMotion() && initialSearch == null)
+    val boot = rememberTvBootState(enabled = !rememberReducedMotion() && initialSearch == null && !fromHomeScreen)
     val completedVideoIds = remember(state.progress) {
         state.progress.asSequence().filter { it.completed }.map { it.videoId }.toSet()
     }
@@ -821,6 +828,14 @@ private fun TvSignedIn(
     val openMedia: (MediaPreview) -> Unit = { media ->
         pendingMediaKey = media.stableKey
         viewModel.loadDetail(media)
+    }
+    // TV-HOME-01: keep Google TV's Continue watching in step with this
+    // profile's progress; settled for a moment so a burst of updates writes once.
+    val context = LocalContext.current
+    val watchNext = remember(context) { WatchNextPublisher(context) }
+    LaunchedEffect(watchNext, state.googleTvHome, state.progress, state.upNext) {
+        delay(WATCH_NEXT_SETTLE_MILLIS)
+        if (state.googleTvHome) watchNext.publish(watchNextEntries(state.progress, state.upNext)) else watchNext.clear()
     }
     // The hero and a row card can show the same title; Back returns to the
     // one the viewer actually opened (TV-NAV-07).
@@ -3774,6 +3789,14 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
         }
         item {
             TvSettingsToggleRow(
+                title = stringResource(R.string.google_tv_home_setting),
+                description = stringResource(R.string.google_tv_home_setting_description),
+                checked = state.googleTvHome,
+                onCheckedChange = viewModel::setGoogleTvHome,
+            )
+        }
+        item {
+            TvSettingsToggleRow(
                 title = stringResource(R.string.fits_tonight_setting),
                 description = stringResource(R.string.fits_tonight_setting_description),
                 checked = state.fitsTonight,
@@ -4507,3 +4530,5 @@ private fun TvSettingsRow(
         )
     }
 }
+
+private const val WATCH_NEXT_SETTLE_MILLIS = 2_000L
