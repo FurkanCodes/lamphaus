@@ -36,8 +36,8 @@ fun interface TrailerExtractor {
 /**
  * In-app YouTube stream extraction, ported from NuvioTV's
  * `InAppYouTubeExtractor`: ask the innertube player endpoint as the visionOS,
- * Android and iOS clients, then prefer separate adaptive video and audio,
- * falling back to the HLS manifest and finally a muxed progressive stream.
+ * Android and iOS clients, then prefer the HLS manifest, falling back to
+ * separate adaptive video and audio and finally a muxed progressive stream.
  *
  * Nothing here is logged: stream URLs are account-free but still
  * provider-sensitive (SHR-PROD-06).
@@ -100,8 +100,13 @@ class YouTubeTrailerExtractor(
         null
     }
 
-    private fun choose(players: List<YouTubePlayer>, maxHeight: Int): TrailerSource? {
+    internal fun choose(players: List<YouTubePlayer>, maxHeight: Int): TrailerSource? {
         val preferred = players.filter { it.client == PREFERRED_CLIENT }.ifEmpty { players }
+        // googlevideo now cuts off adaptive streams without a PO token after a
+        // few megabytes (403), which a one-byte probe cannot catch; the HLS
+        // manifest plays through, and the player caps its height.
+        (preferred + players).firstNotNullOfOrNull(YouTubePlayer::hlsManifestUrl)
+            ?.let { return TrailerSource(videoUrl = it) }
         val video = rankVideo(preferred.flatMap(YouTubePlayer::adaptive), maxHeight).firstOrNull()
             ?: rankVideo(players.flatMap(YouTubePlayer::adaptive), maxHeight).firstOrNull()
         val audio = rankAudio(preferred.flatMap(YouTubePlayer::adaptive)).firstOrNull()
@@ -111,8 +116,6 @@ class YouTubeTrailerExtractor(
                 return TrailerSource(videoUrl = videoUrl, audioUrl = reachableUrl(audio.url) ?: audio.url)
             }
         }
-        // Adaptive refused (403): the HLS manifest works for age-gated and kids titles.
-        players.firstNotNullOfOrNull(YouTubePlayer::hlsManifestUrl)?.let { return TrailerSource(videoUrl = it) }
         val progressive = rankVideo(players.flatMap(YouTubePlayer::progressive), maxHeight).firstOrNull()
             ?: return null
         return reachableUrl(progressive.url)?.let { TrailerSource(videoUrl = it) }
