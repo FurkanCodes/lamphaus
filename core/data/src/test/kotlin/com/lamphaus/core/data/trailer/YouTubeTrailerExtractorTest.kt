@@ -94,4 +94,18 @@ class YouTubeTrailerExtractorTest {
         )
         assertTrue(alternateCdnUrls("https://example.com/v?mn=a,b").isEmpty())
     }
+
+    @Test
+    fun `the HLS manifest wins over adaptive streams googlevideo cuts off`() {
+        val audio = YouTubeFormat(url = "https://a", mimeType = "audio/mp4; codecs=\"mp4a.40.2\"")
+        val players = listOf(
+            YouTubePlayer("android", "OK", hlsManifestUrl = null, progressive = emptyList(), adaptive = listOf(video(720), audio)),
+            YouTubePlayer("visionos", "OK", "https://manifest.googlevideo.com/api/manifest/hls_variant/x", emptyList(), listOf(video(720), audio)),
+        )
+
+        val source = YouTubeTrailerExtractor().choose(players, maxHeight = 720)
+
+        assertEquals("https://manifest.googlevideo.com/api/manifest/hls_variant/x", source?.videoUrl)
+        assertNull(source?.audioUrl)
+    }
 }
