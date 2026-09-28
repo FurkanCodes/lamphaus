@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.wordmarkStyle
 import kotlin.math.PI
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -262,17 +263,15 @@ private fun TvBootScene(t: Float, e: Float, breathing: Float, modifier: Modifier
                         drawContent()
                         drawSweep(t, size)
                     },
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                // The wordmark's tracking (0.26em of 36sp), as the gap between lit letters.
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
             ) {
                 letters.forEachIndexed { index, letter ->
                     val start = TvBootTokens.lettersStart + index * TvBootTokens.letterStagger
                     val p = progress(t, start, start + TvBootTokens.letterDuration, EmphasizedDecelerate)
                     Text(
                         text = letter.toString(),
-                        style = MaterialTheme.typography.displaySmall.copy(
-                            fontWeight = FontWeight.Medium,
-                            letterSpacing = 4.sp,
-                        ),
+                        style = wordmarkStyle(MaterialTheme.typography.displaySmall.fontSize, tracking = false),
                         color = Color(0xFFE3E2E6),
                         modifier = Modifier.graphicsLayer {
                             alpha = p

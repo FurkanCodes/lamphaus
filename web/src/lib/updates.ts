@@ -148,6 +148,8 @@ export function renderChangelog(source: string): { paragraphs: string[]; items: 
   const paragraphs: string[] = [];
   for (const line of source.split("\n")) {
     const trimmed = line.trim();
+    // The notes' own "# Lamphaus <version>" heading repeats the card title.
+    if (/^#{1,6}\s/.test(trimmed)) continue;
     if (/^[-*]\s+/.test(trimmed)) items.push(trimmed.replace(/^[-*]\s+/, ""));
     else if (trimmed) paragraphs.push(trimmed);
   }

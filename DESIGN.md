@@ -4,6 +4,14 @@
 
 Someone settles into a dim living room after sunset and needs to recognize content and focus from across the room without the interface becoming another light source. The TV system uses neutral Material surfaces, a pale inverse focus treatment, and media artwork for emotional color.
 
+## Brand
+
+- **Mark:** the house (`#4058D8`) with its lamp (`#090A0D`) and cone of light (`#68D4E8`), from `ic_lamphaus_foreground.xml`. Never redraw it.
+- **Wordmark:** "LAMPHAUS" in Jost Medium capitals tracked at 0.26em, beside the mark at about 1.6× cap height (`LamphausWordmark` in the app, `LamphausLockup` on the web). Jost is used only for the wordmark in the app; the web also uses it for display headings.
+- **Text:** Inter everywhere else, on TV, mobile, and web.
+- **Colour:** the web uses the TV dark scheme below (page `#121316`, surface `#1A1C1E`, ink `#E3E2E6`, primary `#A8C8FF`) and the TV focus pair (`#E3E2E6` / `#2F3033`) for primary buttons. House blue appears as one full-bleed band at most per page; lamp cyan marks light and positive device notes.
+- **Imagery:** marketing images and screenshots use invented titles and artwork only.
+
 ## Color source
 
 Mobile supports light and dark schemes plus Android dynamic color. TV uses the fixed semantic dark scheme extracted from the approved reference file.
