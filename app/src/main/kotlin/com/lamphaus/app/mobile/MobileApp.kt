@@ -91,6 +91,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lamphaus.app.ui.StreamBadgeMatcher
+import com.lamphaus.app.ui.LamphausWordmark
 import com.lamphaus.app.ui.LocalStreamBadges
 import com.lamphaus.app.ui.LocalSourceFit
 import com.lamphaus.app.ui.SourceFitAdvisor
@@ -294,9 +295,9 @@ internal fun LoadingScreen() {
                 contentDescription = null,
                 modifier = Modifier.size(56.dp),
             )
-            Text(
-                text = stringResource(R.string.app_name).uppercase(),
-                style = MaterialTheme.typography.titleLarge,
+            LamphausWordmark(
+                fontSize = MaterialTheme.typography.titleLarge.fontSize,
+                color = MaterialTheme.colorScheme.onBackground,
             )
             LinearProgressIndicator(
                 modifier = Modifier

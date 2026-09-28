@@ -95,6 +95,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.core.text.HtmlCompat
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.LamphausWordmark
 import androidx.compose.runtime.rememberCoroutineScope
 import com.lamphaus.app.ui.upNextEpisodeLabel
 import com.lamphaus.app.ui.upNextBadgeText
@@ -371,12 +372,8 @@ internal fun TvTopNavigation(
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
                 )
-                Text(
-                    text = stringResource(R.string.app_name).uppercase(),
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 1.6.sp,
-                    ),
+                LamphausWordmark(
+                    fontSize = MaterialTheme.typography.titleSmall.fontSize,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
             }

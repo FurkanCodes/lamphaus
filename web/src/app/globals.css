@@ -1,24 +1,25 @@
 @import "tailwindcss";
 
 /*
- * Lamphaus web tokens — canonical values ported from MobileTheme.kt
- * (dark scheme) and TvDesignTokens.kt; see plans/supabase-migration-plan.md §8.1.
- * Semantic names only: dark-first, light values reserved for later.
- * Anti-references honored: no glass, no gradients.
+ * Lamphaus brand tokens. One identity across the app and the web:
+ * surfaces, ink, and focus come from the TV scheme (DESIGN.md, TvDesignTokens.kt);
+ * house blue and lamp light come from the mark (ic_lamphaus_foreground.xml).
+ * Contrast on the page background: ink 14.4:1, muted 10.9:1, subtle 6.0:1;
+ * white on house blue 5.8:1.
  */
 @theme {
-  --color-bg: #090a0d;
-  --color-surface: #15171e;
-  --color-surface-raised: #1e2023;
+  --color-bg: #121316;
+  --color-surface: #1a1c1e;
+  --color-surface-raised: #242629;
   --color-surface-card: #292a2d;
   --color-surface-variant: #30323a;
 
-  --color-fg: #f2f3fa;
-  --color-fg-muted: #c6c8d2;
-  --color-fg-subtle: #90929d;
+  --color-fg: #e3e2e6;
+  --color-fg-muted: #c4c6cf;
+  --color-fg-subtle: #8f929c;
 
-  --color-primary: #afc2ff;
-  --color-on-primary: #10234f;
+  --color-primary: #a8c8ff;
+  --color-on-primary: #003062;
   --color-primary-container: #293f72;
   --color-on-primary-container: #dce2ff;
 
@@ -27,21 +28,48 @@
   --color-secondary-container: #004f5c;
   --color-on-secondary-container: #a8edfa;
 
-  --color-outline: #90929d;
+  /* The mark: house blue walls, lamp light. */
+  --color-house: #4058d8;
+  --color-on-house: #ffffff;
+  --color-on-house-muted: #dce2ff;
+  --color-lamp: #68d4e8;
+
+  /* TV focus: pale container, dark content (TV-FOC-02). */
+  --color-focus: #e3e2e6;
+  --color-on-focus: #2f3033;
+
+  --color-outline: #8f929c;
   --color-beam: #a8c8ff;
 
   --radius-card: 4px;
   --radius-hero: 12px;
 
-  --font-display: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
-  --font-body: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jost), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background-color: var(--color-bg);
   color: var(--color-fg);
   font-family: var(--font-body);
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
 }
 
 ::selection {
@@ -49,18 +77,26 @@ body {
   color: var(--color-on-primary);
 }
 
-/* Focus ring mirrors the TV focus outline (TvFocusTokens.beam). */
+/* Focus ring mirrors the TV focus outline. */
 :focus-visible {
-  outline: 2px solid var(--color-beam);
-  outline-offset: 2px;
+  outline: 3px solid var(--color-beam);
+  outline-offset: 3px;
 }
 
-/* One orchestrated entrance per page load; transform+opacity only.
-   Easing is ease-out-quint — objects decelerate, they don't bounce. */
+/* The wordmark: tracked capitals in the display face. */
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+
+/* Page entrance: one orchestrated rise, transform and opacity only.
+   Content is visible by default; the animation only decorates it. */
 @keyframes lamphaus-rise {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(14px);
   }
   to {
     opacity: 1;
@@ -69,20 +105,54 @@ body {
 }
 
 .rise {
-  animation: lamphaus-rise 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation: lamphaus-rise 520ms var(--ease-out-quint) backwards;
 }
 
-.rise-2 { animation-delay: 80ms; }
-.rise-3 { animation-delay: 160ms; }
-.rise-4 { animation-delay: 240ms; }
-.rise-5 { animation-delay: 320ms; }
+.rise-2 { animation-delay: 90ms; }
+.rise-3 { animation-delay: 180ms; }
+.rise-4 { animation-delay: 270ms; }
+.rise-5 { animation-delay: 360ms; }
+
+/*
+ * The lamp switches on, as it does when the TV app starts (TV-MOT-01):
+ * two short flickers, then the light settles and blooms.
+ */
+@keyframes lamp-on {
+  0% { opacity: 0; }
+  12% { opacity: 0.55; }
+  18% { opacity: 0.08; }
+  30% { opacity: 0.7; }
+  36% { opacity: 0.2; }
+  60% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+@keyframes lamp-bloom {
+  from { transform: scaleY(0.82); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.lamp-on {
+  animation: lamp-on 1400ms linear 350ms backwards;
+}
+
+.lamp-bloom {
+  transform-origin: top center;
+  animation: lamp-bloom 1100ms var(--ease-out-quint) 900ms backwards;
+}
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   .rise,
   .rise-2,
   .rise-3,
   .rise-4,
-  .rise-5 {
+  .rise-5,
+  .lamp-on,
+  .lamp-bloom {
     animation: none;
   }
 }
