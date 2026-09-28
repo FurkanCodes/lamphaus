@@ -66,6 +66,8 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.LocalStreamBadges
+import com.lamphaus.app.ui.LocalSourceFit
+import com.lamphaus.app.ui.sourceFitLabel
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.SourcePickerState
 import com.lamphaus.app.ui.StreamBadgeRow
@@ -332,6 +334,8 @@ private fun SourceCard(
     val presentation = remember(source, providerLabel) { source.sourcePresentation(providerLabel) }
     val badgeMatcher = LocalStreamBadges.current
     val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
+    val fitAdvisor = LocalSourceFit.current
+    val fit = remember(source, fitAdvisor) { fitAdvisor.fitFor(source) }
     val quality = remember(source) { sourceQuality(source) }
     val (tileColor, tileInk) = qualityColors(quality)
     Row(
@@ -402,6 +406,13 @@ private fun SourceCard(
             }
             presentation.size?.let {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MobileTokens.textMuted)
+            }
+            fit?.let {
+                Text(
+                    sourceFitLabel(it),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MobileTokens.textMuted,
+                )
             }
         }
         Box(

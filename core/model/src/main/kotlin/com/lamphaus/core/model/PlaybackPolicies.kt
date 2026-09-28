@@ -109,7 +109,7 @@ sealed interface AudioOutputDecision {
 object AudioRoutePolicy {
 
     /** True when the route advertised support for the encoding (HDMI/ receiver EDID). */
-    private fun routeSupports(capabilities: PlaybackCapabilities, format: EncodedAudioFormat): Boolean =
+    internal fun routeSupports(capabilities: PlaybackCapabilities, format: EncodedAudioFormat): Boolean =
         when (format) {
             EncodedAudioFormat.AC3 -> capabilities.supportsAc3Passthrough
             EncodedAudioFormat.EAC3 -> capabilities.supportsEac3Passthrough

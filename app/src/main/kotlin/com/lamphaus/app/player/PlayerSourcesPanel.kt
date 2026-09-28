@@ -21,6 +21,8 @@ import androidx.compose.ui.unit.dp
 import com.lamphaus.app.R
 import com.lamphaus.app.mobile.sourceQuality
 import com.lamphaus.app.ui.sourcePresentation
+import com.lamphaus.app.ui.sourceFitLabel
+import com.lamphaus.core.model.SourceFit
 import com.lamphaus.core.model.StreamCandidate
 
 /** A source the player can switch to: the add-on's stream and its resolved playable address. */
@@ -28,6 +30,8 @@ internal data class PlayerSourceOption(
     val stream: StreamCandidate,
     val url: String,
     val providerName: String?,
+    /** How it will play on this device; null when there is nothing worth saying. */
+    val fit: SourceFit? = null,
 ) {
     val key: String get() = listOf(stream.providerId, url).joinToString("|")
 }
@@ -72,12 +76,14 @@ internal fun PlayerSourcesPanel(
                 val presentation = remember(option) { option.stream.sourcePresentation(option.providerName) }
                 val quality = remember(option) { sourceQuality(option.stream) }
                 val playing = index == playingIndex
+                val fitLabel = option.fit?.let { sourceFitLabel(it) }
                 val headline = listOfNotNull(quality, option.providerName).joinToString("  ·  ")
                     .ifBlank { presentation.title }
                 val detail = listOfNotNull(
                     presentation.title.takeIf { it != headline },
                     presentation.description,
                     presentation.size,
+                    fitLabel,
                     if (playing) stringResource(R.string.player_source_playing) else null,
                 ).joinToString("\n").takeIf(String::isNotBlank)
                 PlayerChoiceRow(

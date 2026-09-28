@@ -154,6 +154,9 @@ import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.app.ui.StreamBadgeRow
 import com.lamphaus.app.ui.StreamBadgeMatcher
 import com.lamphaus.app.ui.LocalStreamBadges
+import com.lamphaus.app.ui.LocalSourceFit
+import com.lamphaus.app.ui.SourceFitAdvisor
+import com.lamphaus.app.ui.sourceFitLabel
 import com.lamphaus.app.ui.LocalAccountPhotoUrl
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.rememberReducedMotion
@@ -269,6 +272,9 @@ fun TvApp(
             LocalTvContentMenuEnvironment provides menuEnvironment,
             LocalAccountPhotoUrl provides (state.account as? AccountState.SignedIn)?.avatarUrl,
             LocalStreamBadges provides remember(state.streamBadges) { StreamBadgeMatcher(state.streamBadges) },
+            LocalSourceFit provides remember(state.playbackCapabilities, state.devicePlaybackConfig) {
+                SourceFitAdvisor(state.playbackCapabilities, state.devicePlaybackConfig)
+            },
         ) {
         LaunchedEffect(state.playbackRequest) {
             state.playbackRequest?.let {
@@ -2321,6 +2327,8 @@ private fun TvSourcePickerScreen(
                             }
                             val badgeMatcher = LocalStreamBadges.current
                             val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
+                            val fitAdvisor = LocalSourceFit.current
+                            val fit = remember(source, fitAdvisor) { fitAdvisor.fitFor(source) }
                             TvFocusableSurface(
                                 onClick = { onSource(source) },
                                 modifier = Modifier
@@ -2385,6 +2393,15 @@ private fun TvSourcePickerScreen(
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                                 style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
+                                        fit?.let {
+                                            Text(
+                                                sourceFitLabel(it),
+                                                color = secondaryColor,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.labelMedium,
                                             )
                                         }
                                     }
