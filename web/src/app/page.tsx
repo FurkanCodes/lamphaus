@@ -6,6 +6,8 @@ import { LatestRelease } from "@/components/latest-release";
 // supplies no content (SHR-PROD-05).
 const base = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const art = (kind: "poster" | "backdrop", id: string) => `${base}/art/${kind}/${id}.jpg`;
+// Real captures from Android TV (SEI Box R 4K Plus) and a Xiaomi 15T Pro running Lamphaus.
+const shot = (name: string) => `${base}/shots/${name}.jpg`;
 
 type Title = { id: string; name: string; meta: string; runtime?: number };
 
@@ -37,9 +39,9 @@ function Screen({ src, alt, className = "" }: { src: string; alt: string; classN
 
 function Phone({ src, alt, className = "" }: { src: string; alt: string; className?: string }) {
   return (
-    <div className={`rounded-[22px] bg-[#050507] p-[2.4%] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.85)] ring-1 ring-white/15 ${className}`}>
+    <div className={`rounded-[22px] bg-[#050507] p-[1.8%] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.85)] ring-1 ring-white/15 ${className}`}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={alt} className="block aspect-[9/19] w-full rounded-[16px] object-cover" />
+      <img src={src} alt={alt} className="block aspect-[1280/2772] w-full rounded-[16px] object-cover" />
     </div>
   );
 }
@@ -126,7 +128,7 @@ export default function HomePage() {
               mixBlendMode: "screen",
             }}
           />
-          <Screen src={art("backdrop", "deep-field")} alt="" className="mt-20 lg:mt-24" />
+          <Screen src={shot("tv-spotlight")} alt="" className="mt-20 lg:mt-24" />
         </div>
       </section>
 
@@ -277,11 +279,11 @@ export default function HomePage() {
             </ol>
           </div>
           <div className="relative lg:col-span-2" aria-hidden="true">
-            <Screen src={art("backdrop", "glass-district")} alt="" className="w-[84%] lg:w-[68%]" />
+            <Screen src={shot("tv-details")} alt="" className="w-[84%] lg:w-[68%]" />
             <Phone
-              src={art("poster", "paper-lanterns")}
+              src={shot("phone-home")}
               alt=""
-              className="absolute right-0 bottom-[-6%] w-[24%] lg:right-[16%] lg:w-[14%]"
+              className="absolute right-0 bottom-[-8%] w-[26%] lg:right-[22%] lg:w-[16%]"
             />
           </div>
         </div>
