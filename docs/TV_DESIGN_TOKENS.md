@@ -16,6 +16,10 @@ The production source of truth is `TvDesignTokens.kt` plus `TvTheme.kt`. Values 
 | Hero | 844×320dp at reference width |
 | Settings menu | 268dp |
 | Settings content | 452dp |
+| Side rail item | 40×40dp, 8dp apart, 20dp icon |
+| Side rail open width | 208dp, over the page |
+| Side rail origin | 24dp from the start edge |
+| Page origin with the side rail | 84dp from the start edge, 32dp from the top |
 
 ## Shape and focus
 
@@ -34,6 +38,7 @@ The production source of truth is `TvDesignTokens.kt` plus `TvTheme.kt`. Values 
 | Delayed hero update | 240ms |
 | Hero transition | 220ms crossfade with 1–1.25% horizontal drift |
 | Library confirmation | 110ms out + 110ms return |
+| Side rail | opens on a spring (damping 0.82), labels staggered 5% of the opening apart; closes in 180ms; beam slides on Select |
 | Boot sequence | every launch: 1.9s intro, then a 620ms reveal from the lamp once Home is usable and frames are smooth; hold ≤3.5s; any key skips; off with remove animations (`TvBootTokens`) |
 
 ## Artwork behavior

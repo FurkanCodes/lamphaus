@@ -5,16 +5,39 @@ import org.junit.Test
 
 class TvHomeLayoutTest {
     @Test
-    fun `TV-CNT-01 an unset or unknown layout falls back to classic`() {
-        assertEquals(TvHomeLayout.CLASSIC, TvHomeLayout.fromName(null))
-        assertEquals(TvHomeLayout.CLASSIC, TvHomeLayout.fromName("GRID"))
-        assertEquals(TvHomeLayout.SPOTLIGHT, TvHomeLayout.fromName("SPOTLIGHT"))
+    fun `TV-CNT-01 an unset or unknown layout falls back to spotlight`() {
+        assertEquals(TvHomeLayout.SPOTLIGHT, TvHomeLayout.fromName(null))
+        assertEquals(TvHomeLayout.SPOTLIGHT, TvHomeLayout.fromName("GRID"))
+        assertEquals(TvHomeLayout.CLASSIC, TvHomeLayout.fromName("CLASSIC"))
+        assertEquals(TvHomeLayout.SPOTLIGHT, AppUiState().tvHomeLayout)
     }
 
     @Test
     fun `the device-local layout survives leaving an account`() {
-        val state = AppUiState(tvHomeLayout = TvHomeLayout.SPOTLIGHT)
+        val state = AppUiState(tvHomeLayout = TvHomeLayout.CLASSIC)
 
-        assertEquals(TvHomeLayout.SPOTLIGHT, state.clearAccountData().tvHomeLayout)
+        assertEquals(TvHomeLayout.CLASSIC, state.clearAccountData().tvHomeLayout)
+    }
+
+    @Test
+    fun `TV-NAV-01 an unset or unknown navigation style falls back to the side rail`() {
+        assertEquals(TvNavigationStyle.SIDE_RAIL, TvNavigationStyle.fromName(null))
+        assertEquals(TvNavigationStyle.SIDE_RAIL, TvNavigationStyle.fromName("DRAWER"))
+        assertEquals(TvNavigationStyle.TOP_BAR, TvNavigationStyle.fromName("TOP_BAR"))
+        assertEquals(TvNavigationStyle.SIDE_RAIL, AppUiState().tvNavigationStyle)
+    }
+
+    @Test
+    fun `the device-local navigation style survives leaving an account`() {
+        val state = AppUiState(tvNavigationStyle = TvNavigationStyle.TOP_BAR)
+
+        assertEquals(TvNavigationStyle.TOP_BAR, state.clearAccountData().tvNavigationStyle)
+    }
+
+    @Test
+    fun `TV-CLR-01 the black background is off until chosen and survives leaving an account`() {
+        assertEquals(false, AppUiState().tvBlackBackground)
+
+        assertEquals(true, AppUiState(tvBlackBackground = true).clearAccountData().tvBlackBackground)
     }
 }

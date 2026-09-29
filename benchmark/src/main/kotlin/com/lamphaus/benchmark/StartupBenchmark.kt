@@ -152,10 +152,11 @@ class StartupBenchmark {
     }
 
     /**
-     * PERF-21: moving along the top navigation into Discover and Library,
-     * where each page's first composition happens inside the key press, then
-     * a short walk through each poster grid. Real-TV numbers come from
-     * `scripts/perf/tv_page_jank.py` (this metric records nothing on the SEI Box).
+     * PERF-21: moving through the side rail (the default navigation,
+     * TV-NAV-01) into Discover and Library, where each page's first
+     * composition happens inside the Select press, then a short walk through
+     * each poster grid. Real-TV numbers come from `scripts/perf/tv_page_jank.py`
+     * (this metric records nothing on the SEI Box).
      */
     @Test
     fun tvDiscoverLibraryFrameTiming() = rule.measureRepeated(
@@ -168,20 +169,26 @@ class StartupBenchmark {
     ) {
         startTv()
         device.requireFixtureHome()
-        device.pressDPadUp()
+        // Left at the start of the row opens the rail on Home; moving through
+        // it never switches the page, so Home → Discover is three moves and a Select.
+        device.pressDPadLeft()
         SystemClock.sleep(TV_SETTLE_MILLIS)
-        // Home → Movies → Series → Discover; tabs follow focus.
-        repeat(3) {
-            device.pressDPadRight()
-            SystemClock.sleep(TV_SETTLE_MILLIS)
-        }
         repeat(3) {
             device.pressDPadDown()
             SystemClock.sleep(TV_SETTLE_MILLIS)
         }
-        repeat(3) { device.pressDPadUp() }
+        device.pressDPadCenter() // Discover
+        SystemClock.sleep(TV_SETTLE_MILLIS)
+        repeat(3) {
+            device.pressDPadDown()
+            SystemClock.sleep(TV_SETTLE_MILLIS)
+        }
+        // Left walks to the grid's first column, then opens the rail; extra
+        // presses stay on the rail.
+        repeat(6) { device.pressDPadLeft() }
         device.waitForIdle()
-        device.pressDPadRight() // Library
+        device.pressDPadDown()
+        device.pressDPadCenter() // Library
         SystemClock.sleep(TV_SETTLE_MILLIS)
         repeat(2) {
             device.pressDPadDown()

@@ -173,6 +173,7 @@ import com.lamphaus.app.ui.ArtworkEditorState
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.app.ui.TvHomeLayout
+import com.lamphaus.app.ui.TvNavigationStyle
 import com.lamphaus.app.ui.CatalogBrowseTarget
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.ContentMenuAction
@@ -227,6 +228,7 @@ import com.lamphaus.core.model.SubtitleDefaultMode
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.StreamCandidate
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -265,7 +267,7 @@ fun TvApp(
             menuReturnFocus = null
         }
     }
-    LamphausTvTheme {
+    LamphausTvTheme(blackBackground = state.tvBlackBackground) {
         val artworkResolver = remember(state.artworkOverrides) {
             ArtworkResolver(state.artworkOverrides.associateBy { it.mediaKey })
         }
@@ -795,8 +797,14 @@ private fun TvSignedIn(
     updateViewModel: com.lamphaus.app.update.UpdateViewModel? = null,
 ) {
     val initialDestination = if (initialSearch.isNullOrBlank()) TvDestination.HOME else TvDestination.SEARCH
+    val sideRail = state.tvNavigationStyle == TvNavigationStyle.SIDE_RAIL
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
-    var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination) }
+    // TV-NAV-01: the top bar starts focused; the side rail starts closed, with
+    // focus on the page.
+    var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination.takeUnless { sideRail }) }
+    var contentEntry by remember { mutableStateOf<TvDestination?>(initialDestination.takeIf { sideRail }) }
+    val focusReturn = rememberTvContentFocusReturn()
+    val focusManager = LocalFocusManager.current
     var pendingMediaKey by rememberSaveable { mutableStateOf<String?>(null) }
     var lastFocusedMedia by remember { mutableStateOf(firstDistinctMedia(state.sections, limit = 1).firstOrNull()) }
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
@@ -923,8 +931,27 @@ private fun TvSignedIn(
     // (including the Home root) leaves the app, so repeated Back can never
     // loop, per TV-NAV-04.
     BackHandler(enabled = !navHasFocus) {
+        focusReturn.save()
         navHasFocus = true
         focusDestination = destination
+    }
+    // A page entered from the side rail may still be composing or loading;
+    // keep trying its entry control briefly, then leave focus on the rail.
+    LaunchedEffect(contentEntry) {
+        val target = contentEntry ?: return@LaunchedEffect
+        val entered = withTimeoutOrNull(CONTENT_ENTRY_TIMEOUT_MILLIS) {
+            while (!runCatching { contentFocus.getValue(target).requestFocus() }.getOrDefault(false)) {
+                withFrameNanos { }
+            }
+            true
+        } ?: false
+        contentEntry = null
+        if (!entered) focusDestination = target
+    }
+    // Settings opens the rail only from its section menu, so it returns to the
+    // selected section; walking back could pass other sections and switch the pane.
+    val returnToContent: () -> Unit = {
+        if (destination == TvDestination.SETTINGS || !focusReturn.restore()) contentEntry = destination
     }
     // Catalog data can change while a details screen is open. If the
     // originating item never re-composes to consume its restore key, hand
@@ -994,33 +1021,32 @@ private fun TvSignedIn(
             if (backgroundArtwork && destination != TvDestination.SETTINGS) {
                 TvContentAmbientBackground(ambient = ambient)
             }
-            TvTopNavigation(
-                selectedDestination = destination,
-                activeProfile = state.activeProfile,
-                focusDestination = focusDestination,
-                requesters = navFocus,
-                profileRequester = profileFocus,
-                contentDownRequester = contentFocus.getValue(destination),
-                onFocusHandled = { focusDestination = null },
-                onHasFocus = { navHasFocus = it },
-                onDestination = { destination = it },
-                onProfileSwitcher = { profileSwitcherOpen = true },
-                modifier = Modifier.padding(
-                    start = TvLayoutTokens.screenHorizontalPadding,
-                    top = TvLayoutTokens.screenTopPadding,
-                    end = TvLayoutTokens.screenHorizontalPadding,
-                ),
-            )
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = TvLayoutTokens.contentTopPadding)
+                .padding(
+                    start = if (sideRail) TvRailTokens.contentStartOffset else 0.dp,
+                    top = if (sideRail) TvRailTokens.contentTopPadding else TvLayoutTokens.contentTopPadding,
+                )
                 .tvContentFocusBoundary(
-                    topNavigationRequester = navFocus.getValue(destination),
-                    leftNavigationRequester = if (destination == TvDestination.SETTINGS) {
-                        contentFocus.getValue(TvDestination.SETTINGS)
+                    // With the rail, nothing sits above the page, and Left at
+                    // the page's edge opens the rail through the key handler below.
+                    topNavigationRequester = if (sideRail) FocusRequester.Cancel else navFocus.getValue(destination),
+                    leftNavigationRequester = when {
+                        sideRail -> FocusRequester.Cancel
+                        destination == TvDestination.SETTINGS -> contentFocus.getValue(TvDestination.SETTINGS)
+                        else -> FocusRequester.Default
+                    },
+                )
+                .tvContentFocusMemory(focusReturn)
+                .then(
+                    if (sideRail) {
+                        Modifier.tvRailOpensOnLeft(focusManager) {
+                            focusReturn.save()
+                            focusDestination = destination
+                        }
                     } else {
-                        FocusRequester.Default
+                        Modifier
                     },
                 ),
         ) {
@@ -1083,18 +1109,72 @@ private fun TvSignedIn(
                         showProfiles = showProfilesSettings,
                         onProfilesShown = { showProfilesSettings = false },
                         sectionFocusRequester = contentFocus.getValue(TvDestination.SETTINGS),
-                        topNavigationRequester = navFocus.getValue(TvDestination.SETTINGS),
+                        topNavigationRequester = if (sideRail) {
+                            FocusRequester.Cancel
+                        } else {
+                            navFocus.getValue(TvDestination.SETTINGS)
+                        },
                         updateViewModel = updateViewModel,
                     )
                 }
             }
+            TvContentFocusAnchor(focusReturn, onFailed = { contentEntry = destination })
+        }
+        if (sideRail) {
+            TvSideRail(
+                selectedDestination = destination,
+                activeProfile = state.activeProfile,
+                focusDestination = focusDestination,
+                requesters = navFocus,
+                profileRequester = profileFocus,
+                onFocusHandled = { focusDestination = null },
+                onHasFocus = { hasFocus ->
+                    navHasFocus = hasFocus
+                    // When the focused page item goes away (a loading row
+                    // replaced by content), Compose hands focus to the first
+                    // focusable, which is the rail. Opening it uninvited would
+                    // cover the page, so focus goes back into the page instead.
+                    if (hasFocus && focusDestination == null && !returnToProfileAvatar) contentEntry = destination
+                },
+                onDestination = {
+                    focusReturn.forget()
+                    destination = it
+                    contentEntry = it
+                },
+                onReturnToContent = returnToContent,
+                onProfileSwitcher = { profileSwitcherOpen = true },
+            )
+        } else {
+            TvTopNavigation(
+                selectedDestination = destination,
+                activeProfile = state.activeProfile,
+                focusDestination = focusDestination,
+                requesters = navFocus,
+                profileRequester = profileFocus,
+                contentDownRequester = contentFocus.getValue(destination),
+                onFocusHandled = { focusDestination = null },
+                onHasFocus = { navHasFocus = it },
+                onDestination = { destination = it },
+                onProfileSwitcher = { profileSwitcherOpen = true },
+                modifier = Modifier.padding(
+                    start = TvLayoutTokens.screenHorizontalPadding,
+                    top = TvLayoutTokens.screenTopPadding,
+                    end = TvLayoutTokens.screenHorizontalPadding,
+                ),
+            )
         }
         if (state.refreshing) {
             Text(
                 text = stringResource(R.string.updating),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 76.dp, end = TvLayoutTokens.screenHorizontalPadding),
+                modifier = if (sideRail) {
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = TvLayoutTokens.screenBottomPadding, end = TvLayoutTokens.screenHorizontalPadding)
+                } else {
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 76.dp, end = TvLayoutTokens.screenHorizontalPadding)
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -3354,6 +3434,8 @@ private fun TvSettings(
         Spacer(Modifier.width(72.dp))
         Box(
             Modifier
+                // Never pushes past the screen when the side rail shares the width (TV-TOK-01).
+                .weight(1f, fill = false)
                 .width(TvLayoutTokens.settingsContentWidth)
                 .fillMaxHeight()
                 // The pane is one group: Left returns to its section in the
@@ -3759,6 +3841,14 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
         item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.black_background),
+                description = stringResource(R.string.black_background_description),
+                checked = state.tvBlackBackground,
+                onCheckedChange = viewModel::setTvBlackBackground,
+            )
+        }
+        item {
             val spotlight = state.tvHomeLayout == TvHomeLayout.SPOTLIGHT
             TvSettingsChoiceRow(
                 title = stringResource(R.string.home_layout),
@@ -3768,6 +3858,19 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 value = stringResource(if (spotlight) R.string.home_layout_spotlight else R.string.home_layout_classic),
                 onClick = {
                     viewModel.setTvHomeLayout(if (spotlight) TvHomeLayout.CLASSIC else TvHomeLayout.SPOTLIGHT)
+                },
+            )
+        }
+        item {
+            val rail = state.tvNavigationStyle == TvNavigationStyle.SIDE_RAIL
+            TvSettingsChoiceRow(
+                title = stringResource(R.string.navigation_style),
+                description = stringResource(
+                    if (rail) R.string.navigation_style_side_rail_description else R.string.navigation_style_top_bar_description,
+                ),
+                value = stringResource(if (rail) R.string.navigation_style_side_rail else R.string.navigation_style_top_bar),
+                onClick = {
+                    viewModel.setTvNavigationStyle(if (rail) TvNavigationStyle.TOP_BAR else TvNavigationStyle.SIDE_RAIL)
                 },
             )
         }
@@ -4532,3 +4635,6 @@ private fun TvSettingsRow(
 }
 
 private const val WATCH_NEXT_SETTLE_MILLIS = 2_000L
+
+/** How long a page entered from the side rail may take to offer its entry control. */
+private const val CONTENT_ENTRY_TIMEOUT_MILLIS = 3_000L
