@@ -19,7 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.lamphaus.app.R
-import com.lamphaus.app.mobile.sourceQuality
+import com.lamphaus.app.ui.sourceQuality
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceFitLabel
 import com.lamphaus.core.model.SourceFit

@@ -189,6 +189,7 @@ import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
 import com.lamphaus.app.ui.sourcePresentation
+import com.lamphaus.app.ui.sourceQuality
 import com.lamphaus.app.ui.sourceItemKeys
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
@@ -2363,14 +2364,23 @@ private fun TvSearch(
     }
 }
 
+/**
+ * The TV source list: the title on the start side; on the end side a heading
+ * with the source count, add-on filters with their counts, and one compact
+ * card per source. A card leads with a quality tile and names its add-on only
+ * while every add-on is listed; provider text is clamped so one verbose add-on
+ * cannot turn the list into a wall of text (TV-FOC-01, TV-CNT-02, SHR-PROD-12).
+ */
 @Composable
-private fun TvSourcePickerScreen(
+internal fun TvSourcePickerScreen(
     picker: SourcePickerState,
     onProvider: (String?) -> Unit,
     onSource: (StreamCandidate) -> Unit,
 ) {
     val filtersFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { filtersFocus.requestFocus() }
+    val providerCounts = remember(picker.sources) { picker.sources.groupingBy { it.providerId }.eachCount() }
+    val showProviderOnCards = picker.selectedProviderId == null && picker.providerIds.size > 1
     Box(Modifier.fillMaxSize()) {
         TvBakedBackdrop(media = picker.media, style = TvBackdropStyle.SOURCES, modifier = Modifier.fillMaxSize())
         Row(
@@ -2382,17 +2392,32 @@ private fun TvSourcePickerScreen(
                     end = TvLayoutTokens.screenHorizontalPadding,
                     bottom = TvLayoutTokens.screenBottomPadding,
                 ),
-            horizontalArrangement = Arrangement.spacedBy(44.dp),
+            horizontalArrangement = Arrangement.spacedBy(40.dp),
         ) {
             TvSourceMediaSummary(
                 picker = picker,
-                modifier = Modifier.width(350.dp).fillMaxHeight(),
+                modifier = Modifier.width(320.dp).fillMaxHeight(),
             )
-            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.sources_choose),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (picker.sources.isNotEmpty()) {
+                        Text(
+                            pluralStringResource(R.plurals.sources_count, picker.sources.size, picker.sources.size),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item("all") {
                         TvFilterChip(
                             label = stringResource(R.string.all_sources),
+                            count = picker.sources.size.takeIf { it > 0 },
                             selected = picker.selectedProviderId == null,
                             onClick = { onProvider(null) },
                             modifier = Modifier.focusRequester(filtersFocus),
@@ -2401,6 +2426,7 @@ private fun TvSourcePickerScreen(
                     items(picker.providerIds, key = { it }) { providerId ->
                         TvFilterChip(
                             label = picker.providerLabels[providerId] ?: providerId,
+                            count = providerCounts[providerId],
                             selected = picker.selectedProviderId == providerId,
                             onClick = { onProvider(providerId) },
                         )
@@ -2409,8 +2435,8 @@ private fun TvSourcePickerScreen(
                 picker.failures.values.forEach { error ->
                     Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                 }
-                if (picker.loading) {
-                    Text(stringResource(R.string.loading_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (picker.loading && picker.visibleSources.isEmpty()) {
+                    TvSourceSkeletons()
                 } else if (picker.visibleSources.isEmpty()) {
                     TvEmptyMark()
                     Text(stringResource(R.string.no_sources), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -2428,98 +2454,19 @@ private fun TvSourcePickerScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.weight(1f).onFocusChanged { listFocused = it.hasFocus },
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 4.dp),
                     ) {
                         itemsIndexed(
                             picker.visibleSources,
                             key = { index, _ -> sourceKeys[index] },
                         ) { _, source ->
-                            val providerLabel = picker.providerLabels[source.providerId]
-                            val presentation = remember(source, providerLabel) {
-                                source.sourcePresentation(providerLabel)
-                            }
-                            val badgeMatcher = LocalStreamBadges.current
-                            val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
-                            val fitAdvisor = LocalSourceFit.current
-                            val fit = remember(source, fitAdvisor) { fitAdvisor.fitFor(source) }
-                            TvFocusableSurface(
+                            TvSourceCard(
+                                source = source,
+                                providerLabel = picker.providerLabels[source.providerId],
+                                showProvider = showProviderOnCards,
                                 onClick = { onSource(source) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 104.dp),
-                                containerColor = TvSurfaceTokens.card,
-                            ) { focused ->
-                                val primaryColor = if (focused) {
-                                    TvFocusTokens.focusedContent
-                                } else {
-                                    MaterialTheme.colorScheme.onBackground
-                                }
-                                val secondaryColor = primaryColor.copy(alpha = 0.76f)
-                                Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                ) {
-                                    TvIcon(
-                                        Icons.Outlined.PlayArrow,
-                                        contentDescription = null,
-                                        tint = primaryColor,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        // Imported badges replace Lamphaus's own labels, as in Nuvio.
-                                        if (badgeMatcher.isActive) {
-                                            StreamBadgeRow(importedBadges)
-                                        } else if (presentation.badges.isNotEmpty()) {
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                presentation.badges.forEach { badge ->
-                                                    TvSourceBadge(badge, focused)
-                                                }
-                                            }
-                                        }
-                                        // Addon-formatted text is shown whole: the addon's
-                                        // formatter owns the card's lines (as in Nuvio).
-                                        Text(
-                                            presentation.title,
-                                            color = primaryColor,
-                                            maxLines = if (presentation.usesProviderFormatting) Int.MAX_VALUE else 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            style = MaterialTheme.typography.titleSmall,
-                                        )
-                                        presentation.description?.let { description ->
-                                            Text(
-                                                description,
-                                                color = secondaryColor,
-                                                maxLines = if (presentation.usesProviderFormatting) Int.MAX_VALUE else 3,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                        }
-                                        if (!presentation.usesProviderFormatting) {
-                                            Text(
-                                                buildList {
-                                                    providerLabel?.let(::add)
-                                                    presentation.size?.let(::add)
-                                                    add(stringResource(presentation.transport.labelRes))
-                                                }.distinct().joinToString("  ·  "),
-                                                color = secondaryColor,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = MaterialTheme.typography.labelSmall,
-                                            )
-                                        }
-                                        fit?.let {
-                                            Text(
-                                                sourceFitLabel(it),
-                                                color = secondaryColor,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = MaterialTheme.typography.labelMedium,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                            )
                         }
                         // Last item, so it appears and disappears without moving any
                         // source the viewer is looking at.
@@ -2545,26 +2492,193 @@ private fun TvSourcePickerScreen(
 }
 
 @Composable
+private fun TvSourceCard(
+    source: StreamCandidate,
+    providerLabel: String?,
+    showProvider: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val presentation = remember(source, providerLabel) { source.sourcePresentation(providerLabel) }
+    val badgeMatcher = LocalStreamBadges.current
+    val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
+    val fitAdvisor = LocalSourceFit.current
+    val fit = remember(source, fitAdvisor) { fitAdvisor.fitFor(source) }
+    val quality = remember(source) { sourceQuality(source) }
+    // Provider names often carry their own line breaks and open with the
+    // add-on's name, which the card and filters already show; the title keeps
+    // only what tells this source apart, on one line.
+    val title = remember(presentation, providerLabel) {
+        val lines = presentation.title.lines().map(String::trim).filter(String::isNotEmpty)
+        val distinct = if (lines.size > 1 && lines.first().equals(providerLabel, ignoreCase = true)) lines.drop(1) else lines
+        distinct.joinToString("  ·  ")
+    }
+    val badges = remember(presentation, quality) {
+        presentation.badges.filterNot { it.equals(quality, ignoreCase = true) }.take(4)
+    }
+    val transportLabel = stringResource(presentation.transport.labelRes)
+    TvFocusableSurface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        containerColor = TvSurfaceTokens.card,
+    ) { focused ->
+        val primaryColor = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground
+        val secondaryColor = primaryColor.copy(alpha = 0.72f)
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            TvQualityTile(quality = quality, fallback = transportLabel)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                if (showProvider && providerLabel != null) {
+                    Text(
+                        providerLabel.uppercase(),
+                        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    title,
+                    color = primaryColor,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // Imported badges replace Lamphaus's own labels, as in Nuvio.
+                if (badgeMatcher.isActive) {
+                    StreamBadgeRow(importedBadges)
+                } else if (badges.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        badges.forEach { badge -> TvSourceBadge(badge, focused) }
+                    }
+                }
+                presentation.description?.let { description ->
+                    Text(
+                        description,
+                        color = secondaryColor,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    listOfNotNull(presentation.size, transportLabel).joinToString("  ·  "),
+                    color = secondaryColor,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+                fit?.let {
+                    Text(
+                        sourceFitLabel(it),
+                        color = secondaryColor,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            TvIcon(
+                Icons.Outlined.PlayArrow,
+                contentDescription = null,
+                tint = if (focused) primaryColor else Color.Transparent,
+                modifier = Modifier.align(Alignment.CenterVertically).size(24.dp),
+            )
+        }
+    }
+}
+
+/** Resolution at a glance: 4K gold, HD instrument blue, 720p teal, otherwise the transport. */
+@Composable
+private fun TvQualityTile(quality: String?, fallback: String) {
+    val (container, content) = when (quality) {
+        "4K" -> Color(0xFFE9C46A) to Color(0xFF2B1F00)
+        "1440p", "1080p" -> TvFocusTokens.beam to Color(0xFF003062)
+        "720p" -> Color(0xFF9FD8C8) to Color(0xFF00382E)
+        else -> Color.White.copy(alpha = 0.10f) to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        Modifier.size(56.dp).background(container, TvShapeTokens.card),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            quality ?: fallback,
+            color = content,
+            style = if (quality != null) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
+}
+
+/** Placeholder cards in the final card geometry while the first add-on answers (TV-CNT-02). */
+@Composable
+private fun TvSourceSkeletons() {
+    val pulse = rememberSkeletonPulse(label = "source loading")
+    val color = MaterialTheme.colorScheme.surfaceVariant
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        repeat(4) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(TvShapeTokens.card)
+                    .background(TvSurfaceTokens.card)
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(Modifier.size(56.dp).clip(TvShapeTokens.card).skeletonPulseBackground(color) { pulse.value })
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.fillMaxWidth(0.3f).height(10.dp).skeletonPulseBackground(color) { pulse.value })
+                    Box(Modifier.fillMaxWidth(0.8f).height(14.dp).skeletonPulseBackground(color) { pulse.value })
+                    Box(Modifier.fillMaxWidth(0.55f).height(10.dp).skeletonPulseBackground(color) { pulse.value })
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun TvFilterChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    count: Int? = null,
 ) {
     TvFocusableSurface(
         onClick = onClick,
         modifier = modifier.semantics { this.selected = selected },
         containerColor = if (selected) TvSurfaceTokens.selectedFilter else TvSurfaceTokens.card,
     ) { focused ->
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-            color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        val color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground
+        Row(
+            Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                label,
+                color = color,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            count?.let {
+                Text(
+                    it.toString(),
+                    color = color.copy(alpha = 0.7f),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 @Composable

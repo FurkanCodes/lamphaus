@@ -70,6 +70,19 @@ internal fun StreamCandidate.sourcePresentation(providerLabel: String?): SourceP
     )
 }
 
+/** The resolution a source advertises in its name or title, as a short tile label. */
+internal fun sourceQuality(source: StreamCandidate): String? {
+    val text = listOfNotNull(source.name, source.title, source.description, source.quality).joinToString(" ").lowercase()
+    return when {
+        Regex("""\b(2160p|4k|uhd)\b""").containsMatchIn(text) -> "4K"
+        Regex("""\b1440p\b""").containsMatchIn(text) -> "1440p"
+        Regex("""\b1080p\b""").containsMatchIn(text) -> "1080p"
+        Regex("""\b720p\b""").containsMatchIn(text) -> "720p"
+        Regex("""\b(480p|576p|sd)\b""").containsMatchIn(text) -> "SD"
+        else -> null
+    }
+}
+
 private fun StreamCandidate.transport(): SourceTransport = when {
     infoHash != null -> SourceTransport.PEER
     nzbUrl != null -> SourceTransport.USENET

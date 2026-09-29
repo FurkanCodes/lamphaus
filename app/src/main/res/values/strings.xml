@@ -366,6 +366,10 @@
     <string name="all_sources">All sources</string>
     <string name="no_sources">No sources are currently available.</string>
     <string name="loading_sources">Loading sources…</string>
+    <plurals name="sources_count">
+        <item quantity="one">%d source</item>
+        <item quantity="other">%d sources</item>
+    </plurals>
     <plurals name="sources_still_loading">
         <item quantity="one">Still loading %d add-on…</item>
         <item quantity="other">Still loading %d add-ons…</item>

@@ -73,6 +73,7 @@ import com.lamphaus.app.ui.SourcePickerState
 import com.lamphaus.app.ui.StreamBadgeRow
 import com.lamphaus.app.ui.sourceItemKeys
 import com.lamphaus.app.ui.sourcePresentation
+import com.lamphaus.app.ui.sourceQuality
 import com.lamphaus.core.model.StreamCandidate
 
 private val SourcesMaxWidth = 720.dp
@@ -301,19 +302,6 @@ private fun FilterPill(label: String, count: Int, selected: Boolean, onClick: ()
             style = MaterialTheme.typography.labelMedium,
             color = if (selected) Color.Black.copy(alpha = 0.6f) else MobileTokens.textMuted,
         )
-    }
-}
-
-/** The resolution a source advertises in its name or title, as a short tile label. */
-internal fun sourceQuality(source: StreamCandidate): String? {
-    val text = listOfNotNull(source.name, source.title, source.description, source.quality).joinToString(" ").lowercase()
-    return when {
-        Regex("""\b(2160p|4k|uhd)\b""").containsMatchIn(text) -> "4K"
-        Regex("""\b1440p\b""").containsMatchIn(text) -> "1440p"
-        Regex("""\b1080p\b""").containsMatchIn(text) -> "1080p"
-        Regex("""\b720p\b""").containsMatchIn(text) -> "720p"
-        Regex("""\b(480p|576p|sd)\b""").containsMatchIn(text) -> "SD"
-        else -> null
     }
 }
 
