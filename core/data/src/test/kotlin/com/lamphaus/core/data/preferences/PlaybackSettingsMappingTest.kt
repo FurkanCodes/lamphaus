@@ -30,6 +30,19 @@ class PlaybackSettingsMappingTest {
         assertEquals(NextEpisodeThresholdMode.PERCENTAGE, settings.nextEpisodeThresholdMode)
         assertEquals(98f, settings.nextEpisodeThresholdPercent)
         assertEquals(2f, settings.nextEpisodeThresholdMinutesBeforeEnd)
+        assertTrue(settings.autoPlayNextEpisode)
+        assertFalse(settings.askBeforeNextEpisode)
+    }
+
+    @Test
+    fun `ask before next episode is read back`() {
+        val settings = playbackSettingsFromKeys(
+            true, true, true, null, null, null,
+            autoPlayNext = true,
+            askBeforeNext = true,
+        )
+
+        assertTrue(settings.askBeforeNextEpisode)
     }
 
     @Test

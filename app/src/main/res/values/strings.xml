@@ -156,6 +156,17 @@
     <string name="next_episode_close">Close</string>
     <string name="auto_play_next">Auto-play next episode</string>
     <string name="auto_play_next_description">At the end of an episode, start the next one after a short countdown. After three in a row, playback asks if you are still watching.</string>
+    <string name="auto_play_next_description_asking">Off while Ask before next episode is on.</string>
+    <string name="ask_before_next">Ask before next episode</string>
+    <string name="ask_before_next_description">When an episode ends, show the next one and ask whether to keep watching instead of starting it automatically.</string>
+    <string name="up_next_title">Up next</string>
+    <string name="up_next_question">Continue watching?</string>
+    <string name="up_next_yes">Yes</string>
+    <string name="up_next_no">No</string>
+    <plurals name="up_next_closes_in">
+        <item quantity="one">Closes in %d second</item>
+        <item quantity="other">Closes in %d seconds</item>
+    </plurals>
     <string name="player_episodes">Episodes</string>
     <string name="episode_source_unavailable">No playable source for this episode.</string>
     <string name="still_watching_title">Still watching?</string>

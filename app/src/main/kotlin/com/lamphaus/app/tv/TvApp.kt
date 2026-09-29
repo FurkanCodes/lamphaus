@@ -3481,9 +3481,27 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
         }
         item {
             TvSettingsToggleRow(
+                title = stringResource(R.string.ask_before_next),
+                description = stringResource(R.string.ask_before_next_description),
+                checked = state.playbackSettings.askBeforeNextEpisode,
+                onCheckedChange = {
+                    viewModel.setPlaybackSettings(state.playbackSettings.copy(askBeforeNextEpisode = it))
+                },
+            )
+        }
+        item {
+            // Asking replaces auto-play while it is on.
+            TvSettingsToggleRow(
                 title = stringResource(R.string.auto_play_next),
-                description = stringResource(R.string.auto_play_next_description),
+                description = stringResource(
+                    if (state.playbackSettings.askBeforeNextEpisode) {
+                        R.string.auto_play_next_description_asking
+                    } else {
+                        R.string.auto_play_next_description
+                    },
+                ),
                 checked = state.playbackSettings.autoPlayNextEpisode,
+                enabled = !state.playbackSettings.askBeforeNextEpisode,
                 onCheckedChange = {
                     viewModel.setPlaybackSettings(state.playbackSettings.copy(autoPlayNextEpisode = it))
                 },

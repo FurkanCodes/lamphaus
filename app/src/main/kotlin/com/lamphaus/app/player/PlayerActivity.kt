@@ -107,6 +107,9 @@ class PlayerActivity : ComponentActivity() {
     /** Seconds left on "Still watching?"; null while it is not shown. */
     private val stillWatchingState = mutableStateOf<Int?>(null)
     private var stillWatchingJob: Job? = null
+    /** Seconds left on the "Up next" Yes/No prompt; null while it is not shown. */
+    private val upNextPromptState = mutableStateOf<Int?>(null)
+    private var upNextPromptJob: Job? = null
     private val episodeSwitchState = mutableStateOf<EpisodeSwitchState?>(null)
     private var episodeSwitchJob: Job? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -253,6 +256,9 @@ class PlayerActivity : ComponentActivity() {
                     stillWatchingSecondsLeft = stillWatchingState.value,
                     onStillWatchingContinue = ::continueWatching,
                     onStillWatchingStop = ::stopWatching,
+                    upNextSecondsLeft = upNextPromptState.value,
+                    onUpNextYes = ::acceptUpNext,
+                    onUpNextNo = ::declineUpNext,
                     episodeSwitch = episodeSwitchState.value,
                     onSelectEpisode = ::selectEpisode,
                     nextEpisodeMessage = nextEpisodeMessageState.value,
@@ -544,22 +550,50 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * End of an episode (PLY-AUTO-01): with auto-play on and the card not
-     * dismissed, the next aired episode starts after the card's countdown;
-     * after [AutoPlayPolicy.STILL_WATCHING_AFTER] automatic starts in a row
-     * the viewer is asked first.
+     * End of an episode (PLY-AUTO-01): with the card not dismissed, Ask
+     * before next episode shows "Up next" and waits for a Yes; otherwise,
+     * with auto-play on, the next aired episode starts after the card's
+     * countdown, and after [AutoPlayPolicy.STILL_WATCHING_AFTER] automatic
+     * starts in a row the viewer is asked first.
      */
     private fun onEpisodeEnded() {
         val current = request ?: return
         val next = current.nextEpisode ?: return
         val settings = playbackSettingsState.value
-        if (!settings.nextEpisodeEnabled || !settings.autoPlayNextEpisode || !next.hasAired()) return
+        if (!settings.nextEpisodeEnabled || !next.hasAired()) return
+        if (!settings.askBeforeNextEpisode && !settings.autoPlayNextEpisode) return
         if (nextEpisodeDismissedVideoId.value == current.videoId || pictureInPictureState.value) return
-        if (AutoPlayPolicy.shouldAskStillWatching(current.autoPlayStreak)) {
-            askStillWatching()
-        } else {
-            playNextEpisode(automatic = true)
+        when {
+            settings.askBeforeNextEpisode -> askUpNext()
+            AutoPlayPolicy.shouldAskStillWatching(current.autoPlayStreak) -> askStillWatching()
+            else -> playNextEpisode(automatic = true)
         }
+    }
+
+    /** Same unanswered-prompt guard as "Still watching?": no answer closes the player. */
+    private fun askUpNext() {
+        upNextPromptJob?.cancel()
+        upNextPromptJob = lifecycleScope.launch {
+            for (secondsLeft in AutoPlayPolicy.STILL_WATCHING_TIMEOUT_SECONDS downTo 1) {
+                upNextPromptState.value = secondsLeft
+                delay(1_000)
+            }
+            upNextPromptState.value = null
+            finish()
+        }
+    }
+
+    /** "Yes": the viewer chose the next episode, so it starts and the streak resets. */
+    private fun acceptUpNext() {
+        upNextPromptJob?.cancel()
+        upNextPromptState.value = null
+        playNextEpisode(automatic = false)
+    }
+
+    private fun declineUpNext() {
+        upNextPromptJob?.cancel()
+        upNextPromptState.value = null
+        finish()
     }
 
     private fun askStillWatching() {

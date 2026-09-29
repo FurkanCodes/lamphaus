@@ -130,6 +130,7 @@ class UserPreferences(private val context: Context) {
                 thresholdPercent = values[PLAYBACK_NEXT_EPISODE_PERCENT],
                 thresholdMinutes = values[PLAYBACK_NEXT_EPISODE_MINUTES],
                 autoPlayNext = values[PLAYBACK_AUTO_PLAY_NEXT],
+                askBeforeNext = values[PLAYBACK_ASK_BEFORE_NEXT],
             ),
             devicePlayback = devicePlaybackConfigFromKeys(
                 engine = values[PLAYBACK_ENGINE],
@@ -301,6 +302,7 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_NEXT_EPISODE_PERCENT] = settings.nextEpisodeThresholdPercent
             it[PLAYBACK_NEXT_EPISODE_MINUTES] = settings.nextEpisodeThresholdMinutesBeforeEnd
             it[PLAYBACK_AUTO_PLAY_NEXT] = settings.autoPlayNextEpisode
+            it[PLAYBACK_ASK_BEFORE_NEXT] = settings.askBeforeNextEpisode
         }
     }
 
@@ -386,6 +388,7 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_NEXT_EPISODE_PERCENT = floatPreferencesKey("playback_next_episode_percent")
         val PLAYBACK_NEXT_EPISODE_MINUTES = floatPreferencesKey("playback_next_episode_minutes")
         val PLAYBACK_AUTO_PLAY_NEXT = booleanPreferencesKey("playback_auto_play_next")
+        val PLAYBACK_ASK_BEFORE_NEXT = booleanPreferencesKey("playback_ask_before_next")
         val PLAYBACK_ENGINE = stringPreferencesKey("playback_engine")
         val PLAYBACK_DOLBY_VISION = stringPreferencesKey("playback_dolby_vision")
         val PLAYBACK_FRAME_RATE_MATCHING = stringPreferencesKey("playback_frame_rate_matching")
@@ -412,6 +415,7 @@ internal fun playbackSettingsFromKeys(
     thresholdPercent: Float?,
     thresholdMinutes: Float?,
     autoPlayNext: Boolean? = null,
+    askBeforeNext: Boolean? = null,
 ): PlaybackSettings = PlaybackSettings(
     skipIntroEnabled = skipIntro ?: true,
     skipEndingEnabled = skipEnding ?: true,
@@ -423,6 +427,7 @@ internal fun playbackSettingsFromKeys(
     nextEpisodeThresholdMinutesBeforeEnd =
         NextEpisodePolicy.clampedMinutesBeforeEnd(thresholdMinutes ?: 2f),
     autoPlayNextEpisode = autoPlayNext ?: true,
+    askBeforeNextEpisode = askBeforeNext ?: false,
 )
 
 /**

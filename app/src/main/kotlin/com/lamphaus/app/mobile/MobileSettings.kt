@@ -332,10 +332,27 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 // Depends on the next-episode card (MOB-SET-05).
                 PlaybackSettingRow(
-                    title = stringResource(R.string.auto_play_next),
-                    description = stringResource(R.string.auto_play_next_description),
-                    checked = playback.autoPlayNextEpisode,
+                    title = stringResource(R.string.ask_before_next),
+                    description = stringResource(R.string.ask_before_next_description),
+                    checked = playback.askBeforeNextEpisode,
                     enabled = playback.nextEpisodeEnabled,
+                    onCheckedChange = {
+                        viewModel.setPlaybackSettings(playback.copy(askBeforeNextEpisode = it))
+                    },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                // Depends on the next-episode card, and asking replaces it (MOB-SET-05).
+                PlaybackSettingRow(
+                    title = stringResource(R.string.auto_play_next),
+                    description = stringResource(
+                        if (playback.askBeforeNextEpisode) {
+                            R.string.auto_play_next_description_asking
+                        } else {
+                            R.string.auto_play_next_description
+                        },
+                    ),
+                    checked = playback.autoPlayNextEpisode,
+                    enabled = playback.nextEpisodeEnabled && !playback.askBeforeNextEpisode,
                     onCheckedChange = {
                         viewModel.setPlaybackSettings(playback.copy(autoPlayNextEpisode = it))
                     },

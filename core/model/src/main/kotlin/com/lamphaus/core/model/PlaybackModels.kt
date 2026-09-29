@@ -24,6 +24,11 @@ data class PlaybackSettings(
     val nextEpisodeThresholdMinutesBeforeEnd: Float = 2f,
     /** At an episode's end the next one starts after the card's countdown (Nuvio). */
     val autoPlayNextEpisode: Boolean = true,
+    /**
+     * At an episode's end the next one waits for a Yes on the "Up next"
+     * prompt instead of starting on its own; takes precedence over auto-play.
+     */
+    val askBeforeNextEpisode: Boolean = false,
 )
 
 @Serializable

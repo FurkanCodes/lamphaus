@@ -279,6 +279,9 @@ internal fun PlaybackScreen(
     stillWatchingSecondsLeft: Int? = null,
     onStillWatchingContinue: () -> Unit = {},
     onStillWatchingStop: () -> Unit = {},
+    upNextSecondsLeft: Int? = null,
+    onUpNextYes: () -> Unit = {},
+    onUpNextNo: () -> Unit = {},
     episodeSwitch: EpisodeSwitchState? = null,
     onSelectEpisode: (com.lamphaus.core.model.Episode) -> Unit = {},
 ) {
@@ -416,6 +419,7 @@ internal fun PlaybackScreen(
         nextEpisode.hasAired() &&
         timingReady
     val nextEpisodeCardVisible = nextEpisodeReady && !nextEpisodeDismissed
+    val endPromptShown = stillWatchingSecondsLeft != null || upNextSecondsLeft != null
     val nextEpisodeSkipInCard = nextEpisodeCardVisible && !wideLayout && !isTelevision &&
         activeSegment?.type == PlaybackSegmentType.ENDING
 
@@ -530,8 +534,8 @@ internal fun PlaybackScreen(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || player == null || startupLoading) return@onPreviewKeyEvent false
-                // "Still watching?" owns the remote: its buttons take Select and the D-pad.
-                if (stillWatchingSecondsLeft != null) return@onPreviewKeyEvent false
+                // "Still watching?" and "Up next" own the remote: their buttons take Select and the D-pad.
+                if (endPromptShown) return@onPreviewKeyEvent false
                 // Any key is interaction: it restarts the auto-hide and pause-overlay timers.
                 interactionVersion++
                 if (cueFocused && !controlsVisible && event.key in CUE_KEYS) return@onPreviewKeyEvent false
@@ -875,8 +879,8 @@ internal fun PlaybackScreen(
             DisposableEffect(Unit) { onDispose { cueFocused = false } }
             nextEpisode?.let { current ->
                 // Nuvio: the card takes TV focus when it appears over clean viewing.
-                LaunchedEffect(current.id, controlsVisible) {
-                    if (isTelevision && !controlsVisible) runCatching { nextEpisodeFocus.requestFocus() }
+                LaunchedEffect(current.id, controlsVisible, endPromptShown) {
+                    if (isTelevision && !controlsVisible && !endPromptShown) runCatching { nextEpisodeFocus.requestFocus() }
                 }
                 NextEpisodeCard(
                     episode = current,
@@ -1076,7 +1080,7 @@ internal fun PlaybackScreen(
         }
 
         AnimatedVisibility(
-            visible = pauseOverlayVisible && stillWatchingSecondsLeft == null,
+            visible = pauseOverlayVisible && !endPromptShown,
             enter = fadeIn(tween(if (reducedMotion) 0 else 220)),
             exit = fadeOut(tween(if (reducedMotion) 0 else 160)),
         ) {
@@ -1103,6 +1107,17 @@ internal fun PlaybackScreen(
                 isTelevision = isTelevision,
                 onContinue = onStillWatchingContinue,
                 onStop = onStillWatchingStop,
+            )
+        }
+        if (upNextSecondsLeft != null && nextEpisode != null && !inPictureInPicture) {
+            UpNextPrompt(
+                episode = nextEpisode,
+                secondsLeft = upNextSecondsLeft,
+                blurArtwork = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched = false),
+                hideSynopsis = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched = false),
+                isTelevision = isTelevision,
+                onYes = onUpNextYes,
+                onNo = onUpNextNo,
             )
         }
     }

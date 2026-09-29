@@ -1,30 +1,41 @@
 package com.lamphaus.app.player
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,17 +49,21 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
-import com.lamphaus.app.ui.releaseCountdownText
 import com.lamphaus.app.ui.ReleaseKind
 import com.lamphaus.app.ui.SpoilerBlurLayer
+import com.lamphaus.app.ui.releaseCountdownText
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.hasAired
 
@@ -158,6 +173,116 @@ internal fun NextEpisodeCard(
             ) {
                 Text(stringResource(R.string.next_episode_skip_credits), fontFamily = PlayerFont)
             }
+        }
+    }
+}
+
+/**
+ * Nuvio's "Up next" at an episode's end when Ask before next episode is on
+ * (PLY-AUTO-01): the next episode's still, code, title, and synopsis over a
+ * Yes/No question. Yes starts it; No, Back, or no answer before the
+ * countdown ends closes the player. Spoiler protection veils the still and
+ * leaves the synopsis out. Side by side when there is room, stacked on a
+ * narrow window; the panel scrolls rather than clips at large font scales.
+ */
+@Composable
+internal fun UpNextPrompt(
+    episode: Episode,
+    secondsLeft: Int,
+    blurArtwork: Boolean,
+    hideSynopsis: Boolean,
+    isTelevision: Boolean,
+    onYes: () -> Unit,
+    onNo: () -> Unit,
+) {
+    val yesFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { yesFocus.requestFocus() } }
+    BackHandler(onBack = onNo)
+    val title = stringResource(R.string.up_next_title)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f))
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .semantics { paneTitle = title },
+        contentAlignment = Alignment.Center,
+    ) {
+        BoxWithConstraints(Modifier.widthIn(max = 640.dp).padding(24.dp)) {
+            val sideBySide = maxWidth >= 520.dp
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(PlayerSurface, RoundedCornerShape(if (isTelevision) 4.dp else 16.dp))
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (sideBySide) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        NextEpisodeThumbnail(
+                            episode,
+                            blurArtwork,
+                            Modifier.width(if (isTelevision) 240.dp else 208.dp).aspectRatio(16f / 9f),
+                        )
+                        UpNextDetails(episode, title, hideSynopsis, Modifier.weight(1f))
+                    }
+                } else {
+                    NextEpisodeThumbnail(episode, blurArtwork, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+                    UpNextDetails(episode, title, hideSynopsis)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = stringResource(R.string.up_next_question),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = PlayerOnSurface,
+                    )
+                    Text(
+                        text = pluralStringResource(R.plurals.up_next_closes_in, secondsLeft, secondsLeft),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PlayerOnSurfaceMuted,
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                ) {
+                    PlayerTextButton(stringResource(R.string.up_next_no), onClick = onNo)
+                    PlayerTextButton(
+                        stringResource(R.string.up_next_yes),
+                        onClick = onYes,
+                        modifier = Modifier.focusRequester(yesFocus),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpNextDetails(episode: Episode, title: String, hideSynopsis: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+            color = PlayerOnSurfaceMuted,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(
+            text = episodeDisplayLabel(episode),
+            style = MaterialTheme.typography.titleLarge,
+            color = PlayerOnSurface,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        episode.overview?.takeUnless { hideSynopsis || it.isBlank() }?.let { overview ->
+            Text(
+                text = overview,
+                style = MaterialTheme.typography.bodyMedium,
+                color = PlayerOnSurfaceMuted,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
