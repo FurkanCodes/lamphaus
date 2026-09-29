@@ -811,6 +811,18 @@ private fun TvSignedIn(
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val navFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val contentStates = rememberSaveableStateHolder()
+    // Kept outside Search's page state so the query survives a page switch.
+    var searchQuery by rememberSaveable { mutableStateOf(initialSearch.orEmpty()) }
+    // A page switched to opens at its beginning, so its entry item (the first
+    // card or chip, inside a lazy list) is composed and can take focus; a
+    // restored scroll position left it disposed and focus stuck on the rail
+    // (TV-NAV-01). Settings keeps its selected section.
+    val switchTo: (TvDestination) -> Unit = { next ->
+        if (next != destination) {
+            if (next != TvDestination.SETTINGS) contentStates.removeState(next.name)
+            destination = next
+        }
+    }
     val watchedEpisodeIds = remember(state.progress) {
         state.progress.asSequence()
             .filter { it.completed }
@@ -1051,10 +1063,10 @@ private fun TvSignedIn(
                     },
                 ),
         ) {
-            // Per-destination saveable state (scroll positions, search query,
-            // settings section) survives both detail round-trips and tab
-            // switches, so returning re-composes the previously focused item
-            // and mediaFocusRestore can reach it, per TV-NAV-02/TV-FOC-03.
+            // Per-destination saveable state (scroll positions, settings
+            // section) survives detail round-trips, so returning re-composes
+            // the previously focused item and mediaFocusRestore can reach it,
+            // per TV-NAV-02/TV-FOC-03. A page switch resets it (switchTo).
             contentStates.SaveableStateProvider(destination.name) {
                 when (destination) {
                     TvDestination.HOME -> SignedInHome(catalogType = null)
@@ -1080,7 +1092,8 @@ private fun TvSignedIn(
                     )
 
                     TvDestination.SEARCH -> TvSearch(
-                        initialSearch = initialSearch.orEmpty(),
+                        query = searchQuery,
+                        onQueryChange = { searchQuery = it },
                         state = state,
                         onSearch = viewModel::searchContent,
                         onCatalogLoadMore = viewModel::loadMoreCatalog,
@@ -1139,7 +1152,7 @@ private fun TvSignedIn(
                 },
                 onDestination = {
                     focusReturn.forget()
-                    destination = it
+                    switchTo(it)
                     contentEntry = it
                 },
                 onReturnToContent = returnToContent,
@@ -1155,7 +1168,7 @@ private fun TvSignedIn(
                 contentDownRequester = contentFocus.getValue(destination),
                 onFocusHandled = { focusDestination = null },
                 onHasFocus = { navHasFocus = it },
-                onDestination = { destination = it },
+                onDestination = switchTo,
                 onProfileSwitcher = { profileSwitcherOpen = true },
                 modifier = Modifier.padding(
                     start = TvLayoutTokens.screenHorizontalPadding,
@@ -2284,7 +2297,8 @@ private fun TvPosterSkeleton() {
 
 @Composable
 private fun TvSearch(
-    initialSearch: String,
+    query: String,
+    onQueryChange: (String) -> Unit,
     state: AppUiState,
     onSearch: (String) -> Unit,
     onCatalogLoadMore: (String) -> Unit,
@@ -2295,7 +2309,6 @@ private fun TvSearch(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
-    var query by rememberSaveable { mutableStateOf(initialSearch) }
     val focusManager = LocalFocusManager.current
     LaunchedEffect(query) { onSearch(query) }
     val blank = query.isBlank()
@@ -2324,7 +2337,7 @@ private fun TvSearch(
             Box(Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding)) {
                 TvEditableTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = onQueryChange,
                     label = stringResource(R.string.search_label),
                     placeholder = stringResource(R.string.search_tv_hint),
                     contentPadding = PaddingValues(horizontal = 28.dp, vertical = 20.dp),
