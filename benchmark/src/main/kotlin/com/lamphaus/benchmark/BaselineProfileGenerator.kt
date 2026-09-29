@@ -136,8 +136,7 @@ class BaselineProfileGenerator {
         device.requireFixtureHome()
         device.awaitTvBootSequence()
         device.waitForIdle()
-        device.pressDPadDown()
-        device.waitForIdle()
+        // Home opens with focus on its first card (TV-NAV-01 side rail default).
         device.pressDPadCenter()
         check(device.wait(Until.hasObject(By.text("Play")), 10_000)) { "TV details did not open" }
         device.waitForIdle()

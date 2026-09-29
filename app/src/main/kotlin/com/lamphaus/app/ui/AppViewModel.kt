@@ -206,6 +206,8 @@ class AppViewModel(
                     localOnlyArtworkKeys = settings.localOnlyArtworkKeys,
                     backgroundArtwork = settings.backgroundArtwork,
                     tvHomeLayout = settings.tvHomeLayout,
+                    tvNavigationStyle = settings.tvNavigationStyle,
+                    tvBlackBackground = settings.tvBlackBackground,
                     trailers = settings.trailers,
                     hideUnreleased = settings.hideUnreleased,
                     sourceFit = settings.sourceFit,
@@ -272,6 +274,8 @@ class AppViewModel(
                             container.isLowRamDevice,
                         ),
                         tvHomeLayout = TvHomeLayout.fromName(snapshot.tvHomeLayout),
+                        tvNavigationStyle = TvNavigationStyle.fromName(snapshot.tvNavigationStyle),
+                        tvBlackBackground = snapshot.tvBlackBackground,
                         trailers = snapshot.trailers,
                         hideUnreleased = snapshot.hideUnreleased,
                         sourceFit = snapshot.sourceFit,
@@ -1958,6 +1962,14 @@ class AppViewModel(
         container.preferences.setTvHomeLayout(layout.name)
     }
 
+    fun setTvNavigationStyle(style: TvNavigationStyle) = viewModelScope.launch {
+        container.preferences.setTvNavigationStyle(style.name)
+    }
+
+    fun setTvBlackBackground(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setTvBlackBackground(enabled)
+    }
+
     fun setTrailersEnabled(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setTrailers(enabled)
     }
@@ -2930,6 +2942,8 @@ class AppViewModel(
         val localOnlyArtworkKeys: Boolean,
         val backgroundArtwork: Boolean?,
         val tvHomeLayout: String?,
+        val tvNavigationStyle: String?,
+        val tvBlackBackground: Boolean,
         val trailers: Boolean?,
         val hideUnreleased: Boolean,
         val sourceFit: Boolean,

@@ -43,8 +43,12 @@ data class UserSettings(
      * the right answer depends on each TV.
      */
     val backgroundArtwork: Boolean? = null,
-    /** Device-local TV Home layout name; null means the default (classic). */
+    /** Device-local TV Home layout name; null means the default (spotlight). */
     val tvHomeLayout: String? = null,
+    /** Device-local TV navigation placement name; null means the default (side rail). */
+    val tvNavigationStyle: String? = null,
+    /** Device-local TV choice: black background and panels instead of the dark grey scheme. */
+    val tvBlackBackground: Boolean = false,
     /**
      * Device-local trailer choice. Null means the platform default: the
      * mobile Trailer button is on, TV Spotlight previews are opt-in.
@@ -99,6 +103,8 @@ class UserPreferences(private val context: Context) {
             localOnlyArtworkKeys = values[LOCAL_ONLY_ARTWORK_KEYS] ?: false,
             backgroundArtwork = values[BACKGROUND_ARTWORK],
             tvHomeLayout = values[TV_HOME_LAYOUT],
+            tvNavigationStyle = values[TV_NAVIGATION_STYLE],
+            tvBlackBackground = values[TV_BLACK_BACKGROUND] ?: false,
             trailers = values[TRAILERS],
             hideUnreleased = values[HIDE_UNRELEASED] ?: false,
             sourceFit = values[SOURCE_FIT] ?: true,
@@ -194,6 +200,20 @@ class UserPreferences(private val context: Context) {
     suspend fun setTvHomeLayout(name: String) {
         context.dataStore.edit {
             it[TV_HOME_LAYOUT] = name
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setTvNavigationStyle(name: String) {
+        context.dataStore.edit {
+            it[TV_NAVIGATION_STYLE] = name
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setTvBlackBackground(enabled: Boolean) {
+        context.dataStore.edit {
+            it[TV_BLACK_BACKGROUND] = enabled
         }
     }
 
@@ -345,6 +365,8 @@ class UserPreferences(private val context: Context) {
         val LOCAL_ONLY_ARTWORK_KEYS = booleanPreferencesKey("local_only_artwork_keys")
         val BACKGROUND_ARTWORK = booleanPreferencesKey("background_artwork")
         val TV_HOME_LAYOUT = stringPreferencesKey("tv_home_layout")
+        val TV_NAVIGATION_STYLE = stringPreferencesKey("tv_navigation_style")
+        val TV_BLACK_BACKGROUND = booleanPreferencesKey("tv_black_background")
         val TRAILERS = booleanPreferencesKey("trailers")
         val HIDE_UNRELEASED = booleanPreferencesKey("hide_unreleased")
         val SOURCE_FIT = booleanPreferencesKey("source_fit")

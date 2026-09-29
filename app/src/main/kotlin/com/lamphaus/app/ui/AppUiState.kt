@@ -185,12 +185,26 @@ enum class TvHomeLayout {
     /** A featured hero followed by poster rows. */
     CLASSIC,
 
-    /** No hero; the focused title widens in its row and its details appear below it. */
+    /** No hero; the focused title widens in its row and its details appear below it. The default. */
     SPOTLIGHT,
     ;
 
     companion object {
-        fun fromName(name: String?): TvHomeLayout = entries.firstOrNull { it.name == name } ?: CLASSIC
+        fun fromName(name: String?): TvHomeLayout = entries.firstOrNull { it.name == name } ?: SPOTLIGHT
+    }
+}
+
+/** Where the TV navigation sits (TV-NAV-01). */
+enum class TvNavigationStyle {
+    /** A slim icon rail at the start that opens over the page when it takes focus. The default. */
+    SIDE_RAIL,
+
+    /** One row across the top of every page. */
+    TOP_BAR,
+    ;
+
+    companion object {
+        fun fromName(name: String?): TvNavigationStyle = entries.firstOrNull { it.name == name } ?: SIDE_RAIL
     }
 }
 
@@ -342,7 +356,10 @@ data class AppUiState(
     val localOnlyArtworkKeys: Boolean = false,
     /** Effective TV background artwork choice (see [effectiveBackgroundArtwork]). */
     val backgroundArtworkEnabled: Boolean = true,
-    val tvHomeLayout: TvHomeLayout = TvHomeLayout.CLASSIC,
+    val tvHomeLayout: TvHomeLayout = TvHomeLayout.SPOTLIGHT,
+    val tvNavigationStyle: TvNavigationStyle = TvNavigationStyle.SIDE_RAIL,
+    /** Device-local TV choice: black background and panels instead of the dark grey scheme. */
+    val tvBlackBackground: Boolean = false,
     /** Device-local trailer choice; null means the platform default (mobile on, TV off). */
     val trailers: Boolean? = null,
     /** Device-local: not-yet-released titles are left out of Home and Discover rows. */
@@ -401,6 +418,8 @@ data class AppUiState(
         localOnlyArtworkKeys = localOnlyArtworkKeys,
         backgroundArtworkEnabled = backgroundArtworkEnabled,
         tvHomeLayout = tvHomeLayout,
+        tvNavigationStyle = tvNavigationStyle,
+        tvBlackBackground = tvBlackBackground,
         trailers = trailers,
         hideUnreleased = hideUnreleased,
         sourceFit = sourceFit,

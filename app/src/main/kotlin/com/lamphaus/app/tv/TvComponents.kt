@@ -916,6 +916,7 @@ internal fun TvFocusableSurface(
     content: @Composable (focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val restingOutline = LocalTvSurfaces.current.actionOutline
     val reducedMotion = rememberReducedMotion()
     val focusProgress by animateFloatAsState(
         targetValue = if (focused) 1f else 0f,
@@ -944,8 +945,12 @@ internal fun TvFocusableSurface(
                 shape = TvShapeTokens.button,
             )
             .border(
-                width = if (focused) TvFocusTokens.outlineWidth else 0.dp,
-                color = if (focused) TvFocusTokens.focusedCardOutline else Color.Transparent,
+                width = when {
+                    focused -> TvFocusTokens.outlineWidth
+                    restingOutline != Color.Transparent -> 1.dp
+                    else -> 0.dp
+                },
+                color = if (focused) TvFocusTokens.focusedCardOutline else restingOutline,
                 shape = TvShapeTokens.button,
             )
             .clip(TvShapeTokens.button)

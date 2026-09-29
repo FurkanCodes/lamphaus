@@ -1,6 +1,7 @@
 package com.lamphaus.app.tv
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -78,11 +79,21 @@ private val LamphausTvTypography = Typography(
     bodySmall = tvTextStyle(FontWeight.Normal, 12, 16, 0.2f),
 )
 
+/** TV-CLR-01: the same roles with a black page and panels, for Appearance → Black background. */
+private val LamphausTvBlackColors = LamphausTvColors.copy(
+    background = Color.Black,
+    surface = Color.Black,
+)
+
 @Composable
-fun LamphausTvTheme(content: @Composable () -> Unit) {
+fun LamphausTvTheme(blackBackground: Boolean = false, content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = LamphausTvColors,
+        colorScheme = if (blackBackground) LamphausTvBlackColors else LamphausTvColors,
         typography = LamphausTvTypography,
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(
+            LocalTvSurfaces provides if (blackBackground) TvSurfaces.Black else TvSurfaces.Dark,
+            content = content,
+        )
+    }
 }
