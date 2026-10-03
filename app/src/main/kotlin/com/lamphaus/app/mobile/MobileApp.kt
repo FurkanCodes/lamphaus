@@ -557,12 +557,9 @@ private fun MobileSignedInApp(
     var destination by rememberSaveable { mutableStateOf(MobileDestination.HOME) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var pendingMediaFocusKey by rememberSaveable { mutableStateOf<String?>(null) }
-    // The tapped card and its title, so only that card morphs into the page (MOB-MOT-01).
-    var detailOrigin by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
     val destinationStates = rememberSaveableStateHolder()
     val openMedia: (MediaPreview, String) -> Unit = { media, focusKey ->
         pendingMediaFocusKey = focusKey
-        detailOrigin = focusKey to media.stableKey
         viewModel.loadDetail(media)
     }
     val watchedEpisodeIds = remember(state.progress) {
@@ -678,7 +675,6 @@ private fun MobileSignedInApp(
                             newEpisodePrompt = newEpisodePrompt,
                             onEnableNewEpisodes = enableNewEpisodes,
                             onDismissNewEpisodes = viewModel::dismissNewEpisodePrompt,
-                            sharedKey = detailOrigin?.takeIf { it.second == detail.preview.stableKey }?.first,
                         )
                     }
                 } else {
