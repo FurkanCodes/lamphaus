@@ -4,6 +4,14 @@ import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.KeyEvent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lamphaus.app.ui.rememberReducedMotion
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -31,6 +39,8 @@ class TvActivity : ComponentActivity() {
             (application as LamphausApplication).container.updateCoordinator,
         )
     }
+
+    private val ambientHost = TvAmbientHost()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,19 +71,31 @@ class TvActivity : ComponentActivity() {
         val watchNextKey = WatchNextPublisher.mediaKeyFrom(intent)
         if (savedInstanceState == null) watchNextKey?.let(viewModel::openWatchNext)
         setContent {
-            TvApp(
-                viewModel = viewModel,
-                initialSearch = intent?.getStringExtra(SearchManager.QUERY),
-                fromHomeScreen = watchNextKey != null,
-                onPlay = { startActivity(PlayerActivity.intent(this, it)) },
-                onExternalPlay = ::openExternalPlayback,
-                updateViewModel = updateViewModel,
-            )
+            CompositionLocalProvider(LocalTvAmbientHost provides ambientHost) {
+                Box(Modifier.fillMaxSize()) {
+                    TvApp(
+                        viewModel = viewModel,
+                        initialSearch = intent?.getStringExtra(SearchManager.QUERY),
+                        fromHomeScreen = watchNextKey != null,
+                        onPlay = { startActivity(PlayerActivity.intent(this@TvActivity, it)) },
+                        onExternalPlay = ::openExternalPlayback,
+                        updateViewModel = updateViewModel,
+                    )
+                    val state by viewModel.state.collectAsStateWithLifecycle()
+                    TvIdleAmbient(state, ambientHost, rememberReducedMotion())
+                }
+            }
         }
         // QA-08: once Compose draws, its root Surface covers the window with
         // an opaque background, so the splash-coloured window background would
         // only add a redundant full-screen pass to every frame.
         window.decorView.post { window.setBackgroundDrawable(null) }
+    }
+
+    /** Every key resets the idle ambient; a key that ends it never reaches the page (TV-AMB-01). */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (ambientHost.onKey(down = event.action == KeyEvent.ACTION_DOWN)) return true
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onResume() {

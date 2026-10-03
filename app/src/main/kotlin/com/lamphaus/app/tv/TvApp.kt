@@ -80,6 +80,8 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
@@ -788,6 +790,14 @@ internal fun TvPairingContent(
     }
 }
 
+private val AMBIENT_DESTINATIONS = setOf(
+    TvDestination.HOME,
+    TvDestination.MOVIES,
+    TvDestination.SERIES,
+    TvDestination.DISCOVER,
+    TvDestination.LIBRARY,
+)
+
 internal object TvTestTags {
     const val PairingRefresh = "pairing_refresh"
     const val PairingDevelopment = "pairing_development"
@@ -819,6 +829,16 @@ private fun TvSignedIn(
     // card or chip, inside a lazy list) is composed and can take focus; a
     // restored scroll position left it disposed and focus stuck on the rail
     // (TV-NAV-01). Settings keeps its selected section.
+    // TV-AMB-01: the idle ambient may cover browsing pages only, never
+    // details, settings, menus, or a source list.
+    val ambientHost = LocalTvAmbientHost.current
+    SideEffect {
+        ambientHost.eligible = destination in AMBIENT_DESTINATIONS &&
+            state.selectedDetail == null &&
+            state.sourcePicker == null &&
+            state.contentMenu.target == null
+    }
+    DisposableEffect(ambientHost) { onDispose { ambientHost.eligible = false } }
     val switchTo: (TvDestination) -> Unit = { next ->
         if (next != destination) {
             if (next != TvDestination.SETTINGS) contentStates.removeState(next.name)
@@ -3920,6 +3940,14 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 onClick = {
                     viewModel.setTvNavigationStyle(if (rail) TvNavigationStyle.TOP_BAR else TvNavigationStyle.SIDE_RAIL)
                 },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.idle_ambient),
+                description = stringResource(R.string.idle_ambient_description),
+                checked = state.engagement.tvIdleAmbient,
+                onCheckedChange = viewModel::setTvIdleAmbient,
             )
         }
         item {

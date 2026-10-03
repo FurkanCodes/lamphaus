@@ -2067,6 +2067,11 @@ class AppViewModel(
         container.preferences.setTvBlackBackground(enabled)
     }
 
+    /** Device-local TV opt-in for the idle ambient (TV-AMB-01). */
+    fun setTvIdleAmbient(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setTvIdleAmbient(enabled)
+    }
+
     fun setTrailersEnabled(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setTrailers(enabled)
     }

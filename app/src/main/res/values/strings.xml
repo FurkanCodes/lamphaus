@@ -643,4 +643,7 @@
         <item quantity="one">%d min left</item>
         <item quantity="other">%d min left</item>
     </plurals>
+    <!-- TV ambient screensaver (TV-AMB-01) -->
+    <string name="idle_ambient">Ambient after idle</string>
+    <string name="idle_ambient_description">After five minutes without the remote on a browsing page, show your titles\' artwork with a clock. Any button returns. Where your TV offers a screensaver choice, Lamphaus is listed there too.</string>
 </resources>
