@@ -445,6 +445,8 @@
     <string name="facts_revenue">Revenue</string>
     <string name="rating_votes_count">%1$s votes</string>
     <string name="rating_attribution">Rating provided by %1$s</string>
+    <string name="rating_open_source">Open on %1$s</string>
+    <string name="rating_open_unavailable">No app on this device can open web pages.</string>
     <string name="rating_last_updated">Updated %1$s</string>
     <string name="detail_enrichment_failed">Ratings and credits could not be loaded.</string>
 

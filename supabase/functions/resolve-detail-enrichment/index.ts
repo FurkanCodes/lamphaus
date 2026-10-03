@@ -398,6 +398,24 @@ function tmdbRatingFrom(details: TmdbSummary): Record<string, unknown> | null {
   };
 }
 
+/**
+ * The exact page for a rating whose source id this pass resolved; the app
+ * falls back to the source's own search otherwise. Only public ids travel.
+ */
+function withDetailsUrl(
+  rating: Record<string, unknown>,
+  imdbId: string | null,
+  tmdbId: number | null,
+  tmdbPath: "movie" | "tv",
+): Record<string, unknown> {
+  const detailsUrl = rating.sourceId === "imdb" && imdbId !== null
+    ? `https://www.imdb.com/title/${encodeURIComponent(imdbId)}/`
+    : rating.sourceId === "tmdb" && tmdbId !== null
+    ? `https://www.themoviedb.org/${tmdbPath}/${tmdbId}`
+    : null;
+  return detailsUrl === null ? rating : { ...rating, detailsUrl };
+}
+
 // ─────────────────────────────── handler ───────────────────────────────
 
 Deno.serve(async (req) => {
@@ -469,7 +487,9 @@ Deno.serve(async (req) => {
     cast: [],
     crew: [],
     similar: [],
-    ratings: ratingsOut,
+    ratings: ratingsOut.map((rating) =>
+      withDetailsUrl(rating, imdbId, resolution.tmdbId, tmdbType)
+    ),
     facts: null,
     fetchedAtEpochMillis: Date.now(),
   };

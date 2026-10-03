@@ -19,17 +19,22 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -44,6 +49,7 @@ import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.openRatingPage
 import com.lamphaus.core.model.MediaFacts
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PersonCredit
@@ -172,17 +178,22 @@ internal fun TvSimilarRail(
 
 /**
  * Select affordance for a rating badge: value, scale, votes, attribution and
- * data freshness. Never gated behind Back (TV-NAV-04): the dialog carries its
- * own visible Close action.
+ * data freshness, plus "Open on <source>" when the source has a page for the
+ * title. Never gated behind Back (TV-NAV-04): the dialog carries its own
+ * visible Close action.
  */
 @Composable
 internal fun TvRatingDetailsDialog(
     rating: RatingSourceScore,
+    detailsUrl: String?,
     fetchedAtEpochMillis: Long?,
     onDismiss: () -> Unit,
 ) {
-    val closeFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { closeFocus.requestFocus() }
+    val context = LocalContext.current
+    val firstFocus = remember { FocusRequester() }
+    // Many televisions have no browser: the failure stays in the dialog (SHR-PROD-04).
+    var openFailed by remember(rating.sourceId) { mutableStateOf(false) }
+    LaunchedEffect(Unit) { firstFocus.requestFocus() }
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier.width(640.dp),
@@ -231,11 +242,26 @@ internal fun TvRatingDetailsDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (openFailed) {
+                    Text(
+                        text = stringResource(R.string.rating_open_unavailable),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (detailsUrl != null) {
+                        TvAction(
+                            label = stringResource(R.string.rating_open_source, rating.displayName),
+                            icon = Icons.AutoMirrored.Outlined.OpenInNew,
+                            modifier = Modifier.focusRequester(firstFocus),
+                            onClick = { openFailed = !openRatingPage(context, detailsUrl) },
+                        )
+                    }
                     TvAction(
                         label = stringResource(R.string.close),
                         icon = Icons.Outlined.Close,
-                        modifier = Modifier.focusRequester(closeFocus),
+                        modifier = if (detailsUrl == null) Modifier.focusRequester(firstFocus) else Modifier,
                         onClick = onDismiss,
                     )
                 }

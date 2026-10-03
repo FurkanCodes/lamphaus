@@ -1,6 +1,7 @@
 package com.lamphaus.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,12 +12,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -176,18 +180,37 @@ private fun ratingBadgeDescription(score: RatingSourceScore): String = stringRes
     ratingValueText(score),
 )
 
-/** Non-interactive badge: brand chip + value, one accessibility unit. */
+/**
+ * Brand chip + value, one accessibility unit. With [onClick] it is a touch
+ * button (mobile: 48dp target, MOB-A11Y-04) that names where it leads.
+ */
 @Composable
 fun RatingBadge(
     score: RatingSourceScore,
     modifier: Modifier = Modifier,
     valueColor: Color = Color.Unspecified,
+    onClick: (() -> Unit)? = null,
 ) {
     val description = ratingBadgeDescription(score)
+    val openLabel = stringResource(R.string.rating_open_source, score.displayName)
     Row(
-        modifier = modifier.clearAndSetSemantics {
-            contentDescription = description
-        },
+        modifier = modifier
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .minimumInteractiveComponentSize()
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClickLabel = openLabel, role = Role.Button, onClick = onClick)
+                        .padding(horizontal = 4.dp)
+                } else {
+                    Modifier
+                },
+            )
+            // The clickable above keeps its role and labeled action; this
+            // node folds chip and value into one spoken description.
+            .clearAndSetSemantics {
+                contentDescription = description
+            },
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

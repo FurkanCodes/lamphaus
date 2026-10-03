@@ -77,6 +77,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -104,7 +105,9 @@ import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.metadataImdbScore
 import com.lamphaus.app.ui.metadataPresentation
+import com.lamphaus.app.ui.openRatingPage
 import com.lamphaus.app.ui.orderedRatingScores
+import com.lamphaus.app.ui.ratingDetailsUrl
 import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.core.model.DetailEnrichment
@@ -534,11 +537,20 @@ private fun DetailHeadline(
             )
         }
         if (ratings.isNotEmpty()) {
+            val context = LocalContext.current
+            // Each badge opens the title's page on its source in the browser
+            // (MOB-NAV-11); the 48dp targets carry their own spacing.
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
             ) {
-                ratings.forEach { RatingBadge(it, valueColor = MobileTokens.textPrimary) }
+                ratings.forEach { score ->
+                    val url = ratingDetailsUrl(score, detail.preview)
+                    RatingBadge(
+                        score,
+                        valueColor = MobileTokens.textPrimary,
+                        onClick = url?.let { { openRatingPage(context, it) } },
+                    )
+                }
             }
         }
         Spacer(Modifier.height(4.dp))
