@@ -1,5 +1,7 @@
 package com.lamphaus.app.player
 
+import com.lamphaus.core.model.countedWatchMillis
+import android.os.SystemClock
 import android.app.PictureInPictureParams
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -157,6 +159,8 @@ class PlayerActivity : ComponentActivity() {
     /** Position of the last progress write; guards against redundant periodic saves. */
     @Volatile
     private var lastSavedPositionMillis = -1L
+    /** Where and when watch time was last counted for the monthly recap (SHR-PROD-17). */
+    private var viewingAnchor: ViewingAnchor? = null
     private val controller: MediaController? get() = controllerState.value
     private val isTelevision by lazy { packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
 
@@ -1355,6 +1359,12 @@ class PlayerActivity : ComponentActivity() {
         // or just-started player never produces redundant writes.
         if (!final && position - lastSavedPositionMillis < PROGRESS_SAVE_DELTA_MILLIS) return
         lastSavedPositionMillis = position
+        val wallNow = SystemClock.elapsedRealtime()
+        val watchedMillis = viewingAnchor
+            ?.takeIf { it.videoId == playback.videoId }
+            ?.let { anchor -> countedWatchMillis(anchor.positionMillis, position, wallNow - anchor.wallMillis) }
+            ?: 0L
+        viewingAnchor = ViewingAnchor(playback.videoId, position, wallNow)
         container.applicationScope.launch {
             val profileId = container.preferences.settings.first().activeProfileId ?: run {
                 Log.d(PROGRESS_LOG_TAG, "save skipped: no active profile")
@@ -1366,6 +1376,9 @@ class PlayerActivity : ComponentActivity() {
                 naturalEnd = naturalEnd,
                 endingSegments = segmentsState.value,
             )
+            if (watchedMillis > 0) {
+                container.viewingLogRepository.addWatchTime(profileId, playback.mediaKey, watchedMillis, System.currentTimeMillis())
+            }
             val progress = container.libraryRepository.saveProgress(
                 WatchProgress(
                     profileId = profileId,
@@ -1481,3 +1494,6 @@ private fun audioRouteFingerprint(audioManager: AudioManager): String {
         .joinToString("") { "%02x".format(it) }
         .take(16)
 }
+
+/** A playback position and the moment it was saved, for counting watch time. */
+private data class ViewingAnchor(val videoId: String, val positionMillis: Long, val wallMillis: Long)

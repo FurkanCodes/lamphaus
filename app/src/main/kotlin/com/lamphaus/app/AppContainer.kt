@@ -216,6 +216,9 @@ class AppContainer(context: Context) {
             json = enrichmentJson,
         )
     }
+    /** Private playing time per month, the monthly recap's source (SHR-PROD-17). */
+    val viewingLogRepository = com.lamphaus.core.data.repository.ViewingLogRepository(context)
+
     /** A cast member's other titles (MOB-SRCH-01); lookups need the cloud's TMDB access. */
     val personCreditsRepository = com.lamphaus.core.data.repository.PersonCreditsRepository(
         remote = supabase?.let { com.lamphaus.core.data.cloud.SupabasePersonCreditsRemoteDataSource(it, enrichmentJson) },

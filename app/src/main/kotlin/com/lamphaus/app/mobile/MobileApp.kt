@@ -83,6 +83,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -178,9 +179,12 @@ fun MobileApp(
             },
         ) {
         val snackbar = remember { SnackbarHostState() }
+        val undoLabel = stringResource(R.string.undo)
         LaunchedEffect(state.message) {
             state.message?.let {
-                snackbar.showSnackbar(it)
+                val action = state.messageAction
+                val result = snackbar.showSnackbar(it, actionLabel = action?.let { undoLabel })
+                if (action != null && result == SnackbarResult.ActionPerformed) viewModel.performMessageAction(action)
                 viewModel.dismissMessage()
             }
         }
@@ -703,6 +707,7 @@ private fun MobileSignedInApp(
                             MobileDestination.LIBRARY -> LibraryScreen(
                                 state = state,
                                 onMedia = openMedia,
+                                onDismissRecap = viewModel::dismissRecap,
                                 restoreMediaKey = pendingMediaFocusKey,
                                 onFocusRestored = { pendingMediaFocusKey = null },
                                 onOpenMenu = viewModel::openContentMenu,
@@ -907,14 +912,34 @@ private fun DiscoverScreen(
 private fun LibraryScreen(
     state: AppUiState,
     onMedia: (MediaPreview, String) -> Unit,
+    onDismissRecap: (month: String, message: String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onOpenMenu: (ContentMenuTarget) -> Unit,
     onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     val media = state.library.map { it.preview }
+    var recapOpen by rememberSaveable { mutableStateOf(false) }
+    val recapHidden = stringResource(R.string.recap_hidden)
+    state.monthlyRecap?.takeIf { recapOpen }?.let { recap ->
+        RecapSheet(
+            recap = recap,
+            onDismiss = { recapOpen = false },
+            onMedia = { selected ->
+                recapOpen = false
+                onMedia(selected, "library:recap:${selected.stableKey}")
+            },
+        )
+    }
     Column(Modifier.fillMaxSize()) {
         MobileScreenHeader(stringResource(R.string.library))
+        state.monthlyRecap?.let { recap ->
+            RecapCard(
+                recap = recap,
+                onOpen = { recapOpen = true },
+                onDismiss = { onDismissRecap(recap.month.toString(), recapHidden) },
+            )
+        }
         if (media.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Column(

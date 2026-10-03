@@ -715,6 +715,16 @@ private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
+            SettingsCard(stringResource(R.string.library)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.monthly_recap_setting),
+                    description = stringResource(R.string.monthly_recap_setting_description),
+                    checked = state.engagement.monthlyRecap,
+                    onCheckedChange = viewModel::setMonthlyRecap,
+                )
+            }
+        }
+        item {
             SettingsCard(stringResource(R.string.player_sources)) {
                 PlaybackSettingRow(
                     title = stringResource(R.string.source_fit_setting),

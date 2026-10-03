@@ -646,4 +646,26 @@
     <!-- TV ambient screensaver (TV-AMB-01) -->
     <string name="idle_ambient">Ambient after idle</string>
     <string name="idle_ambient_description">After five minutes without the remote on a browsing page, show your titles\' artwork with a clock. Any button returns. Where your TV offers a screensaver choice, Lamphaus is listed there too.</string>
+    <string name="undo">Undo</string>
+    <!-- Monthly recap (SHR-PROD-17) -->
+    <string name="recap_title">Your %1$s</string>
+    <string name="recap_sheet_title">Your %1$s in Lamphaus</string>
+    <string name="recap_open">see the recap</string>
+    <string name="recap_hide">Hide recap</string>
+    <string name="recap_hidden">Recap hidden</string>
+    <string name="recap_top_title">Watched most: %1$s</string>
+    <plurals name="recap_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <plurals name="recap_episodes">
+        <item quantity="one">%d episode</item>
+        <item quantity="other">%d episodes</item>
+    </plurals>
+    <plurals name="recap_movies">
+        <item quantity="one">%d movie</item>
+        <item quantity="other">%d movies</item>
+    </plurals>
+    <string name="monthly_recap_setting">Monthly recap</string>
+    <string name="monthly_recap_setting_description">In the first week of each month, Library shows how much you watched last month. Kept on this device only.</string>
 </resources>

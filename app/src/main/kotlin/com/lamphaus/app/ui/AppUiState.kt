@@ -379,6 +379,10 @@ data class AppUiState(
     val upNextDismissed: Set<String> = emptySet(),
     /** Device-local engagement choices: alerts, recap, idle ambient. */
     val engagement: EngagementSettings = EngagementSettings(),
+    /** Last month's private recap while it is relevant (SHR-PROD-17); null otherwise. */
+    val monthlyRecap: com.lamphaus.core.model.MonthlyRecap? = null,
+    /** What the snackbar's action does for [message], when it has one (MOB-CMP-05). */
+    val messageAction: MessageAction? = null,
     /** A cast member's page opened from the details page (MOB-SRCH-01); null when closed. */
     val personPage: PersonPageState? = null,
     /** The active profile's recent searches, newest first (MOB-SRCH-01). */
@@ -481,3 +485,9 @@ data class PersonPageState(
     val failed: Boolean = false,
     val showingTitle: Boolean = false,
 )
+
+/** A snackbar action, held as state so it survives configuration changes (SHR-ARC-09). */
+sealed interface MessageAction {
+    /** Undo hiding a month's recap. */
+    data class RestoreRecap(val month: String) : MessageAction
+}

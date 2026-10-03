@@ -335,6 +335,7 @@ class AppViewModel(
                         container.libraryRepository.clearLocalAccountData()
                         container.preferences.clearSyncedSettings()
                         container.preferences.clearPersonalHistory()
+                        container.viewingLogRepository.clear()
                         // Provider metadata is scoped to the previous account's
                         // configuration/auth; drop it with the rows (PERF-04).
                         snapshot.providers.forEach { container.providerClient.invalidateProvider(it.manifestUrl) }
@@ -357,6 +358,7 @@ class AppViewModel(
                 mutableState.update { it.copy(progress = progress) }
             }
         }
+        observeMonthlyRecap()
         viewModelScope.launch {
             state.mapActiveProfileId().filterNotNull().flatMapLatest(container.preferences::searchHistory).collectLatest { history ->
                 mutableState.update { it.copy(searchHistory = history) }
@@ -2030,6 +2032,7 @@ class AppViewModel(
             // and leak the old account's content into it via seeding.
             container.libraryRepository.clearLocalAccountData()
             container.preferences.clearPersonalHistory()
+            container.viewingLogRepository.clear()
             container.preferences.setActiveProfile(null)
             container.preferences.setPairingDeviceId(null)
             devicesLoadedOnce = false
@@ -2283,7 +2286,50 @@ class AppViewModel(
 
 
 
-    fun dismissMessage() = mutableState.update { it.copy(message = null) }
+    fun dismissMessage() = mutableState.update { it.copy(message = null, messageAction = null) }
+
+    /** The snackbar's action was chosen (MOB-CMP-05). */
+    fun performMessageAction(action: MessageAction) {
+        when (action) {
+            is MessageAction.RestoreRecap -> viewModelScope.launch { container.preferences.setRecapDismissedMonth(null) }
+        }
+    }
+
+    /**
+     * Last month's private recap for the active profile (SHR-PROD-17), from
+     * the device-local viewing log and finished progress. Rebuilt when the
+     * profile, the setting, a dismissal, the log, or progress changes.
+     */
+    private fun observeMonthlyRecap() = viewModelScope.launch {
+        state.map { Triple(it.activeProfileId, it.engagement.monthlyRecap, it.engagement.recapDismissedMonth) }
+            .distinctUntilChanged()
+            .flatMapLatest { (profileId, enabled, dismissed) ->
+                if (profileId == null || !enabled) {
+                    flowOf(null)
+                } else {
+                    val zone = java.time.ZoneId.systemDefault()
+                    val lastMonth = java.time.YearMonth.now(zone).minusMonths(1)
+                    combine(
+                        container.viewingLogRepository.getMonthStream(profileId, lastMonth),
+                        state.map { it.progress }.distinctUntilChanged(),
+                    ) { watched, progress ->
+                        com.lamphaus.core.model.monthlyRecap(System.currentTimeMillis(), zone, watched, progress, dismissed)
+                    }
+                }
+            }
+            .collectLatest { recap -> mutableState.update { it.copy(monthlyRecap = recap) } }
+    }
+
+    /** Hides last month's recap, with Undo in the snackbar (MOB-CMP-05). */
+    fun dismissRecap(month: String, message: String) = viewModelScope.launch {
+        container.preferences.setRecapDismissedMonth(month)
+        mutableState.update { it.copy(message = message, messageAction = MessageAction.RestoreRecap(month)) }
+    }
+
+    /** Device-local: Settings → Browsing → Monthly recap (SHR-PROD-17). */
+    fun setMonthlyRecap(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setMonthlyRecap(enabled)
+    }
 
     private suspend fun loadSubtitles(
         media: MediaPreview,
