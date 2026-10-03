@@ -4,13 +4,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.runtime.produceState
-import com.lamphaus.app.ui.ArtworkPalette
-import com.lamphaus.app.ui.loadArtworkPalette
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -174,166 +168,163 @@ internal fun MobileDetailScreen(
     sharedKey: String? = null,
 ) {
     if (detail == null) return
-    DetailTint(detail.preview) {
-        var trailerOpen by rememberSaveable(detail.preview.stableKey) { mutableStateOf(false) }
-        if (trailerOpen) {
-            MobileTrailerDialog(
-                media = detail.preview,
-                resolve = resolveTrailer,
-                onDismiss = { trailerOpen = false },
-            )
-        }
-        val artworkResolver = LocalArtworkResolver.current
-        val preview = remember(detail.preview, artworkResolver) { artworkResolver.resolve(detail.preview).media }
-        val reducedMotion = rememberReducedMotion()
-        val enter = remember(detail.preview.stableKey) { Animatable(if (reducedMotion) ENTER_MILLIS.toFloat() else 0f) }
-        LaunchedEffect(detail.preview.stableKey) {
-            if (!reducedMotion) enter.animateTo(ENTER_MILLIS.toFloat(), tween(ENTER_MILLIS, easing = LinearEasing))
-        }
-        val menuTarget = ContentMenuTarget(
+    var trailerOpen by rememberSaveable(detail.preview.stableKey) { mutableStateOf(false) }
+    if (trailerOpen) {
+        MobileTrailerDialog(
             media = detail.preview,
-            progress = progress.firstOrNull { it.videoId == detail.preview.id },
-            origin = ContentMenuOrigin.DETAIL,
+            resolve = resolveTrailer,
+            onDismiss = { trailerOpen = false },
         )
-        val seasons = remember(detail) { detail.episodes.mapNotNull { it.season }.distinct().sorted() }
-        val resumeEpisode = detail.episodes.firstOrNull { it.id == resumeProgress?.videoId }
-        val recap = remember(detail.episodes, progress, watchedEpisodeIds, recapEnabled) {
-            if (recapEnabled) seriesRecap(detail.episodes, progress, watchedEpisodeIds) else null
-        }
-        // The viewer's pick, if any; the default follows the episodes as they load
-        // (the detail can arrive before its episode list).
-        var pickedSeason by rememberSaveable(detail.preview.stableKey) { mutableStateOf<Int?>(null) }
-        val selectedSeason = pickedSeason?.takeIf(seasons::contains)
-            ?: resumeEpisode?.season?.takeIf(seasons::contains)
-            ?: seasons.firstOrNull { it > 0 }
-            ?: seasons.firstOrNull()
-        val visibleEpisodes = remember(detail, selectedSeason) {
-            detail.episodes
-                .filter { selectedSeason == null || it.season == selectedSeason }
-                .sortedWith(compareBy<Episode>({ it.season ?: 0 }, { it.episode ?: Int.MAX_VALUE }))
-        }
-        val ratings = orderedRatingScores(
-            metadata = metadataImdbScore(preview.rating, preview.ratingSource, stringResource(R.string.source_imdb)),
-            enrichment = enrichment?.ratings.orEmpty(),
-        )
-        val cast: List<PersonCredit> = enrichment?.cast?.takeIf { it.isNotEmpty() }
-            ?: detail.cast.map { PersonCredit(name = plainName(it)) }
-        val similar = enrichment?.similar.orEmpty()
-        val listState = rememberLazyListState()
-        val density = LocalDensity.current
+    }
+    val artworkResolver = LocalArtworkResolver.current
+    val preview = remember(detail.preview, artworkResolver) { artworkResolver.resolve(detail.preview).media }
+    val reducedMotion = rememberReducedMotion()
+    val enter = remember(detail.preview.stableKey) { Animatable(if (reducedMotion) ENTER_MILLIS.toFloat() else 0f) }
+    LaunchedEffect(detail.preview.stableKey) {
+        if (!reducedMotion) enter.animateTo(ENTER_MILLIS.toFloat(), tween(ENTER_MILLIS, easing = LinearEasing))
+    }
+    val menuTarget = ContentMenuTarget(
+        media = detail.preview,
+        progress = progress.firstOrNull { it.videoId == detail.preview.id },
+        origin = ContentMenuOrigin.DETAIL,
+    )
+    val seasons = remember(detail) { detail.episodes.mapNotNull { it.season }.distinct().sorted() }
+    val resumeEpisode = detail.episodes.firstOrNull { it.id == resumeProgress?.videoId }
+    val recap = remember(detail.episodes, progress, watchedEpisodeIds, recapEnabled) {
+        if (recapEnabled) seriesRecap(detail.episodes, progress, watchedEpisodeIds) else null
+    }
+    // The viewer's pick, if any; the default follows the episodes as they load
+    // (the detail can arrive before its episode list).
+    var pickedSeason by rememberSaveable(detail.preview.stableKey) { mutableStateOf<Int?>(null) }
+    val selectedSeason = pickedSeason?.takeIf(seasons::contains)
+        ?: resumeEpisode?.season?.takeIf(seasons::contains)
+        ?: seasons.firstOrNull { it > 0 }
+        ?: seasons.firstOrNull()
+    val visibleEpisodes = remember(detail, selectedSeason) {
+        detail.episodes
+            .filter { selectedSeason == null || it.season == selectedSeason }
+            .sortedWith(compareBy<Episode>({ it.season ?: 0 }, { it.episode ?: Int.MAX_VALUE }))
+    }
+    val ratings = orderedRatingScores(
+        metadata = metadataImdbScore(preview.rating, preview.ratingSource, stringResource(R.string.source_imdb)),
+        enrichment = enrichment?.ratings.orEmpty(),
+    )
+    val cast: List<PersonCredit> = enrichment?.cast?.takeIf { it.isNotEmpty() }
+        ?: detail.cast.map { PersonCredit(name = plainName(it)) }
+    val similar = enrichment?.similar.orEmpty()
+    val listState = rememberLazyListState()
+    val density = LocalDensity.current
 
-        // DetailTint paints the surface and its wash underneath.
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val heroHeight = (maxHeight * 0.66f).coerceIn(440.dp, 680.dp)
-            val heroHeightPx = with(density) { heroHeight.toPx() }
-            // One rise per section, in order, 90 ms apart.
-            fun section(index: Int): Modifier = Modifier.graphicsLayer {
-                val start = 180f + index * 90f
-                val p = Emphasized.transform(((enter.value - start) / 520f).coerceIn(0f, 1f))
-                alpha = p
-                translationY = (1f - p) * 28.dp.toPx()
+    BoxWithConstraints(Modifier.fillMaxSize().background(MobileTokens.ink)) {
+        val heroHeight = (maxHeight * 0.66f).coerceIn(440.dp, 680.dp)
+        val heroHeightPx = with(density) { heroHeight.toPx() }
+        // One rise per section, in order, 90 ms apart.
+        fun section(index: Int): Modifier = Modifier.graphicsLayer {
+            val start = 180f + index * 90f
+            val p = Emphasized.transform(((enter.value - start) / 520f).coerceIn(0f, 1f))
+            alpha = p
+            translationY = (1f - p) * 28.dp.toPx()
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 40.dp),
+        ) {
+            item(key = "hero", contentType = "hero") {
+                DetailHero(
+                    preview = preview,
+                    height = heroHeight,
+                    scrollOffset = {
+                        if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else heroHeightPx
+                    },
+                    enter = { enter.value },
+                    sharedKey = sharedKey,
+                )
             }
-
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 40.dp),
-            ) {
-                item(key = "hero", contentType = "hero") {
-                    DetailHero(
-                        preview = preview,
-                        height = heroHeight,
-                        scrollOffset = {
-                            if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else heroHeightPx
-                        },
-                        enter = { enter.value },
-                        sharedKey = sharedKey,
-                    )
+            constrained("headline", section(0)) {
+                DetailHeadline(detail, preview, ratings)
+            }
+            constrained("actions", section(1)) {
+                DetailActions(
+                    inLibrary = inLibrary,
+                    resumeProgress = resumeProgress,
+                    resumeEpisode = resumeEpisode,
+                    onPlay = onPlay,
+                    onLibrary = onLibrary,
+                    onEditArtwork = onEditArtwork,
+                    onOpenMenu = { onOpenMenu(menuTarget) },
+                    onTrailer = { trailerOpen = true }.takeIf {
+                        trailersEnabled && detail.preview.trailerYtIds.isNotEmpty()
+                    },
+                )
+            }
+            if (newEpisodePrompt) {
+                constrained("new-episodes", section(1)) {
+                    NewEpisodePromptCard(onTurnOn = onEnableNewEpisodes, onNotNow = onDismissNewEpisodes)
                 }
-                constrained("headline", section(0)) {
-                    DetailHeadline(detail, preview, ratings)
+            }
+            recap?.let { episode ->
+                constrained("recap", section(2)) {
+                    DetailRecap(episode)
                 }
-                constrained("actions", section(1)) {
-                    DetailActions(
-                        inLibrary = inLibrary,
-                        resumeProgress = resumeProgress,
-                        resumeEpisode = resumeEpisode,
-                        onPlay = onPlay,
-                        onLibrary = onLibrary,
-                        onEditArtwork = onEditArtwork,
-                        onOpenMenu = { onOpenMenu(menuTarget) },
-                        onTrailer = { trailerOpen = true }.takeIf {
-                            trailersEnabled && detail.preview.trailerYtIds.isNotEmpty()
-                        },
-                    )
-                }
-                if (newEpisodePrompt) {
-                    constrained("new-episodes", section(1)) {
-                        NewEpisodePromptCard(onTurnOn = onEnableNewEpisodes, onNotNow = onDismissNewEpisodes)
-                    }
-                }
-                recap?.let { episode ->
-                    constrained("recap", section(2)) {
-                        DetailRecap(episode)
-                    }
-                }
-                constrained("synopsis", section(2)) {
-                    DetailSynopsis(detail)
-                }
-                if (detail.episodes.isNotEmpty()) {
-                    constrained("episodes-header", section(3)) {
-                        val timeLeft = remember(detail, selectedSeason, progress, watchedEpisodeIds, seasonTimeLeftEnabled) {
-                            if (seasonTimeLeftEnabled) {
-                                seasonTimeLeft(detail.episodes, selectedSeason, progress, watchedEpisodeIds, detail.runtimeMinutes)
-                            } else {
-                                null
-                            }
-                        }
-                        EpisodesHeader(seasons, selectedSeason, timeLeft, onSeason = { pickedSeason = it })
-                    }
-                    visibleEpisodes.forEach { episode ->
-                        constrained("episode:${episode.id}", section(4), contentType = "episode") {
-                            EpisodeCard(
-                                media = detail.preview,
-                                episode = episode,
-                                watched = episode.id in watchedEpisodeIds,
-                                spoilerProtection = spoilerProtection,
-                                progress = progress.firstOrNull { it.videoId == episode.id },
-                                onPlay = onPlay,
-                                onOpenMenu = onOpenMenu,
-                            )
+            }
+            constrained("synopsis", section(2)) {
+                DetailSynopsis(detail)
+            }
+            if (detail.episodes.isNotEmpty()) {
+                constrained("episodes-header", section(3)) {
+                    val timeLeft = remember(detail, selectedSeason, progress, watchedEpisodeIds, seasonTimeLeftEnabled) {
+                        if (seasonTimeLeftEnabled) {
+                            seasonTimeLeft(detail.episodes, selectedSeason, progress, watchedEpisodeIds, detail.runtimeMinutes)
+                        } else {
+                            null
                         }
                     }
+                    EpisodesHeader(seasons, selectedSeason, timeLeft, onSeason = { pickedSeason = it })
                 }
-                if (cast.isNotEmpty()) {
-                    item(key = "cast", contentType = "cast") {
-                        Box(section(5)) { CastRow(cast, onOpenPerson) }
+                visibleEpisodes.forEach { episode ->
+                    constrained("episode:${episode.id}", section(4), contentType = "episode") {
+                        EpisodeCard(
+                            media = detail.preview,
+                            episode = episode,
+                            watched = episode.id in watchedEpisodeIds,
+                            spoilerProtection = spoilerProtection,
+                            progress = progress.firstOrNull { it.videoId == episode.id },
+                            onPlay = onPlay,
+                            onOpenMenu = onOpenMenu,
+                        )
                     }
                 }
-                if (similar.isNotEmpty()) {
-                    item(key = "similar", contentType = "similar") {
-                        Box(section(6)) { SimilarRow(similar, onOpenMedia) }
-                    }
-                }
-                enrichment?.facts
-                    ?.takeIf { it.status != null || it.originalLanguage != null || (it.budgetUsd ?: 0) > 0 || (it.revenueUsd ?: 0) > 0 }
-                    ?.let { facts ->
-                        constrained("facts", section(7)) { FactsGrid(facts) }
-                    }
             }
-
-            DetailTopBar(
-                title = preview.name,
-                progress = {
-                    if (listState.firstVisibleItemIndex > 0) {
-                        1f
-                    } else {
-                        (listState.firstVisibleItemScrollOffset / (heroHeightPx * 0.72f)).coerceIn(0f, 1f)
-                    }
-                },
-                onBack = onBack,
-            )
+            if (cast.isNotEmpty()) {
+                item(key = "cast", contentType = "cast") {
+                    Box(section(5)) { CastRow(cast, onOpenPerson) }
+                }
+            }
+            if (similar.isNotEmpty()) {
+                item(key = "similar", contentType = "similar") {
+                    Box(section(6)) { SimilarRow(similar, onOpenMedia) }
+                }
+            }
+            enrichment?.facts
+                ?.takeIf { it.status != null || it.originalLanguage != null || (it.budgetUsd ?: 0) > 0 || (it.revenueUsd ?: 0) > 0 }
+                ?.let { facts ->
+                    constrained("facts", section(7)) { FactsGrid(facts) }
+                }
         }
+
+        DetailTopBar(
+            title = preview.name,
+            progress = {
+                if (listState.firstVisibleItemIndex > 0) {
+                    1f
+                } else {
+                    (listState.firstVisibleItemScrollOffset / (heroHeightPx * 0.72f)).coerceIn(0f, 1f)
+                }
+            },
+            onBack = onBack,
+        )
     }
 }
 
@@ -632,7 +623,7 @@ private fun DetailActions(
                         Modifier
                             .fillMaxWidth(progress.fraction)
                             .height(3.dp)
-                            .background(MaterialTheme.colorScheme.primary),
+                            .background(MobileTokens.accent),
                     )
                 }
                 val leftMinutes = ((progress.durationMillis - progress.positionMillis).coerceAtLeast(0) / 60_000).toInt()
@@ -673,7 +664,7 @@ private fun LabeledAction(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(icon, null, tint = if (highlighted) MaterialTheme.colorScheme.primary else MobileTokens.textPrimary, modifier = Modifier.size(26.dp))
+        Icon(icon, null, tint = if (highlighted) MobileTokens.accent else MobileTokens.textPrimary, modifier = Modifier.size(26.dp))
         Text(label, style = MaterialTheme.typography.labelMedium, color = MobileTokens.textMuted, maxLines = 1)
     }
 }
@@ -688,7 +679,7 @@ private fun DetailRecap(episode: Episode) {
         Text(
             stringResource(R.string.recap_heading),
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = MobileTokens.accent,
             modifier = Modifier.semantics { heading() },
         )
         Text(
@@ -727,7 +718,7 @@ private fun DetailSynopsis(detail: MediaDetail) {
                 Text(
                     stringResource(if (expanded) R.string.detail_less else R.string.detail_more),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MobileTokens.accent,
                     modifier = Modifier.clickable { expanded = !expanded }.padding(vertical = 4.dp),
                 )
             }
@@ -901,7 +892,7 @@ internal fun EpisodeCard(
                     Box(
                         Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.25f)),
                     ) {
-                        Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(MaterialTheme.colorScheme.primary))
+                        Box(Modifier.fillMaxWidth(fraction).height(3.dp).background(MobileTokens.accent))
                     }
                 }
             }
@@ -914,7 +905,7 @@ internal fun EpisodeCard(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (watched) {
-                        Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Rounded.CheckCircle, null, tint = MobileTokens.accent, modifier = Modifier.size(14.dp))
                     }
                     airDate?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MobileTokens.textMuted) }
                 }
@@ -1068,58 +1059,3 @@ private fun usd(value: Long): String = when {
 private fun plainName(value: String): String =
     HtmlCompat.fromHtml(value, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
 
-/**
- * Tints the details page with one accent from its own backdrop (MOB-CLR-07):
- * progress, highlighted actions, and links take the artwork's color, clamped
- * to text contrast on the page surface (SHR-PROD-08), while reading surfaces
- * stay neutral (MOB-CLR-08). Until the palette is ready, or when the art has
- * no usable color, the page keeps instrument blue (MOB-CLR-09). The change
- * crossfades in 220 ms and is instant with animations removed (MOB-MOT-03).
- */
-@Composable
-private fun DetailTint(media: MediaPreview, content: @Composable () -> Unit) {
-    val context = LocalContext.current
-    val resolved = LocalArtworkResolver.current.resolve(media).media
-    val artwork = resolved.backgroundUrl?.takeIf(String::isNotBlank) ?: resolved.posterUrl?.takeIf(String::isNotBlank)
-    val palette by produceState<ArtworkPalette?>(null, artwork) {
-        value = artwork?.let { loadArtworkPalette(context, "url:$it", it, MobileTokens.ink) }
-    }
-    val reducedMotion = rememberReducedMotion()
-    val spec = tween<Color>(if (reducedMotion) 0 else 220, easing = LinearOutSlowInEasing)
-    val accent by animateColorAsState(palette?.accent ?: MobileTokens.accent, spec, label = "detail accent")
-    val container by animateColorAsState(
-        palette?.accentContainer?.copy(alpha = 0.32f) ?: MobileTokens.accent.copy(alpha = 0.16f),
-        spec,
-        label = "detail accent container",
-    )
-    val base = MaterialTheme.colorScheme
-    MaterialTheme(
-        colorScheme = base.copy(
-            primary = accent,
-            onPrimary = MobileTokens.ink,
-            primaryContainer = container,
-            onPrimaryContainer = accent,
-            secondaryContainer = container,
-            onSecondaryContainer = accent,
-        ),
-    ) {
-        Box(Modifier.fillMaxSize().background(MobileTokens.ink)) {
-            // A faint wash of the artwork's container color under the
-            // headline, below every text layer; the hero scrim still ends
-            // on the neutral surface.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.9f)
-                    .background(
-                        Brush.verticalGradient(
-                            0.35f to Color.Transparent,
-                            0.7f to container.copy(alpha = container.alpha * 0.5f),
-                            1f to Color.Transparent,
-                        ),
-                    ),
-            )
-            content()
-        }
-    }
-}
