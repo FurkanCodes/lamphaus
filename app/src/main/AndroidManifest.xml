@@ -16,6 +16,13 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.faketouch" android:required="false" />
 
+    <!-- Mobile search hides its voice button when no speech recognizer is installed (MOB-SRCH-01). -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
     <application
         android:name=".LamphausApplication"
         android:allowBackup="false"
@@ -105,6 +112,42 @@
                 <data android:scheme="stremio" />
             </intent-filter>
         </activity>
+        <!-- The ambient as the TV's system screensaver, where the device offers a choice (TV-AMB-01).
+             Disabled until TvActivity enables it, so phones never list it. -->
+        <service
+            android:name=".tv.LamphausDreamService"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_DREAM_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.dreams.DreamService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+        <!-- Continue watching home-screen widget (MOB-WGT-01). -->
+        <receiver
+            android:name=".widget.ContinueWatchingWidgetReceiver"
+            android:exported="false"
+            android:label="@string/continue_watching">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/continue_watching_widget_info" />
+        </receiver>
+        <!-- WorkManager starts on demand rather than at every launch (QA-08, SHR-PROD-16). -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
         <receiver
             android:name=".update.UpdateInstallReceiver"
             android:exported="false">

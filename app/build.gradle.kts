@@ -135,6 +135,9 @@ android {
         checkReleaseBuilds = true
         warningsAsErrors = true
         lintConfig = file("lint.xml")
+        // Print every finding, not only the first, so CI logs show the whole report.
+        textReport = true
+        textOutput = File("stdout")
         disable += setOf("GradleDependency", "AndroidGradlePluginVersion", "OldTargetApi")
     }
 
@@ -210,6 +213,9 @@ dependencies {
     implementation(libs.play.services.cast.tv)
     implementation(libs.zxing.core)
     implementation(libs.androidx.profileinstaller)
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
     baselineProfile(project(":benchmark"))
 
     testImplementation(libs.junit)

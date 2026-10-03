@@ -2,7 +2,6 @@ package com.lamphaus.app.tv
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -34,13 +33,11 @@ import coil3.request.allowHardware
 import coil3.request.bitmapConfig
 import coil3.size.Size
 import coil3.toBitmap
-import com.google.android.material.color.DynamicColorsOptions
-import com.google.android.material.color.MaterialColors
 import com.lamphaus.app.ui.ArtworkResolution
+import com.lamphaus.app.ui.artworkPalette
 import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.app.ui.fixtureArtworkResource
-import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -55,8 +52,6 @@ import kotlinx.coroutines.withContext
 // Artwork-free fallbacks are only gradients, so they stay at half resolution.
 private const val FALLBACK_WIDTH = 960
 private const val FALLBACK_HEIGHT = 540
-private const val PALETTE_SAMPLE_SIZE = 96
-private const val PALETTE_CACHE_CAPACITY = 32
 
 @Immutable
 internal data class TvContentAmbientState(
@@ -74,13 +69,6 @@ internal data class AmbientArtworkSource(
     val key: String,
     val data: Any,
 )
-
-private data class TvAmbientPalette(
-    val accent: Color,
-    val accentContainer: Color,
-)
-
-private val paletteCache = LruCache<String, TvAmbientPalette>(PALETTE_CACHE_CAPACITY)
 
 /**
  * Holds the ambient artwork and accent derived from the focused media.
@@ -270,21 +258,7 @@ private suspend fun loadAmbient(
     )
     if (displayResult !is SuccessResult) return null
 
-    val palette = paletteCache.get(artwork.key) ?: runCatching {
-        val bitmap = displayResult.image.toBitmap().scale(PALETTE_SAMPLE_SIZE, PALETTE_SAMPLE_SIZE)
-        val seed = DynamicColorsOptions.Builder()
-            .setContentBasedSource(bitmap)
-            .build()
-            .contentBasedSeedColor
-            ?: return@runCatching null
-        val roles = MaterialColors.getColorRoles(seed, false)
-        val accent = roles.accent
-        val accentContainer = roles.accentContainer
-        TvAmbientPalette(
-            accent = Color(accent),
-            accentContainer = Color(accentContainer),
-        )
-    }.getOrNull()?.also { paletteCache.put(artwork.key, it) }
+    val palette = artworkPalette(artwork.key, displayResult.image.toBitmap(), background)
 
     val accentContainer = palette?.accentContainer ?: defaultAccentContainer
     return TvContentAmbientState(

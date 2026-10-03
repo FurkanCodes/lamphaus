@@ -1,6 +1,26 @@
 package com.lamphaus.app.mobile
 
 import androidx.activity.compose.BackHandler
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -63,6 +83,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -111,6 +132,7 @@ import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.app.R
 
@@ -157,9 +179,12 @@ fun MobileApp(
             },
         ) {
         val snackbar = remember { SnackbarHostState() }
+        val undoLabel = stringResource(R.string.undo)
         LaunchedEffect(state.message) {
             state.message?.let {
-                snackbar.showSnackbar(it)
+                val action = state.messageAction
+                val result = snackbar.showSnackbar(it, actionLabel = action?.let { undoLabel })
+                if (action != null && result == SnackbarResult.ActionPerformed) viewModel.performMessageAction(action)
                 viewModel.dismissMessage()
             }
         }
@@ -532,9 +557,12 @@ private fun MobileSignedInApp(
     var destination by rememberSaveable { mutableStateOf(MobileDestination.HOME) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var pendingMediaFocusKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // The tapped card and its title, so only that card morphs into the page (MOB-MOT-01).
+    var detailOrigin by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }
     val destinationStates = rememberSaveableStateHolder()
     val openMedia: (MediaPreview, String) -> Unit = { media, focusKey ->
         pendingMediaFocusKey = focusKey
+        detailOrigin = focusKey to media.stableKey
         viewModel.loadDetail(media)
     }
     val watchedEpisodeIds = remember(state.progress) {
@@ -574,141 +602,193 @@ private fun MobileSignedInApp(
                 onSave = viewModel::saveArtworkSelection,
             )
         }
-        state.selectedDetail != null -> {
-            BackHandler { viewModel.clearDetail() }
-            val detailProgress = state.progress.lastOrNull {
-                it.mediaKey == state.selectedDetail.preview.stableKey && it.isResumable()
-            }
-            val detailInLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey }
-            MobileDetailScreen(
-                detail = state.selectedDetail,
-                enrichment = state.detailEnrichment,
-                inLibrary = detailInLibrary,
-                watchedEpisodeIds = watchedEpisodeIds,
-                spoilerProtection = state.spoilerProtection,
-                onBack = viewModel::clearDetail,
-                resumeProgress = detailProgress,
-                onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
-                onLibrary = {
-                    val preview = state.selectedDetail.preview
-                    if (detailInLibrary) viewModel.removeFromLibrary(preview.stableKey) else viewModel.addToLibrary(preview)
-                },
-                onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
-                onOpenMedia = viewModel::loadDetail,
+        state.personPage != null && !state.personPage.showingTitle -> {
+            BackHandler { viewModel.closePerson() }
+            MobilePersonScreen(
+                page = state.personPage,
+                onBack = viewModel::closePerson,
+                onRetry = viewModel::retryPerson,
+                onMedia = viewModel::openPersonTitle,
                 progress = state.progress,
-                onOpenMenu = viewModel::openContentMenu,
-                recapEnabled = state.seriesRecap,
-                seasonTimeLeftEnabled = state.fitsTonight,
-                // Unset means on for phones and tablets.
-                trailersEnabled = state.trailers != false,
-                resolveTrailer = viewModel::trailerSource,
+                inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
             )
         }
-        settingsOpen -> {
+        state.selectedDetail == null && settingsOpen -> {
             BackHandler { settingsOpen = false }
             MobileSettingsScreen(state, viewModel, onBack = { settingsOpen = false }, updateViewModel = updateViewModel)
         }
         else -> {
-            val compact = widthSizeClass == WindowWidthSizeClass.Compact
-            val content: @Composable () -> Unit = {
-                Box(Modifier.fillMaxSize()) {
-                    AnimatedContent(
-                        targetState = destination,
-                        transitionSpec = {
-                            (fadeIn(tween(220, delayMillis = 90, easing = LinearOutSlowInEasing)) + scaleIn(
-                                initialScale = 0.92f,
-                                animationSpec = tween(220, delayMillis = 90, easing = LinearOutSlowInEasing),
-                            )) togetherWith fadeOut(tween(90, easing = FastOutLinearInEasing))
-                        },
-                        label = "destination",
-                    ) { tab ->
-                        destinationStates.SaveableStateProvider(tab.name) {
-                            when (tab) {
-                            MobileDestination.HOME -> MobileHomeScreen(
-                                state = state,
-                                onMedia = openMedia,
-                                onAddSource = { settingsOpen = true },
-                                onLoadMore = viewModel::loadMoreCatalog,
-                                onRetry = viewModel::retryCatalogPage,
-                                onPlay = { media -> viewModel.openSources(media, null) },
-                                onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
-                                onRetryHome = viewModel::retryHomeCatalogSections,
-                                restoreMediaKey = pendingMediaFocusKey,
-                                onFocusRestored = { pendingMediaFocusKey = null },
-                                inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
-                                onToggleLibrary = viewModel::addToLibrary,
-                                onMenuAction = viewModel::onContentMenuAction,
-                                onOpenMenu = viewModel::openContentMenu,
-                            )
-
-                            MobileDestination.DISCOVER -> DiscoverScreen(
-                                state = state,
-                                onMedia = openMedia,
-                                restoreMediaKey = pendingMediaFocusKey,
-                                onFocusRestored = { pendingMediaFocusKey = null },
-                                onOpenMenu = viewModel::openContentMenu,
-                                onMenuAction = viewModel::onContentMenuAction,
-                            )
-                            MobileDestination.LIBRARY -> LibraryScreen(
-                                state = state,
-                                onMedia = openMedia,
-                                restoreMediaKey = pendingMediaFocusKey,
-                                onFocusRestored = { pendingMediaFocusKey = null },
-                                onOpenMenu = viewModel::openContentMenu,
-                                onMenuAction = viewModel::onContentMenuAction,
-                            )
-                            MobileDestination.SEARCH -> SearchScreen(
-                                state = state,
-                                onSearch = viewModel::searchContent,
-                                onBrowseType = viewModel::selectBrowseType,
-                                onBrowseCatalog = viewModel::selectBrowseCatalog,
-                                onBrowseGenre = viewModel::selectBrowseGenre,
-                                onLoadMore = viewModel::loadMoreBrowse,
-                                onRetry = viewModel::retryBrowse,
-                                onCatalogLoadMore = viewModel::loadMoreCatalog,
-                                onCatalogRetry = viewModel::retryCatalogPage,
-                                onMedia = openMedia,
-                                restoreMediaKey = pendingMediaFocusKey,
-                                onFocusRestored = { pendingMediaFocusKey = null },
-                                onOpenMenu = viewModel::openContentMenu,
-                                onMenuAction = viewModel::onContentMenuAction,
-                            )
-                        }
-                        }
-                        }
-                        if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter).statusBarsPadding())
+            // A title opened from a person page goes back to that page (MOB-NAV-10).
+            val backFromDetail = if (state.personPage?.showingTitle == true) viewModel::returnToPerson else viewModel::clearDetail
+            // The page being left keeps drawing its own title while it fades.
+            val shownDetails = remember { DetailSnapshots() }
+            state.selectedDetail?.let(shownDetails::keep)
+            MediaDetailTransition(
+                detailKey = state.selectedDetail?.preview?.stableKey,
+                reducedMotion = rememberReducedMotion(),
+                predictiveBack = state.personPage?.showingTitle != true,
+                onBack = backFromDetail,
+            ) { key ->
+                val detail = key?.let(shownDetails::get)
+                if (detail != null) {
+                    val detailProgress = state.progress.lastOrNull {
+                        it.mediaKey == detail.preview.stableKey && it.isResumable()
                     }
-            }
-            if (compact) {
-                Box(Modifier.fillMaxSize()) {
-                    content()
-                    MobileNavBar(
-                        destination = destination,
-                        onProfile = { settingsOpen = true },
-                        onSelect = { destination = it },
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
-                }
-            } else {
-                Row(Modifier.fillMaxSize()) {
-                    NavigationRail {
-                        Spacer(Modifier.height(24.dp))
-                        MobileDestination.entries.forEach { item ->
-                            NavigationRailItem(
-                                selected = destination == item,
-                                onClick = { destination = item },
-                                icon = { Icon(if (destination == item) item.selectedIcon else item.icon, null) },
-                            label = { Text(stringResource(item.labelRes)) },
-                            )
-                        }
-                        NavigationRailItem(
-                            selected = false,
-                            onClick = { settingsOpen = true },
-                            icon = { Icon(Icons.Outlined.Person, null) },
-                            label = { Text(stringResource(R.string.profile)) },
+                    val detailInLibrary = state.library.any { it.mediaKey == detail.preview.stableKey }
+                    val alertsDeniedMessage = stringResource(R.string.new_episodes_permission_denied)
+                    val enableNewEpisodes = rememberEnableNewEpisodeAlerts { granted ->
+                        viewModel.setNewEpisodeAlerts(granted)
+                        if (!granted) viewModel.reportMessage(alertsDeniedMessage)
+                    }
+                    // Asked once, on a followed series, after the benefit is clear (SHR-PROD-16).
+                    val newEpisodePrompt = detailInLibrary &&
+                        detail.preview.type == MediaType.SERIES &&
+                        !state.engagement.newEpisodeAlerts &&
+                        !state.engagement.newEpisodePromptAnswered
+                    // Keeps the page's scroll while a person page covers it (MOB-NAV-10).
+                    destinationStates.SaveableStateProvider("detail:${detail.preview.stableKey}") {
+                        MobileDetailScreen(
+                            detail = detail,
+                            enrichment = state.detailEnrichment.takeIf { detail.preview.stableKey == state.selectedDetail?.preview?.stableKey },
+                            inLibrary = detailInLibrary,
+                            watchedEpisodeIds = watchedEpisodeIds,
+                            spoilerProtection = state.spoilerProtection,
+                            onBack = backFromDetail,
+                            resumeProgress = detailProgress,
+                            onPlay = { episode -> viewModel.openSources(detail.preview, episode) },
+                            onLibrary = {
+                                val preview = detail.preview
+                                if (detailInLibrary) viewModel.removeFromLibrary(preview.stableKey) else viewModel.addToLibrary(preview)
+                            },
+                            onEditArtwork = { viewModel.openArtworkEditor(detail.preview) },
+                            onOpenMedia = viewModel::loadDetail,
+                            progress = state.progress,
+                            onOpenMenu = viewModel::openContentMenu,
+                            recapEnabled = state.seriesRecap,
+                            seasonTimeLeftEnabled = state.fitsTonight,
+                            // Unset means on for phones and tablets.
+                            trailersEnabled = state.trailers != false,
+                            resolveTrailer = viewModel::trailerSource,
+                            // People come from the viewer's own TMDB key; without it the cast stays plain text.
+                            onOpenPerson = if (viewModel.personPagesAvailable && state.tmdbKeyInAccount) {
+                                viewModel::openPerson
+                            } else {
+                                null
+                            },
+                            newEpisodePrompt = newEpisodePrompt,
+                            onEnableNewEpisodes = enableNewEpisodes,
+                            onDismissNewEpisodes = viewModel::dismissNewEpisodePrompt,
+                            sharedKey = detailOrigin?.takeIf { it.second == detail.preview.stableKey }?.first,
                         )
                     }
-                    Box(Modifier.weight(1f)) { content() }
+                } else {
+                    val compact = widthSizeClass == WindowWidthSizeClass.Compact
+                    val content: @Composable () -> Unit = {
+                        Box(Modifier.fillMaxSize()) {
+                            AnimatedContent(
+                                targetState = destination,
+                                transitionSpec = {
+                                    (fadeIn(tween(220, delayMillis = 90, easing = LinearOutSlowInEasing)) + scaleIn(
+                                        initialScale = 0.92f,
+                                        animationSpec = tween(220, delayMillis = 90, easing = LinearOutSlowInEasing),
+                                    )) togetherWith fadeOut(tween(90, easing = FastOutLinearInEasing))
+                                },
+                                label = "destination",
+                            ) { tab ->
+                                destinationStates.SaveableStateProvider(tab.name) {
+                                    when (tab) {
+                                    MobileDestination.HOME -> MobileHomeScreen(
+                                        state = state,
+                                        onMedia = openMedia,
+                                        onAddSource = { settingsOpen = true },
+                                        onLoadMore = viewModel::loadMoreCatalog,
+                                        onRetry = viewModel::retryCatalogPage,
+                                        onPlay = { media -> viewModel.openSources(media, null) },
+                                        onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
+                                        onRetryHome = viewModel::retryHomeCatalogSections,
+                                        restoreMediaKey = pendingMediaFocusKey,
+                                        onFocusRestored = { pendingMediaFocusKey = null },
+                                        inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
+                                        onToggleLibrary = viewModel::addToLibrary,
+                                        onMenuAction = viewModel::onContentMenuAction,
+                                        onOpenMenu = viewModel::openContentMenu,
+                                    )
+
+                                    MobileDestination.DISCOVER -> DiscoverScreen(
+                                        state = state,
+                                        onMedia = openMedia,
+                                        restoreMediaKey = pendingMediaFocusKey,
+                                        onFocusRestored = { pendingMediaFocusKey = null },
+                                        onOpenMenu = viewModel::openContentMenu,
+                                        onMenuAction = viewModel::onContentMenuAction,
+                                    )
+                                    MobileDestination.LIBRARY -> LibraryScreen(
+                                        state = state,
+                                        onMedia = openMedia,
+                                        onDismissRecap = viewModel::dismissRecap,
+                                        restoreMediaKey = pendingMediaFocusKey,
+                                        onFocusRestored = { pendingMediaFocusKey = null },
+                                        onOpenMenu = viewModel::openContentMenu,
+                                        onMenuAction = viewModel::onContentMenuAction,
+                                    )
+                                    MobileDestination.SEARCH -> SearchScreen(
+                                        state = state,
+                                        onSearch = viewModel::searchContent,
+                                        history = state.searchHistory,
+                                        onRecordSearch = viewModel::recordSearch,
+                                        onForgetSearch = viewModel::forgetSearch,
+                                        onClearHistory = viewModel::clearSearchHistory,
+                                        onBrowseType = viewModel::selectBrowseType,
+                                        onBrowseCatalog = viewModel::selectBrowseCatalog,
+                                        onBrowseGenre = viewModel::selectBrowseGenre,
+                                        onLoadMore = viewModel::loadMoreBrowse,
+                                        onRetry = viewModel::retryBrowse,
+                                        onCatalogLoadMore = viewModel::loadMoreCatalog,
+                                        onCatalogRetry = viewModel::retryCatalogPage,
+                                        onMedia = openMedia,
+                                        restoreMediaKey = pendingMediaFocusKey,
+                                        onFocusRestored = { pendingMediaFocusKey = null },
+                                        onOpenMenu = viewModel::openContentMenu,
+                                        onMenuAction = viewModel::onContentMenuAction,
+                                    )
+                                }
+                                }
+                                }
+                                if (state.refreshing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter).statusBarsPadding())
+                            }
+                    }
+                    if (compact) {
+                        Box(Modifier.fillMaxSize()) {
+                            content()
+                            MobileNavBar(
+                                destination = destination,
+                                onProfile = { settingsOpen = true },
+                                onSelect = { destination = it },
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            )
+                        }
+                    } else {
+                        Row(Modifier.fillMaxSize()) {
+                            NavigationRail {
+                                Spacer(Modifier.height(24.dp))
+                                MobileDestination.entries.forEach { item ->
+                                    NavigationRailItem(
+                                        selected = destination == item,
+                                        onClick = { destination = item },
+                                        icon = { Icon(if (destination == item) item.selectedIcon else item.icon, null) },
+                                    label = { Text(stringResource(item.labelRes)) },
+                                    )
+                                }
+                                NavigationRailItem(
+                                    selected = false,
+                                    onClick = { settingsOpen = true },
+                                    icon = { Icon(Icons.Outlined.Person, null) },
+                                    label = { Text(stringResource(R.string.profile)) },
+                                )
+                            }
+                            Box(Modifier.weight(1f)) { content() }
+                        }
+                    }
                 }
             }
         }
@@ -852,14 +932,34 @@ private fun DiscoverScreen(
 private fun LibraryScreen(
     state: AppUiState,
     onMedia: (MediaPreview, String) -> Unit,
+    onDismissRecap: (month: String, message: String) -> Unit,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     onOpenMenu: (ContentMenuTarget) -> Unit,
     onMenuAction: (ContentMenuTarget, ContentMenuAction) -> Unit,
 ) {
     val media = state.library.map { it.preview }
+    var recapOpen by rememberSaveable { mutableStateOf(false) }
+    val recapHidden = stringResource(R.string.recap_hidden)
+    state.monthlyRecap?.takeIf { recapOpen }?.let { recap ->
+        RecapSheet(
+            recap = recap,
+            onDismiss = { recapOpen = false },
+            onMedia = { selected ->
+                recapOpen = false
+                onMedia(selected, "library:recap:${selected.stableKey}")
+            },
+        )
+    }
     Column(Modifier.fillMaxSize()) {
         MobileScreenHeader(stringResource(R.string.library))
+        state.monthlyRecap?.let { recap ->
+            RecapCard(
+                recap = recap,
+                onOpen = { recapOpen = true },
+                onDismiss = { onDismissRecap(recap.month.toString(), recapHidden) },
+            )
+        }
         if (media.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Column(
@@ -894,6 +994,10 @@ private fun LibraryScreen(
 private fun SearchScreen(
     state: AppUiState,
     onSearch: (String) -> Unit,
+    history: List<String>,
+    onRecordSearch: (String) -> Unit,
+    onForgetSearch: (String) -> Unit,
+    onClearHistory: () -> Unit,
     onBrowseType: (String) -> Unit,
     onBrowseCatalog: (String) -> Unit,
     onBrowseGenre: (String?) -> Unit,
@@ -909,6 +1013,14 @@ private fun SearchScreen(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(query) { onSearch(query) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // A search counts once the viewer acts on it: opening a result or
+    // pressing Search. Abandoned typing is never remembered (MOB-SRCH-01).
+    val openResult: (MediaPreview, String) -> Unit = { media, key ->
+        if (query.isNotBlank()) onRecordSearch(query)
+        onMedia(media, key)
+    }
+    val voiceLauncher = rememberVoiceSearch { spoken -> query = spoken }
     Column(Modifier.fillMaxSize().imePadding()) {
         MobileScreenHeader(stringResource(R.string.search))
         TextField(
@@ -916,6 +1028,28 @@ private fun SearchScreen(
             onValueChange = { query = it },
             placeholder = { Text(stringResource(R.string.search_movies_series), color = MobileTokens.textMuted) },
             leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MobileTokens.textMuted) },
+            trailingIcon = when {
+                query.isNotEmpty() -> {
+                    {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Outlined.Close, stringResource(R.string.search_clear_query), tint = MobileTokens.textMuted)
+                        }
+                    }
+                }
+                voiceLauncher != null -> {
+                    {
+                        IconButton(onClick = voiceLauncher) {
+                            Icon(Icons.Outlined.Mic, stringResource(R.string.search_by_voice), tint = MobileTokens.textMuted)
+                        }
+                    }
+                }
+                else -> null
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = {
+                if (query.isNotBlank()) onRecordSearch(query)
+                keyboard?.hide()
+            }),
             singleLine = true,
             shape = RoundedCornerShape(MobileTokens.radiusField),
             colors = TextFieldDefaults.colors(
@@ -931,6 +1065,14 @@ private fun SearchScreen(
         )
         if (state.searching || state.browse.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (query.isBlank()) {
+            if (history.isNotEmpty()) {
+                RecentSearches(
+                    history = history,
+                    onSelect = { query = it },
+                    onForget = onForgetSearch,
+                    onClear = onClearHistory,
+                )
+            }
             val browse = state.browse
             val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
             LazyRow(contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1008,7 +1150,7 @@ private fun SearchScreen(
                     }
                     CatalogRow(
                         section.copy(title = typeTitle),
-                        onMedia,
+                        openResult,
                         "search:${section.id}",
                         onCatalogLoadMore,
                         onCatalogRetry,
@@ -1024,6 +1166,91 @@ private fun SearchScreen(
             }
         }
     }
+}
+
+/**
+ * The active profile's recent searches (MOB-SRCH-01): tap to search again,
+ * remove one, or clear them all. Rows keep 48dp targets (MOB-A11Y-04).
+ */
+@Composable
+private fun RecentSearches(
+    history: List<String>,
+    onSelect: (String) -> Unit,
+    onForget: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = MobileTokens.spacingScreen, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.search_recent),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f).semantics { heading() },
+            )
+            TextButton(onClick = onClear) { Text(stringResource(R.string.search_recent_clear)) }
+        }
+        history.take(5).forEach { entry ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(onClickLabel = stringResource(R.string.search_recent_search_again)) { onSelect(entry) }
+                    .padding(start = MobileTokens.spacingScreen, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.History, null, tint = MobileTokens.textMuted, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    entry,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onForget(entry) }) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        stringResource(R.string.search_recent_remove, entry),
+                        tint = MobileTokens.textMuted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Launches the system speech recognizer and hands back what it heard, or
+ * null when this device has none (the button is then hidden). The
+ * recognizer owns the microphone, so the app requests no audio permission
+ * (MOB-PERM-03).
+ */
+@Composable
+private fun rememberVoiceSearch(onResult: (String) -> Unit): (() -> Unit)? {
+    val context = LocalContext.current
+    val prompt = stringResource(R.string.search_movies_series)
+    val intent = remember(prompt) {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
+            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+    }
+    val available = remember(context) { intent.resolveActivity(context.packageManager) != null }
+    val currentOnResult by rememberUpdatedState(onResult)
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.takeIf(String::isNotBlank)
+                ?.let(currentOnResult)
+        }
+    }
+    if (!available) return null
+    return { runCatching { launcher.launch(intent) } }
 }
 
 @Composable
@@ -1047,4 +1274,18 @@ internal fun EmptyProviders(modifier: Modifier = Modifier, onAddSource: (() -> U
             }
         }
     }
+}
+
+
+/** The last few details pages shown, by title, so a page that is leaving still draws itself. */
+private class DetailSnapshots {
+    private val byKey = object : LinkedHashMap<String, com.lamphaus.core.model.MediaDetail>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, com.lamphaus.core.model.MediaDetail>) = size > 4
+    }
+
+    fun keep(detail: com.lamphaus.core.model.MediaDetail) {
+        byKey[detail.preview.stableKey] = detail
+    }
+
+    fun get(key: String): com.lamphaus.core.model.MediaDetail? = byKey[key]
 }

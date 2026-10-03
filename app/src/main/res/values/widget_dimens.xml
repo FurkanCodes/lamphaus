@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Continue watching widget corner radius; Android 12+ uses the launcher's (MOB-WGT-02). -->
+    <dimen name="widget_background_radius">16dp</dimen>
+</resources>

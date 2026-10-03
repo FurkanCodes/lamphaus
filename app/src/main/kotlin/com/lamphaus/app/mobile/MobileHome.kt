@@ -529,6 +529,7 @@ private fun MobileHeroCarousel(
                 Modifier
                     .fillMaxSize()
                     .mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored)
+                    .mediaSharedBounds(focusKey)
                     .clickable(role = Role.Button) { onMedia(media, focusKey) }
                     .semantics { contentDescription = pageDescription },
             )
@@ -789,7 +790,9 @@ private fun MobileContinueWatchingRow(
                     inLibrary(media),
                     onOpenMenu,
                     onMenuAction,
-                    modifier = Modifier.mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored),
+                    modifier = Modifier
+                        .mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored)
+                        .mediaSharedBounds(focusKey),
                     upNext = upNextByKey[media.stableKey],
                 )
             }
@@ -1026,7 +1029,9 @@ internal fun CatalogRow(
                     PosterCard(
                         media = media,
                         onMedia = { selected -> onMedia(selected, focusKey) },
-                        modifier = Modifier.mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored),
+                        modifier = Modifier
+                            .mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored)
+                            .mediaSharedBounds(focusKey),
                         menuTarget = menuTarget,
                         onOpenMenu = onOpenMenu,
                         onMenuAction = onMenuAction,
@@ -1213,7 +1218,8 @@ internal fun MediaGrid(
                 onMedia = { selected -> onMedia(selected, focusKey) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored),
+                    .mediaFocusRestore(focusKey, restoreMediaKey, onFocusRestored)
+                    .mediaSharedBounds(focusKey),
                 menuTarget = ContentMenuTarget(item, progress = progressByVideo[item.id]),
                 onOpenMenu = onOpenMenu,
                 onMenuAction = onMenuAction,

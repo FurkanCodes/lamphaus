@@ -57,6 +57,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -76,6 +77,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -121,6 +123,7 @@ internal enum class SettingsSection(
     ADDONS(R.string.addons, Icons.Outlined.Extension),
     PLAYBACK(R.string.playback, Icons.Outlined.PlayCircle),
     BROWSING(R.string.browsing, Icons.Outlined.GridView),
+    NOTIFICATIONS(R.string.notifications, Icons.Outlined.Notifications),
     PAIRED_DEVICES(R.string.paired_devices, Icons.Outlined.Tv),
     SPOILER_PROTECTION(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ARTWORK(R.string.artwork, Icons.Outlined.Image),
@@ -162,6 +165,7 @@ internal fun MobileSettingsScreen(
             SettingsSection.ADDONS -> SettingsAddonsPage(state, viewModel)
             SettingsSection.PLAYBACK -> SettingsPlaybackPage(state, viewModel)
             SettingsSection.BROWSING -> SettingsBrowsingPage(state, viewModel)
+            SettingsSection.NOTIFICATIONS -> SettingsNotificationsPage(state, viewModel)
             SettingsSection.PAIRED_DEVICES -> SettingsPairedDevicesPage(state, viewModel)
             SettingsSection.SPOILER_PROTECTION -> SettingsSpoilerPage(state, viewModel)
             SettingsSection.ARTWORK -> SettingsArtworkPage(state, viewModel)
@@ -179,6 +183,8 @@ private fun SettingsRootMenu(onSelect: (SettingsSection) -> Unit) {
         add(SettingsSection.PROFILES)
         add(SettingsSection.ADDONS)
         add(SettingsSection.PLAYBACK)
+        add(SettingsSection.BROWSING)
+        add(SettingsSection.NOTIFICATIONS)
         if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
             add(SettingsSection.PAIRED_DEVICES)
         }
@@ -709,6 +715,16 @@ private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
+            SettingsCard(stringResource(R.string.library)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.monthly_recap_setting),
+                    description = stringResource(R.string.monthly_recap_setting_description),
+                    checked = state.engagement.monthlyRecap,
+                    onCheckedChange = viewModel::setMonthlyRecap,
+                )
+            }
+        }
+        item {
             SettingsCard(stringResource(R.string.player_sources)) {
                 PlaybackSettingRow(
                     title = stringResource(R.string.source_fit_setting),
@@ -716,6 +732,50 @@ private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
                     checked = state.sourceFit,
                     onCheckedChange = viewModel::setSourceFit,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Settings → Notifications (MOB-SET-04). New-episode alerts are off by
+ * default (MOB-SET-02); turning them on asks for the system permission
+ * only now (MOB-PERM-01). When the system blocks Lamphaus, the row says so
+ * and links to the app's notification settings (MOB-SET-05).
+ */
+@Composable
+private fun SettingsNotificationsPage(state: AppUiState, viewModel: AppViewModel) {
+    val context = LocalContext.current
+    var allowed by remember { mutableStateOf(notificationsAllowed(context)) }
+    LifecycleResumeEffect(Unit) {
+        allowed = notificationsAllowed(context)
+        onPauseOrDispose {}
+    }
+    val enable = rememberEnableNewEpisodeAlerts { granted ->
+        allowed = notificationsAllowed(context)
+        viewModel.setNewEpisodeAlerts(granted)
+    }
+    SettingsPage(title = stringResource(R.string.notifications)) {
+        item {
+            SettingsCard(stringResource(R.string.notifications_series)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.new_episodes_setting),
+                    description = stringResource(R.string.new_episodes_setting_description),
+                    checked = state.engagement.newEpisodeAlerts,
+                    onCheckedChange = { on -> if (on) enable() else viewModel.setNewEpisodeAlerts(false) },
+                )
+                if (state.engagement.newEpisodeAlerts && !allowed) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.notifications_blocked)) },
+                        supportingContent = { Text(stringResource(R.string.notifications_blocked_description)) },
+                        trailingContent = {
+                            TextButton(onClick = { openAppNotificationSettings(context) }) {
+                                Text(stringResource(R.string.open_settings))
+                            }
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                }
             }
         }
     }

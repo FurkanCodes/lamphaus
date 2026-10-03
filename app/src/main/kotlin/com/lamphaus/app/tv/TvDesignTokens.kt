@@ -142,6 +142,8 @@ internal object TvMotionTokens {
     const val focusedArtworkScale = 1.02f
     /** The side rail opens on a soft spring and closes on a quicker ease (TV-MOT-01). */
     const val railCloseDurationMillis = 180
+    /** The ambient screensaver's slow slide crossfade (TV-AMB-01). */
+    const val ambientSlideCrossfadeMillis = 1_200
 }
 
 internal object TvAmbientTokens {

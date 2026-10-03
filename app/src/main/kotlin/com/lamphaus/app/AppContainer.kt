@@ -1,5 +1,6 @@
 package com.lamphaus.app
 
+import kotlinx.coroutines.flow.first
 import android.annotation.SuppressLint
 import android.content.Context
 import android.provider.Settings
@@ -141,6 +142,16 @@ class AppContainer(context: Context) {
     val providerAggregator = ProviderAggregator(providerClient)
 
     /**
+     * Provider metadata outside a details page: up-next episodes, trailers,
+     * the new-episode check, and the widget read through one owner (SHR-ARC-04).
+     */
+    val providerMetadataRepository = com.lamphaus.core.data.repository.ProviderMetadataRepository(
+        client = providerClient,
+        aggregator = providerAggregator,
+        providers = { libraryRepository.providers().first() },
+    )
+
+    /**
      * Shared Supabase client, present only when cloud credentials are provided via
      * Gradle properties (lamphaus.supabaseUrl / lamphaus.supabasePublishableKey).
      * Gateways migrate onto this client milestone by milestone (M2 auth, M3 sync,
@@ -205,6 +216,13 @@ class AppContainer(context: Context) {
             json = enrichmentJson,
         )
     }
+    /** Private playing time per month, the monthly recap's source (SHR-PROD-17). */
+    val viewingLogRepository = com.lamphaus.core.data.repository.ViewingLogRepository(context)
+
+    /** A cast member's other titles (MOB-SRCH-01); lookups need the cloud's TMDB access. */
+    val personCreditsRepository = com.lamphaus.core.data.repository.PersonCreditsRepository(
+        remote = supabase?.let { com.lamphaus.core.data.cloud.SupabasePersonCreditsRemoteDataSource(it, enrichmentJson) },
+    )
     val playbackPreferencesRepository: PlaybackPreferencesRepository =
         DefaultPlaybackPreferencesRepository(database.dao())
     /**

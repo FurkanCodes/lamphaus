@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar notification icon: the lamp mark cropped from the monochrome launcher layer. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="76"
+    android:viewportHeight="76">
+    <group
+        android:translateX="-16"
+        android:translateY="-15">
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M18,48 L54,18 L90,48 L90,88 L18,88 Z M50,31 L58,31 L58,48 L67,48 C67,48 73,50 76,58 L65,58 L76,84 L32,84 L43,58 L32,58 C35,50 41,48 50,48 Z" />
+    </group>
+</vector>

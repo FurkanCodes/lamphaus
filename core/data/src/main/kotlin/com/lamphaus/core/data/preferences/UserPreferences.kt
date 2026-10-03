@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 
 private val Context.dataStore by preferencesDataStore("lamphaus_preferences")
 
@@ -68,6 +70,16 @@ data class UserSettings(
     val googleTvHome: Boolean = true,
     /** Up-next cards the viewer removed, as `mediaKey|finishedVideoId`; a newer finish shows it again. */
     val upNextDismissed: Set<String> = emptySet(),
+    /** Device-local mobile opt-in: notify when a followed series gets a new episode (SHR-PROD-16). */
+    val newEpisodeAlerts: Boolean = false,
+    /** Device-local: the new-episode invitation was answered, so it never shows again (MOB-NOT-02). */
+    val newEpisodePromptAnswered: Boolean = false,
+    /** Device-local: Library shows last month's private recap in the first week (SHR-PROD-17). */
+    val monthlyRecap: Boolean = true,
+    /** Device-local: the recap month (`yyyy-MM`) the viewer dismissed. */
+    val recapDismissedMonth: String? = null,
+    /** Device-local TV opt-in: the ambient screensaver covers browsing after idle (TV-AMB-01). */
+    val tvIdleAmbient: Boolean = false,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playback: PlaybackSettings = PlaybackSettings(),
@@ -92,6 +104,12 @@ data class SyncedSettings(
     val updatedAtEpochMillis: Long = 0,
 )
 
+/** Bookkeeping for one profile's new-episode check; null [checkedAtEpochMillis] means never run. */
+data class NewEpisodeCheckState(
+    val checkedAtEpochMillis: Long? = null,
+    val notifiedVideoIds: Set<String> = emptySet(),
+)
+
 class UserPreferences(private val context: Context) {
     val settings: Flow<UserSettings> = context.dataStore.data.map { values ->
         UserSettings(
@@ -113,6 +131,11 @@ class UserPreferences(private val context: Context) {
             bedtimeMinutes = values[BEDTIME_MINUTES],
             googleTvHome = values[GOOGLE_TV_HOME] ?: true,
             upNextDismissed = values[UP_NEXT_DISMISSED].orEmpty(),
+            newEpisodeAlerts = values[NEW_EPISODE_ALERTS] ?: false,
+            newEpisodePromptAnswered = values[NEW_EPISODE_PROMPT_ANSWERED] ?: false,
+            monthlyRecap = values[MONTHLY_RECAP] ?: true,
+            recapDismissedMonth = values[RECAP_DISMISSED_MONTH],
+            tvIdleAmbient = values[TV_IDLE_AMBIENT] ?: false,
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -269,6 +292,86 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /** Device-local; turning alerts on or off also answers the invitation. */
+    suspend fun setNewEpisodeAlerts(enabled: Boolean) {
+        context.dataStore.edit {
+            it[NEW_EPISODE_ALERTS] = enabled
+            it[NEW_EPISODE_PROMPT_ANSWERED] = true
+        }
+    }
+
+    /** Device-local: "Not now" on the invitation. */
+    suspend fun answerNewEpisodePrompt() {
+        context.dataStore.edit { it[NEW_EPISODE_PROMPT_ANSWERED] = true }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setMonthlyRecap(enabled: Boolean) {
+        context.dataStore.edit { it[MONTHLY_RECAP] = enabled }
+    }
+
+    /** Device-local: null brings a dismissed recap back (Undo). */
+    suspend fun setRecapDismissedMonth(month: String?) {
+        context.dataStore.edit {
+            if (month == null) it.remove(RECAP_DISMISSED_MONTH) else it[RECAP_DISMISSED_MONTH] = month
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setTvIdleAmbient(enabled: Boolean) {
+        context.dataStore.edit { it[TV_IDLE_AMBIENT] = enabled }
+    }
+
+    /**
+     * A profile's recent searches, newest first (MOB-SRCH-01). Device-local and
+     * never synced or logged: queries are private (SHR-PROD-06).
+     */
+    fun searchHistory(profileId: String): Flow<List<String>> =
+        context.dataStore.data.map { decodeStrings(it[searchHistoryKey(profileId)]) }
+
+    suspend fun updateSearchHistory(profileId: String, transform: (List<String>) -> List<String>) {
+        context.dataStore.edit { values ->
+            val key = searchHistoryKey(profileId)
+            val updated = transform(decodeStrings(values[key]))
+            if (updated.isEmpty()) values.remove(key) else values[key] = historyJson.encodeToString(updated)
+        }
+    }
+
+    /** What the new-episode check has already seen for a profile (SHR-PROD-16). */
+    suspend fun newEpisodeState(profileId: String): NewEpisodeCheckState {
+        val values = context.dataStore.data.first()
+        return NewEpisodeCheckState(
+            checkedAtEpochMillis = values[longPreferencesKey("$NEW_EPISODE_CHECKED_PREFIX$profileId")],
+            notifiedVideoIds = values[stringSetPreferencesKey("$NEW_EPISODE_NOTIFIED_PREFIX$profileId")].orEmpty(),
+        )
+    }
+
+    suspend fun saveNewEpisodeState(profileId: String, state: NewEpisodeCheckState) {
+        context.dataStore.edit { values ->
+            state.checkedAtEpochMillis?.let { values[longPreferencesKey("$NEW_EPISODE_CHECKED_PREFIX$profileId")] = it }
+            values[stringSetPreferencesKey("$NEW_EPISODE_NOTIFIED_PREFIX$profileId")] =
+                state.notifiedVideoIds.toList().takeLast(NEW_EPISODE_NOTIFIED_LIMIT).toSet()
+        }
+    }
+
+    /**
+     * Forgets per-person history on leaving an account: recent searches,
+     * new-episode bookkeeping, and the recap dismissal (SHR-PROD-06).
+     */
+    suspend fun clearPersonalHistory() {
+        context.dataStore.edit { values ->
+            values.asMap().keys
+                .filter { key ->
+                    key.name.startsWith(SEARCH_HISTORY_PREFIX) ||
+                        key.name.startsWith(NEW_EPISODE_CHECKED_PREFIX) ||
+                        key.name.startsWith(NEW_EPISODE_NOTIFIED_PREFIX)
+                }
+                .toList()
+                .forEach { values.remove(it) }
+            values.remove(RECAP_DISMISSED_MONTH)
+        }
+    }
+
     suspend fun setBedtimeMinutes(minutes: Int) {
         context.dataStore.edit {
             it[BEDTIME_MINUTES] = minutes.mod(24 * 60)
@@ -360,6 +463,22 @@ class UserPreferences(private val context: Context) {
     }
 
     private companion object {
+        const val SEARCH_HISTORY_PREFIX = "search_history_"
+        const val NEW_EPISODE_CHECKED_PREFIX = "new_episode_checked_"
+        const val NEW_EPISODE_NOTIFIED_PREFIX = "new_episode_notified_"
+        const val NEW_EPISODE_NOTIFIED_LIMIT = 500
+        val historyJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+        fun searchHistoryKey(profileId: String) = stringPreferencesKey("$SEARCH_HISTORY_PREFIX$profileId")
+
+        fun decodeStrings(raw: String?): List<String> =
+            raw?.let { runCatching { historyJson.decodeFromString<List<String>>(it) }.getOrNull() }.orEmpty()
+
+        val NEW_EPISODE_ALERTS = booleanPreferencesKey("new_episode_alerts")
+        val NEW_EPISODE_PROMPT_ANSWERED = booleanPreferencesKey("new_episode_prompt_answered")
+        val MONTHLY_RECAP = booleanPreferencesKey("monthly_recap")
+        val RECAP_DISMISSED_MONTH = stringPreferencesKey("recap_dismissed_month")
+        val TV_IDLE_AMBIENT = booleanPreferencesKey("tv_idle_ambient")
         val ACTIVE_PROFILE = stringPreferencesKey("active_profile")
         val PAIRING_DEVICE_ID = stringPreferencesKey("pairing_device_id")
         val THEME = stringPreferencesKey("theme")

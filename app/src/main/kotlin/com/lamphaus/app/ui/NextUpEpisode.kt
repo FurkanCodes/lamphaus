@@ -4,6 +4,10 @@ import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.core.model.hasAired
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 /** Why an episode is the one to play next. */
 internal enum class NextUpKind {
@@ -120,6 +124,30 @@ internal fun upNextCandidates(
         .filter { it.mediaKey !in resumableKeys && upNextDismissalKey(it) !in dismissed }
         .sortedByDescending(WatchProgress::updatedAtEpochMillis)
         .take(UP_NEXT_MAX_SERIES)
+}
+
+/**
+ * Continue Watching's up-next set (SHR-PROD-10): for each candidate series,
+ * the episode after the one the viewer last finished. Home, the new-episode
+ * check, and the widget all compute it here so they always agree. A series
+ * whose episodes cannot be loaded is simply left out.
+ */
+internal suspend fun computeUpNext(
+    progress: List<WatchProgress>,
+    dismissed: Set<String>,
+    nowEpochMillis: Long,
+    episodesOf: suspend (MediaPreview) -> List<Episode>,
+): List<UpNextItem> = coroutineScope {
+    val completed = progress.filter(WatchProgress::completed).mapTo(HashSet()) { it.videoId }
+    upNextCandidates(progress, dismissed, nowEpochMillis).map { row ->
+        async {
+            val media = row.preview ?: return@async null
+            runCatching { episodesOf(media) }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrNull()
+                ?.let { episodes -> upNextAfter(media, row, episodes, completed, nowEpochMillis) }
+        }
+    }.awaitAll().filterNotNull()
 }
 
 /**

@@ -158,6 +158,7 @@ class AppViewModel(
     private var searchJob: Job? = null
     private var browseJob: Job? = null
     private val pageJobs = mutableMapOf<String, Job>()
+    private var personJob: Job? = null
     private var detailJob: Job? = null
     private var enrichmentJob: Job? = null
     private var sourceJob: Job? = null
@@ -170,12 +171,6 @@ class AppViewModel(
     private val recentlyLoadedDetails = object : LinkedHashMap<String, MediaDetail>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MediaDetail>): Boolean =
             size > 24
-    }
-
-    /** Episodes looked up for Continue Watching "up next", with when they were fetched. Main-confined. */
-    private val episodesByKey = object : LinkedHashMap<String, Pair<Long, List<Episode>>>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<Episode>>>): Boolean =
-            size > 50
     }
 
     /** Trailer ids found in provider metadata for catalog items that had none. Main-confined. */
@@ -219,6 +214,7 @@ class AppViewModel(
                     bedtimeMinutes = settings.bedtimeMinutes ?: DEFAULT_BEDTIME_MINUTES,
                     googleTvHome = settings.googleTvHome,
                     upNextDismissed = settings.upNextDismissed,
+                    engagement = EngagementSettings.from(settings),
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
                     playbackSettings = settings.playback,
@@ -287,6 +283,7 @@ class AppViewModel(
                         bedtimeMinutes = snapshot.bedtimeMinutes,
                         googleTvHome = snapshot.googleTvHome,
                         upNextDismissed = snapshot.upNextDismissed,
+                        engagement = snapshot.engagement,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
                         playbackSettings = snapshot.playbackSettings,
@@ -337,6 +334,8 @@ class AppViewModel(
                         // Everything re-arrives from the cloud on next sign-in.
                         container.libraryRepository.clearLocalAccountData()
                         container.preferences.clearSyncedSettings()
+                        container.preferences.clearPersonalHistory()
+                        container.viewingLogRepository.clear()
                         // Provider metadata is scoped to the previous account's
                         // configuration/auth; drop it with the rows (PERF-04).
                         snapshot.providers.forEach { container.providerClient.invalidateProvider(it.manifestUrl) }
@@ -357,6 +356,12 @@ class AppViewModel(
         viewModelScope.launch {
             state.mapActiveProfileId().filterNotNull().flatMapLatest(container.libraryRepository::progress).collectLatest { progress ->
                 mutableState.update { it.copy(progress = progress) }
+            }
+        }
+        observeMonthlyRecap()
+        viewModelScope.launch {
+            state.mapActiveProfileId().filterNotNull().flatMapLatest(container.preferences::searchHistory).collectLatest { history ->
+                mutableState.update { it.copy(searchHistory = history) }
             }
         }
         viewModelScope.launch {
@@ -542,6 +547,22 @@ class AppViewModel(
     fun refreshContent() {
         ensureBuiltInAddons(state.value.providers)
         refreshCatalogs(force = true)
+    }
+
+    /** Remembers a search the viewer acted on (MOB-SRCH-01); device-local, never synced or logged. */
+    fun recordSearch(query: String) = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        container.preferences.updateSearchHistory(profileId) { com.lamphaus.core.model.recordSearch(it, query) }
+    }
+
+    fun forgetSearch(query: String) = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        container.preferences.updateSearchHistory(profileId) { com.lamphaus.core.model.forgetSearch(it, query) }
+    }
+
+    fun clearSearchHistory() = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        container.preferences.updateSearchHistory(profileId) { emptyList() }
     }
 
     fun searchContent(input: String) {
@@ -1162,7 +1183,10 @@ class AppViewModel(
             }
             state.value.selectedDetail
                 ?.takeIf { it.preview.stableKey == media.stableKey }
-                ?.let { recentlyLoadedDetails[media.stableKey] = it }
+                ?.let {
+                    recentlyLoadedDetails[media.stableKey] = it
+                    container.providerMetadataRepository.rememberEpisodes(media, it.episodes)
+                }
         }
     }
 
@@ -1573,12 +1597,77 @@ class AppViewModel(
             .onFailure { showMessage("Could not save artwork. Try again.") }
     }
 
+    /** Whether the cloud's TMDB lookups exist; cast also needs [AppUiState.tmdbKeyInAccount]. */
+    val personPagesAvailable: Boolean get() = container.personCreditsRepository.available
+
+    /** Opens a cast or crew member's titles above the current details page (MOB-SRCH-01). */
+    fun openPerson(credit: com.lamphaus.core.model.PersonCredit) {
+        val personId = credit.personId ?: return
+        val origin = state.value.selectedDetail?.preview ?: return
+        mutableState.update {
+            it.copy(personPage = PersonPageState(personId, credit.name, credit.profileUrl, origin))
+        }
+        loadPerson(personId)
+    }
+
+    fun retryPerson() {
+        val page = state.value.personPage ?: return
+        mutableState.update { it.copy(personPage = page.copy(loading = true, failed = false)) }
+        loadPerson(page.personId)
+    }
+
+    private fun loadPerson(personId: String) {
+        personJob?.cancel()
+        personJob = viewModelScope.launch {
+            val result = container.personCreditsRepository.filmography(personId)
+            mutableState.update { current ->
+                val page = current.personPage?.takeIf { it.personId == personId } ?: return@update current
+                current.copy(
+                    personPage = result.fold(
+                        onSuccess = { filmography ->
+                            page.copy(
+                                filmography = filmography,
+                                name = filmography.name.ifBlank { page.name },
+                                profileUrl = filmography.profileUrl ?: page.profileUrl,
+                                loading = false,
+                                failed = false,
+                            )
+                        },
+                        onFailure = { page.copy(loading = false, failed = true) },
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Back from the person page: its origin details page is still underneath. */
+    fun closePerson() {
+        personJob?.cancel()
+        mutableState.update { it.copy(personPage = null) }
+    }
+
+    /** Opens one of the person's titles; Back returns to the person page. */
+    fun openPersonTitle(media: MediaPreview) {
+        mutableState.update { current ->
+            current.copy(personPage = current.personPage?.copy(showingTitle = true))
+        }
+        loadDetail(media)
+    }
+
+    /** Back from a title opened from the person page: show the person again over its origin. */
+    fun returnToPerson() {
+        val page = state.value.personPage ?: return
+        mutableState.update { it.copy(personPage = page.copy(showingTitle = false)) }
+        loadDetail(page.origin)
+    }
+
     fun clearDetail() {
         detailJob?.cancel()
         enrichmentJob?.cancel()
         mutableState.update {
             it.copy(
                 selectedDetail = null,
+                personPage = null,
                 refreshing = false,
                 detailEnrichment = null,
                 detailEnrichmentLoading = false,
@@ -1942,6 +2031,8 @@ class AppViewModel(
             // would suppress createInitialProfile for the next registration
             // and leak the old account's content into it via seeding.
             container.libraryRepository.clearLocalAccountData()
+            container.preferences.clearPersonalHistory()
+            container.viewingLogRepository.clear()
             container.preferences.setActiveProfile(null)
             container.preferences.setPairingDeviceId(null)
             devicesLoadedOnce = false
@@ -1977,6 +2068,11 @@ class AppViewModel(
 
     fun setTvBlackBackground(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setTvBlackBackground(enabled)
+    }
+
+    /** Device-local TV opt-in for the idle ambient (TV-AMB-01). */
+    fun setTvIdleAmbient(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setTvIdleAmbient(enabled)
     }
 
     fun setTrailersEnabled(enabled: Boolean) = viewModelScope.launch {
@@ -2021,6 +2117,36 @@ class AppViewModel(
         }
     }
 
+    /**
+     * Opens a title from a notification or widget link (MOB-NOT-05). Only
+     * titles this profile already follows open, found in Library, Continue
+     * Watching, or up next, so a crafted link cannot inject arbitrary
+     * metadata; anything else is ignored.
+     */
+    fun openFollowedTitle(mediaKey: String) {
+        viewModelScope.launch {
+            val media = withTimeoutOrNull(WATCH_NEXT_OPEN_WAIT_MILLIS) {
+                state.map { current ->
+                    current.library.firstOrNull { it.mediaKey == mediaKey }?.preview
+                        ?: current.progress.firstOrNull { it.mediaKey == mediaKey }?.preview
+                        ?: current.upNext.firstOrNull { it.media.stableKey == mediaKey }?.media
+                }.filterNotNull().first()
+            } ?: return@launch
+            clearDetail()
+            loadDetail(media)
+        }
+    }
+
+    /** Device-local opt-in for new-episode notifications (SHR-PROD-16). */
+    fun setNewEpisodeAlerts(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setNewEpisodeAlerts(enabled)
+    }
+
+    /** "Not now" on the new-episode invitation: it never shows again (MOB-NOT-02). */
+    fun dismissNewEpisodePrompt() = viewModelScope.launch {
+        container.preferences.answerNewEpisodePrompt()
+    }
+
     fun setBedtimeMinutes(minutes: Int) = viewModelScope.launch {
         container.preferences.setBedtimeMinutes(minutes)
     }
@@ -2052,44 +2178,16 @@ class AppViewModel(
         return ids
     }
 
-    /**
-     * The first provider metadata for [media] that satisfies [wanted], asking
-     * the title's own add-ons first. Responses come from the provider cache
-     * when fresh, so repeated lookups stay cheap.
-     */
-    private suspend fun providerMeta(media: MediaPreview, wanted: (MediaDetail) -> Boolean): MediaDetail? {
-        val providers = state.value.providers
-            .filter(ProviderSubscription::enabled)
-            .sortedWith(
-                compareBy<ProviderSubscription> { if (it.id in media.providerIds) 0 else 1 }
-                    .thenBy(ProviderSubscription::sortOrder)
-                    .thenBy(ProviderSubscription::id),
-            )
-        for (provider in providers) {
-            val manifest = container.providerClient.manifest(provider.manifestUrl)
-            if (manifest !is ProviderResult.Success ||
-                !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)
-            ) {
-                continue
-            }
-            val meta = (container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
-                as? ProviderResult.Success<MediaDetail>)?.value
-            if (meta != null && wanted(meta)) return meta
-        }
-        return null
-    }
+    /** The first provider metadata for [media] that satisfies [wanted] (see ProviderMetadataRepository). */
+    private suspend fun providerMeta(media: MediaPreview, wanted: (MediaDetail) -> Boolean): MediaDetail? =
+        container.providerMetadataRepository.findMeta(media, wanted)
 
     /** A series' episodes: the loaded detail, else provider metadata (kept for a few hours). */
-    private suspend fun seriesEpisodes(media: MediaPreview, nowEpochMillis: Long): List<Episode> {
+    private suspend fun seriesEpisodes(media: MediaPreview): List<Episode> {
         (state.value.selectedDetail?.takeIf { it.preview.stableKey == media.stableKey }
             ?: recentlyLoadedDetails[media.stableKey])
             ?.episodes?.takeIf { it.isNotEmpty() }?.let { return it }
-        episodesByKey[media.stableKey]
-            ?.takeIf { (fetchedAt) -> nowEpochMillis - fetchedAt < SERIES_EPISODES_TTL_MILLIS }
-            ?.let { (_, episodes) -> return episodes }
-        val episodes = providerMeta(media) { it.episodes.isNotEmpty() }?.episodes.orEmpty()
-        episodesByKey[media.stableKey] = nowEpochMillis to episodes
-        return episodes
+        return container.providerMetadataRepository.getSeriesEpisodes(media)
     }
 
     /**
@@ -2105,19 +2203,7 @@ class AppViewModel(
             .collectLatest { (progress, dismissed) ->
                 // Progress lands in bursts (sync, playback pulses); settle first.
                 delay(UP_NEXT_SETTLE_MILLIS)
-                val now = System.currentTimeMillis()
-                val completed = progress.filter(WatchProgress::completed).mapTo(HashSet()) { it.videoId }
-                val items = coroutineScope {
-                    upNextCandidates(progress, dismissed, now).map { row ->
-                        async {
-                            val media = row.preview ?: return@async null
-                            runCatching { seriesEpisodes(media, now) }
-                                .onFailure { if (it is CancellationException) throw it }
-                                .getOrNull()
-                                ?.let { episodes -> upNextAfter(media, row, episodes, completed, now) }
-                        }
-                    }.awaitAll().filterNotNull()
-                }
+                val items = computeUpNext(progress, dismissed, System.currentTimeMillis(), ::seriesEpisodes)
                 mutableState.update { it.copy(upNext = items) }
             }
     }
@@ -2200,7 +2286,50 @@ class AppViewModel(
 
 
 
-    fun dismissMessage() = mutableState.update { it.copy(message = null) }
+    fun dismissMessage() = mutableState.update { it.copy(message = null, messageAction = null) }
+
+    /** The snackbar's action was chosen (MOB-CMP-05). */
+    fun performMessageAction(action: MessageAction) {
+        when (action) {
+            is MessageAction.RestoreRecap -> viewModelScope.launch { container.preferences.setRecapDismissedMonth(null) }
+        }
+    }
+
+    /**
+     * Last month's private recap for the active profile (SHR-PROD-17), from
+     * the device-local viewing log and finished progress. Rebuilt when the
+     * profile, the setting, a dismissal, the log, or progress changes.
+     */
+    private fun observeMonthlyRecap() = viewModelScope.launch {
+        state.map { Triple(it.activeProfileId, it.engagement.monthlyRecap, it.engagement.recapDismissedMonth) }
+            .distinctUntilChanged()
+            .flatMapLatest { (profileId, enabled, dismissed) ->
+                if (profileId == null || !enabled) {
+                    flowOf(null)
+                } else {
+                    val zone = java.time.ZoneId.systemDefault()
+                    val lastMonth = java.time.YearMonth.now(zone).minusMonths(1)
+                    combine(
+                        container.viewingLogRepository.getMonthStream(profileId, lastMonth),
+                        state.map { it.progress }.distinctUntilChanged(),
+                    ) { watched, progress ->
+                        com.lamphaus.core.model.monthlyRecap(System.currentTimeMillis(), zone, watched, progress, dismissed)
+                    }
+                }
+            }
+            .collectLatest { recap -> mutableState.update { it.copy(monthlyRecap = recap) } }
+    }
+
+    /** Hides last month's recap, with Undo in the snackbar (MOB-CMP-05). */
+    fun dismissRecap(month: String, message: String) = viewModelScope.launch {
+        container.preferences.setRecapDismissedMonth(month)
+        mutableState.update { it.copy(message = message, messageAction = MessageAction.RestoreRecap(month)) }
+    }
+
+    /** Device-local: Settings → Browsing → Monthly recap (SHR-PROD-17). */
+    fun setMonthlyRecap(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setMonthlyRecap(enabled)
+    }
 
     private suspend fun loadSubtitles(
         media: MediaPreview,
@@ -2858,6 +2987,21 @@ class AppViewModel(
             launch {
                 syncSettings(userId)
             }
+            // Which of the viewer's own keys are saved decides key-backed UI
+            // such as tappable cast. Quiet: Settings reports failures itself.
+            launch {
+                container.cloudSyncGateway.artworkProviderStatuses(userId).onSuccess { providers ->
+                    mutableState.update { current ->
+                        if ((current.account as? AccountState.SignedIn)?.userId != userId) {
+                            current
+                        } else {
+                            current.copy(
+                                artworkProviders = providers.sortedWith(compareBy({ it.sortOrder }, { it.provider.value })),
+                            )
+                        }
+                    }
+                }
+            }
             // One cloud probe decides how the account boots on this device:
             // non-empty → the collector above adopts those rows and nothing is
             // minted locally; empty → seed from local data, or — when this
@@ -2961,6 +3105,7 @@ class AppViewModel(
         val bedtimeMinutes: Int,
         val googleTvHome: Boolean,
         val upNextDismissed: Set<String>,
+        val engagement: EngagementSettings,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
         val playbackSettings: PlaybackSettings,
@@ -2971,7 +3116,6 @@ class AppViewModel(
         private const val MAX_DISCOVERED_PROVIDERS = 50
         private const val WATCH_NEXT_OPEN_WAIT_MILLIS = 10_000L
         private const val UP_NEXT_SETTLE_MILLIS = 800L
-        private const val SERIES_EPISODES_TTL_MILLIS = 6L * 60 * 60 * 1000
         private const val PAIRING_POLL_MILLIS = 3_000L
         private const val PAIRING_DEVICE_LABEL = "Living room TV"
         private const val DEVELOPMENT_SOURCE_ID = "lamphaus.dev.source"

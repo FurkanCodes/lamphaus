@@ -29,8 +29,17 @@ import androidx.core.net.toUri
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
+import com.lamphaus.app.widget.ContinueWatchingWidget
+import com.lamphaus.app.notify.NewEpisodeWorker
+import com.lamphaus.core.data.cloud.AccountState
 import androidx.credentials.exceptions.NoCredentialException
 private const val BACK_PRESS_EXIT_WINDOW_MILLIS = 2_000L
+private const val WIDGET_REFRESH_DEBOUNCE_MILLIS = 2_000L
 
 
 class MobileActivity : ComponentActivity() {
@@ -68,6 +77,8 @@ class MobileActivity : ComponentActivity() {
             }
         })
         handleIncomingIntent(intent)
+        observeNewEpisodeAlerts()
+        observeWidgetContent()
         // Update checks never delay first display; the coordinator schedules
         // them asynchronously (plan §4, SHR-ARC-10).
         (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
@@ -145,11 +156,51 @@ class MobileActivity : ComponentActivity() {
         viewModel.completeEmailLink(email, link)
     }
 
+    /**
+     * Keeps the new-episode check scheduled exactly while the viewer has
+     * opted in and is signed in (SHR-PROD-16). The auth flow's Loading phase
+     * is ignored so a cold launch never cancels a running schedule.
+     */
+    private fun observeNewEpisodeAlerts() {
+        lifecycleScope.launch {
+            viewModel.state
+                .map { state ->
+                    when (state.account) {
+                        is AccountState.SignedIn -> state.engagement.newEpisodeAlerts
+                        AccountState.SignedOut -> false
+                        AccountState.Loading -> null
+                    }
+                }
+                .filterNotNull()
+                .distinctUntilChanged()
+                .collect { enabled -> NewEpisodeWorker.sync(applicationContext, enabled) }
+        }
+    }
+
+    /**
+     * Redraws the Continue watching widget when what it shows changes:
+     * another profile, new progress (including synced from another device),
+     * or a changed up-next set (MOB-WGT-01).
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private fun observeWidgetContent() {
+        lifecycleScope.launch {
+            viewModel.state
+                .map { Triple(it.activeProfileId, it.progress.maxOfOrNull { row -> row.updatedAtEpochMillis }, it.upNext.map { item -> item.episode.id }) }
+                .distinctUntilChanged()
+                .drop(1)
+                .debounce(WIDGET_REFRESH_DEBOUNCE_MILLIS)
+                .collect { ContinueWatchingWidget.refresh(applicationContext) }
+        }
+    }
+
     private fun handleIncomingIntent(incoming: Intent?) {
         val data = incoming?.data ?: return
         val scheme = data.scheme?.lowercase()
         if (scheme != "http" && scheme != "https") {
-            if (data.host.equals("pair", ignoreCase = true)) {
+            if (scheme == TitleLinks.SCHEME && data.host.equals(TitleLinks.HOST, ignoreCase = true)) {
+                TitleLinks.mediaKeyFrom(data)?.let(viewModel::openFollowedTitle)
+            } else if (data.host.equals("pair", ignoreCase = true)) {
                 val code = data.getQueryParameter("code") ?: data.pathSegments.firstOrNull()
                 if (code.isNullOrBlank()) viewModel.reportMessage("That pairing link is incomplete.")
                 else viewModel.claimPairingSession(code)

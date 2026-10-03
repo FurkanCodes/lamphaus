@@ -92,3 +92,23 @@ fun MediaType.wireName(): String = when (this) {
     MediaType.SERIES -> "series"
     MediaType.UNKNOWN -> "unknown"
 }
+
+/** Asks the edge for one TMDB person's titles (MOB-SRCH-01). */
+@Serializable
+data class PersonCreditsRequest(
+    val personId: String,
+)
+
+/**
+ * A person's best-known titles, resolved to IMDb ids so each opens through the
+ * viewer's own add-ons like a similar title does (SHR-PROD-05). [credits] are
+ * most popular first.
+ */
+@Serializable
+data class PersonFilmography(
+    val personId: String,
+    val name: String,
+    val profileUrl: String? = null,
+    val knownFor: String? = null,
+    val credits: List<MediaPreview> = emptyList(),
+)

@@ -1,5 +1,7 @@
 <resources>
     <color name="launcher_background">#090A0D</color>
     <color name="splash_background">#090A0D</color>
+    <!-- Instrument blue; tints notification icons (MOB-NOT-04, MOB-CLR-09). -->
+    <color name="brand_accent">#A8C8FF</color>
 </resources>
 

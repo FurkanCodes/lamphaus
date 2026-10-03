@@ -377,6 +377,16 @@ data class AppUiState(
     /** Series whose next episode follows one the viewer finished (Continue Watching "up next"). */
     val upNext: List<UpNextItem> = emptyList(),
     val upNextDismissed: Set<String> = emptySet(),
+    /** Device-local engagement choices: alerts, recap, idle ambient. */
+    val engagement: EngagementSettings = EngagementSettings(),
+    /** Last month's private recap while it is relevant (SHR-PROD-17); null otherwise. */
+    val monthlyRecap: com.lamphaus.core.model.MonthlyRecap? = null,
+    /** What the snackbar's action does for [message], when it has one (MOB-CMP-05). */
+    val messageAction: MessageAction? = null,
+    /** A cast member's page opened from the details page (MOB-SRCH-01); null when closed. */
+    val personPage: PersonPageState? = null,
+    /** The active profile's recent searches, newest first (MOB-SRCH-01). */
+    val searchHistory: List<String> = emptyList(),
     /** Imported Nuvio-compatible stream badges; null when none are imported. */
     val streamBadges: com.lamphaus.core.data.repository.StreamBadgeImport? = null,
     val streamBadgesImporting: Boolean = false,
@@ -406,6 +416,12 @@ data class AppUiState(
     val allMedia: List<MediaPreview>
         get() = sections.flatMap(CatalogSection::items).distinctBy(MediaPreview::stableKey)
 
+    /** The viewer's own TMDB key is saved to the account, so cloud TMDB lookups can use it.
+     *  Local-only keys never leave the device, so the cloud cannot. */
+    val tmdbKeyInAccount: Boolean
+        get() = !localOnlyArtworkKeys &&
+            artworkProviders.any { it.provider == ArtworkProviderId.TMDB && it.configured }
+
     /** Everything account-scoped resets; device-local preferences survive.
      *  [account] must be carried over: rebuilding with the Loading default
      *  would strand the UI on the loading screen, since no further auth
@@ -427,6 +443,7 @@ data class AppUiState(
         fitsTonight = fitsTonight,
         bedtimeMinutes = bedtimeMinutes,
         googleTvHome = googleTvHome,
+        engagement = engagement,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,
@@ -434,4 +451,49 @@ data class AppUiState(
         playbackCapabilities = playbackCapabilities,
         initialContentLoading = false,
     )
+}
+
+/**
+ * Device-local choices behind the engagement features: new-episode alerts
+ * (SHR-PROD-16), the monthly recap (SHR-PROD-17), and the TV idle ambient
+ * (TV-AMB-01). None of them sync: each device decides for itself.
+ */
+data class EngagementSettings(
+    val newEpisodeAlerts: Boolean = false,
+    val newEpisodePromptAnswered: Boolean = false,
+    val monthlyRecap: Boolean = true,
+    val recapDismissedMonth: String? = null,
+    val tvIdleAmbient: Boolean = false,
+) {
+    companion object {
+        fun from(settings: com.lamphaus.core.data.preferences.UserSettings) = EngagementSettings(
+            newEpisodeAlerts = settings.newEpisodeAlerts,
+            newEpisodePromptAnswered = settings.newEpisodePromptAnswered,
+            monthlyRecap = settings.monthlyRecap,
+            recapDismissedMonth = settings.recapDismissedMonth,
+            tvIdleAmbient = settings.tvIdleAmbient,
+        )
+    }
+}
+
+/**
+ * A cast or crew member's titles. [origin] is the details page it was opened
+ * from, so Back returns there; [showingTitle] is true while one of the
+ * person's titles is open on top of it.
+ */
+data class PersonPageState(
+    val personId: String,
+    val name: String,
+    val profileUrl: String? = null,
+    val origin: MediaPreview,
+    val filmography: com.lamphaus.core.model.PersonFilmography? = null,
+    val loading: Boolean = true,
+    val failed: Boolean = false,
+    val showingTitle: Boolean = false,
+)
+
+/** A snackbar action, held as state so it survives configuration changes (SHR-ARC-09). */
+sealed interface MessageAction {
+    /** Undo hiding a month's recap. */
+    data class RestoreRecap(val month: String) : MessageAction
 }
