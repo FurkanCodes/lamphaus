@@ -115,6 +115,8 @@ class PlayerActivity : ComponentActivity() {
     private var nextEpisodeResolutionJob: Job? = null
     private var displayModeController: PlaybackDisplayModeController? = null
     private var surfaceFrameRateHost: AndroidPlaybackSurfaceFrameRateHost? = null
+    /** This playback's seek previews; null for a title without a catalog entry. */
+    private var seekPreviews: PlaybackSeekPreviews? = null
     private val sidecarLoader = com.lamphaus.core.player.SidecarSubtitleLoader()
     private var subtitleCues: List<com.lamphaus.core.model.SubtitleCue> = emptyList()
     private var uiPlayer: Player? = null
@@ -173,6 +175,16 @@ class PlayerActivity : ComponentActivity() {
             return
         }
         requestState.value = playback
+        seekPreviews = playback.preview?.let { media ->
+            PlaybackSeekPreviews(
+                repository = container.seekPreviewRepository,
+                media = media,
+                episode = playback.episode,
+                // Per instance: the next episode's player may start before this one is destroyed.
+                directory = java.io.File(cacheDir, "seek-previews/${java.util.UUID.randomUUID()}"),
+                scope = lifecycleScope,
+            )
+        }
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge()
@@ -246,6 +258,7 @@ class PlayerActivity : ComponentActivity() {
         }
         setContent {
             requestState.value?.let { currentRequest ->
+                androidx.compose.runtime.CompositionLocalProvider(LocalSeekPreviews provides seekPreviews) {
                 PlaybackScreen(
                     request = currentRequest,
                     player = uiPlayer ?: controllerState.value,
@@ -306,6 +319,7 @@ class PlayerActivity : ComponentActivity() {
                         }
                     },
                 )
+                }
             }
         }
     }
@@ -1023,6 +1037,8 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        seekPreviews?.release()
+        seekPreviews = null
         audioDeviceCallback?.let { callback ->
             (getSystemService(Context.AUDIO_SERVICE) as? AudioManager)
                 ?.unregisterAudioDeviceCallback(callback)

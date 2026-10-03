@@ -469,6 +469,9 @@
     <string name="integration_replace_key">Replace key</string>
     <string name="integration_remove">Remove integration</string>
     <string name="integration_source_toggle_description">Show this source on detail pages</string>
+    <string name="seekr_integration_title">Seekr seek previews</string>
+    <string name="seekr_integration_description">Shows a frame from the moment you are seeking to, on phones and TVs. The key is saved to your account, so every signed-in device uses it. Seekr learns which titles you seek in. Get a key at seekr.tv.</string>
+    <string name="seekr_integration_limited">Previews appear for titles Seekr has indexed. A free key covers a limited number of titles each day.</string>
     <string name="source_imdb">IMDb</string>
     <string name="source_tmdb">TMDB</string>
     <string name="source_trakt">Trakt</string>

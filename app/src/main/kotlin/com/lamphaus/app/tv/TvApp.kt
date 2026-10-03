@@ -205,6 +205,7 @@ import com.lamphaus.app.ui.menuActions
 import com.lamphaus.app.ui.RatingBadge
 import com.lamphaus.app.ui.RatingBadgeChip
 import com.lamphaus.app.ui.metadataImdbScore
+import com.lamphaus.app.ui.SEEKR_INTEGRATION
 import com.lamphaus.app.ui.orderedRatingScores
 import com.lamphaus.app.ui.ratingDetailsUrl
 import com.lamphaus.app.ui.ratingValueText
@@ -4099,6 +4100,87 @@ private val ratingSourceOptions = listOf(
 )
 private val ratingSourceIds = listOf("imdb", "tmdb", "trakt", "tomatoes", "popcorn", "metacritic", "letterboxd")
 
+/**
+ * Seekr seek previews (PLY-SEEK-01). The key is saved to the account, so a
+ * key entered on one device serves every signed-in device; it is never shown
+ * again (SHR-PROD-06).
+ */
+@Composable
+private fun TvSeekrIntegrationCard(state: AppUiState, viewModel: AppViewModel) {
+    var seekrKey by rememberSaveable { mutableStateOf("") }
+    val seekr = state.integrations.firstOrNull { it.integration == SEEKR_INTEGRATION }
+    val connected = seekr?.connected == true
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(TvSurfaceTokens.elevated, TvShapeTokens.card)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(stringResource(R.string.seekr_integration_title), style = MaterialTheme.typography.titleMedium)
+        Text(
+            stringResource(R.string.seekr_integration_description),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = when {
+                state.integrationsLoading -> stringResource(R.string.integration_status_checking)
+                seekr == null -> stringResource(R.string.integration_not_connected)
+                seekr.valid == false -> stringResource(R.string.integration_key_rejected)
+                connected -> stringResource(R.string.integration_connected)
+                else -> stringResource(R.string.integration_not_connected)
+            },
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        TvEditableTextField(
+            value = seekrKey,
+            onValueChange = { seekrKey = it },
+            label = stringResource(R.string.integration_api_key),
+            placeholder = stringResource(R.string.integration_api_key_placeholder),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+            ),
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth().height(60.dp),
+            onImeAction = {
+                viewModel.saveIntegrationCredential(SEEKR_INTEGRATION, seekrKey)
+                seekrKey = ""
+            },
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TvAction(
+                label = stringResource(
+                    if (connected) R.string.integration_replace_key else R.string.integration_connect,
+                ),
+                icon = Icons.Outlined.Check,
+                enabled = seekrKey.isNotBlank(),
+                onClick = {
+                    viewModel.saveIntegrationCredential(SEEKR_INTEGRATION, seekrKey)
+                    seekrKey = ""
+                },
+            )
+            if (connected) {
+                TvAction(
+                    label = stringResource(R.string.integration_remove),
+                    icon = Icons.Outlined.Delete,
+                    onClick = { viewModel.removeIntegration(SEEKR_INTEGRATION) },
+                )
+            }
+        }
+        if (connected) {
+            Text(
+                stringResource(R.string.seekr_integration_limited),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
 @Composable
 private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
     var mdblistKey by rememberSaveable { mutableStateOf("") }
@@ -4336,6 +4418,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                 }
             }
         }
+        item { TvSeekrIntegrationCard(state, viewModel) }
         if (state.integrationsFailed) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

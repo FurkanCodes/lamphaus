@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PlayCircle
@@ -97,6 +98,8 @@ import com.lamphaus.app.ui.BEDTIME_OPTIONS
 import com.lamphaus.app.ui.bedtimeLabel
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
+import com.lamphaus.app.ui.SEEKR_INTEGRATION
+import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.PairedDevice
 import com.lamphaus.core.model.NextEpisodePolicy
 import com.lamphaus.core.model.NextEpisodeThresholdMode
@@ -121,6 +124,7 @@ internal enum class SettingsSection(
     PAIRED_DEVICES(R.string.paired_devices, Icons.Outlined.Tv),
     SPOILER_PROTECTION(R.string.spoiler_protection, Icons.Outlined.Visibility),
     ARTWORK(R.string.artwork, Icons.Outlined.Image),
+    INTEGRATIONS(R.string.integrations, Icons.Outlined.Key),
     PRIVACY(R.string.privacy, Icons.Outlined.Lock),
     ACCOUNT(R.string.account, Icons.Outlined.AccountCircle),
     UPDATES(R.string.update_check, Icons.Outlined.SystemUpdate),
@@ -161,6 +165,7 @@ internal fun MobileSettingsScreen(
             SettingsSection.PAIRED_DEVICES -> SettingsPairedDevicesPage(state, viewModel)
             SettingsSection.SPOILER_PROTECTION -> SettingsSpoilerPage(state, viewModel)
             SettingsSection.ARTWORK -> SettingsArtworkPage(state, viewModel)
+            SettingsSection.INTEGRATIONS -> SettingsIntegrationsPage(state, viewModel)
             SettingsSection.PRIVACY -> SettingsPrivacyPage(state, viewModel)
             SettingsSection.ACCOUNT -> SettingsAccountPage(state, viewModel)
             SettingsSection.UPDATES -> SettingsUpdatesPage(updateViewModel)
@@ -179,6 +184,9 @@ private fun SettingsRootMenu(onSelect: (SettingsSection) -> Unit) {
         }
         add(SettingsSection.SPOILER_PROTECTION)
         add(SettingsSection.ARTWORK)
+        if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
+            add(SettingsSection.INTEGRATIONS)
+        }
         add(SettingsSection.PRIVACY)
         if (com.lamphaus.app.BuildConfig.CLOUD_CONFIGURED) {
             add(SettingsSection.ACCOUNT)
@@ -1204,6 +1212,108 @@ private fun SettingsArtworkPage(state: AppUiState, viewModel: AppViewModel) {
                 }
             },
         )
+    }
+}
+
+/**
+ * Account-wide integration keys. Seekr seek previews (PLY-SEEK-01): one key
+ * saved here serves every signed-in phone and TV; it is never shown again
+ * (SHR-PROD-06).
+ */
+@Composable
+private fun SettingsIntegrationsPage(state: AppUiState, viewModel: AppViewModel) {
+    var seekrKey by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(state.account) { viewModel.refreshIntegrations() }
+    val seekr = state.integrations.firstOrNull { it.integration == SEEKR_INTEGRATION }
+    val connected = seekr?.connected == true
+    SettingsPage(title = stringResource(R.string.integrations)) {
+        if (state.account !is AccountState.SignedIn) {
+            item {
+                Text(
+                    stringResource(R.string.integrations_sign_in_required),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@SettingsPage
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(MobileTokens.radiusSection),
+                colors = CardDefaults.cardColors(containerColor = MobileTokens.surface),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.seekr_integration_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Text(
+                        stringResource(R.string.seekr_integration_description),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = when {
+                            state.integrationsLoading -> stringResource(R.string.integration_status_checking)
+                            seekr == null -> stringResource(R.string.integration_not_connected)
+                            seekr.valid == false -> stringResource(R.string.integration_key_rejected)
+                            connected -> stringResource(R.string.integration_connected)
+                            else -> stringResource(R.string.integration_not_connected)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value = seekrKey,
+                        onValueChange = { seekrKey = it },
+                        label = { Text(stringResource(R.string.integration_api_key)) },
+                        placeholder = { Text(stringResource(R.string.integration_api_key_placeholder)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = {
+                                viewModel.saveIntegrationCredential(SEEKR_INTEGRATION, seekrKey)
+                                seekrKey = ""
+                            },
+                            enabled = seekrKey.isNotBlank(),
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (connected) R.string.integration_replace_key else R.string.integration_connect,
+                                ),
+                            )
+                        }
+                        if (connected) {
+                            OutlinedButton(onClick = { viewModel.removeIntegration(SEEKR_INTEGRATION) }) {
+                                Text(stringResource(R.string.integration_remove))
+                            }
+                        }
+                    }
+                    if (connected) {
+                        Text(
+                            stringResource(R.string.seekr_integration_limited),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        if (state.integrationsFailed) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.integrations_load_failed), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { viewModel.refreshIntegrations() }) {
+                        Text(stringResource(R.string.retry))
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
 import { validateMdbListKey } from "../_shared/mdblist.ts";
+import { validateSeekrKey } from "../_shared/seekr.ts";
 
 // list-integrations — connection state for the caller's integrations.
 //
@@ -109,7 +110,11 @@ Deno.serve(async (req) => {
         const config = decrypted.config;
         if (config && typeof config === "object" && "apiKey" in config) {
           const apiKey = config.apiKey;
-          valid = typeof apiKey === "string" && await validateMdbListKey(apiKey);
+          valid = typeof apiKey !== "string"
+            ? false
+            : row.integration === "seekr"
+            ? await validateSeekrKey(apiKey)
+            : await validateMdbListKey(apiKey);
         } else {
           valid = false;
         }

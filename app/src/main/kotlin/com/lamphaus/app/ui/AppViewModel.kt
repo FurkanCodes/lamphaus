@@ -130,6 +130,9 @@ internal fun isTerminalDeviceBindingError(error: Throwable?): Boolean {
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
+/** Integration id of the Seekr seek-preview key (PLY-SEEK-01); matches the server. */
+const val SEEKR_INTEGRATION = "seekr"
+
 class AppViewModel(
     private val container: AppContainer,
 ) : ViewModel() {
@@ -1356,7 +1359,10 @@ class AppViewModel(
             return@launch
         }
         val result = container.integrationsGateway.saveCredential(userId, integration, credential.trim())
-        if (result.isSuccess) invalidateDetailEnrichment()
+        if (result.isSuccess) {
+            invalidateDetailEnrichment()
+            container.seekPreviewRepository.invalidate()
+        }
         result
             .onSuccess {
                 showMessage("Integration connected.")
@@ -1391,7 +1397,10 @@ class AppViewModel(
     fun removeIntegration(integration: String) = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         val result = container.integrationsGateway.removeCredential(userId, integration)
-        if (result.isSuccess) invalidateDetailEnrichment()
+        if (result.isSuccess) {
+            invalidateDetailEnrichment()
+            container.seekPreviewRepository.invalidate()
+        }
         result
             .onSuccess {
                 showMessage("Integration removed.")
