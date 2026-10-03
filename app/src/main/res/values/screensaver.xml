@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- The system screensaver is a television surface only (TV-AMB-01). -->
-    <bool name="tv_screensaver_enabled">false</bool>
-</resources>

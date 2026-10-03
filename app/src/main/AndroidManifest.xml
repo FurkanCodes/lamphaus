@@ -112,10 +112,11 @@
                 <data android:scheme="stremio" />
             </intent-filter>
         </activity>
-        <!-- The ambient as the TV's system screensaver, where the device offers a choice (TV-AMB-01). -->
+        <!-- The ambient as the TV's system screensaver, where the device offers a choice (TV-AMB-01).
+             Disabled until TvActivity enables it, so phones never list it. -->
         <service
             android:name=".tv.LamphausDreamService"
-            android:enabled="@bool/tv_screensaver_enabled"
+            android:enabled="false"
             android:exported="true"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_DREAM_SERVICE">

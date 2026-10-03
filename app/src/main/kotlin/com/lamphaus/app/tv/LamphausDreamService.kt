@@ -1,5 +1,8 @@
 package com.lamphaus.app.tv
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.pm.PackageManager
 import android.service.dreams.DreamService
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -81,5 +84,24 @@ class LamphausDreamService : DreamService(), LifecycleOwner, SavedStateRegistryO
     override fun onDetachedFromWindow() {
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         super.onDetachedFromWindow()
+    }
+
+    companion object {
+        /**
+         * The screensaver ships disabled so phones never list it; the TV
+         * host turns it on the first time it runs (TV-AMB-01).
+         */
+        fun enableOnTelevision(context: Context) {
+            val component = ComponentName(context, LamphausDreamService::class.java)
+            val packageManager = context.packageManager
+            if (packageManager.getComponentEnabledSetting(component) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) return
+            runCatching {
+                packageManager.setComponentEnabledSetting(
+                    component,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP,
+                )
+            }
+        }
     }
 }

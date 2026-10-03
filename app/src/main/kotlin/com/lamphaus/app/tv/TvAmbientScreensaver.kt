@@ -180,7 +180,7 @@ private fun AmbientFrame(slide: AmbientSlide, reducedMotion: Boolean) {
 
 /** The time, updated each minute, beside the wordmark. */
 @Composable
-private fun AmbientClock(modifier: Modifier) {
+private fun AmbientClock(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val format = remember(context) { DateFormat.getTimeFormat(context) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }

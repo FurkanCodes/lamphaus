@@ -65,6 +65,7 @@ class TvActivity : ComponentActivity() {
                 }
             }
         })
+        LamphausDreamService.enableOnTelevision(this)
         (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
         launchPendingPlayback((application as LamphausApplication).container)
         // TV-HOME-01: a Google TV home card opens its title (once, not on recreation).
