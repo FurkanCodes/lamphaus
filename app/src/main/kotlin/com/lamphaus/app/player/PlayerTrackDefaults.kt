@@ -19,39 +19,35 @@ import com.lamphaus.core.model.subtitleRoles
 /** One track inside the engine's [Tracks], addressable for an override. */
 internal data class TrackRef(val group: TrackGroup, val trackIndex: Int, val format: Format)
 
-/** The tracks the policy may choose from, keyed by a stable "group:track" id. */
-internal data class TrackCandidates(
-    val audio: List<Pair<AudioTrackInfo, TrackRef>>,
-    val subtitles: List<Pair<SubtitleTrackInfo, TrackRef>>,
-)
+/**
+ * A track the policy may choose: its [format], whether the device can play
+ * it, and the engine [handle] to select it with. The policy only reads
+ * formats, so it is testable without an engine.
+ */
+internal data class TrackCandidate<T>(val format: Format, val supported: Boolean, val handle: T)
 
 /** What the defaults policy decided; a null subtitle means subtitles off. */
-internal data class TrackDefaultsDecision(
-    val audio: TrackRef?,
-    val subtitle: TrackRef?,
+internal data class TrackDefaultsDecision<T>(
+    val audio: T?,
+    val subtitle: T?,
 )
 
-/**
- * Maps engine tracks into the policy's track model. Tracks the device cannot
- * play are left out, so a default never lands on an undecodable stream; when
- * nothing of a type is playable, every track of that type stays eligible.
- */
-internal fun Tracks.trackCandidates(): TrackCandidates {
-    fun refs(type: Int): List<Pair<TrackRef, Boolean>> = groups
-        .filter { it.type == type }
-        .flatMap { group ->
-            (0 until group.length).map { index ->
-                TrackRef(group.mediaTrackGroup, index, group.getTrackFormat(index)) to group.isTrackSupported(index)
-            }
+/** The engine's audio or subtitle tracks as candidates, in the engine's order. */
+internal fun Tracks.trackCandidates(trackType: Int): List<TrackCandidate<TrackRef>> = groups
+    .filter { it.type == trackType }
+    .flatMap { group ->
+        (0 until group.length).map { index ->
+            val format = group.getTrackFormat(index)
+            TrackCandidate(format, group.isTrackSupported(index), TrackRef(group.mediaTrackGroup, index, format))
         }
-    fun playable(type: Int): List<TrackRef> {
-        val all = refs(type)
-        return all.filter { it.second }.ifEmpty { all }.map { it.first }
     }
-    val audio = playable(C.TRACK_TYPE_AUDIO).mapIndexed { index, ref -> ref.format.audioInfo("a$index") to ref }
-    val subtitles = playable(C.TRACK_TYPE_TEXT).mapIndexed { index, ref -> ref.format.subtitleInfo("s$index") to ref }
-    return TrackCandidates(audio, subtitles)
-}
+
+/**
+ * Tracks the device cannot play are left out, so a default never lands on an
+ * undecodable stream; when nothing of a type is playable, all stay eligible.
+ */
+private fun <T> List<TrackCandidate<T>>.playable(): List<TrackCandidate<T>> =
+    filter { it.supported }.ifEmpty { this }
 
 private fun Format.roles(): Set<TrackRole> {
     val roles = subtitleRoles(label, isForcedFlag = selectionFlags and C.SELECTION_FLAG_FORCED != 0).toMutableSet()
@@ -86,22 +82,25 @@ private val BITMAP_SUBTITLE_MIME_TYPES = setOf(MimeTypes.APPLICATION_PGS, MimeTy
  * engine's real tracks (plan §3): one policy for Media3 and MPV, embedded and
  * add-on tracks alike.
  */
-internal fun decideTrackDefaults(
-    candidates: TrackCandidates,
+internal fun <T> decideTrackDefaults(
+    audioTracks: List<TrackCandidate<T>>,
+    subtitleTracks: List<TrackCandidate<T>>,
     profile: ProfilePlaybackPreferences,
     remembered: MediaPlaybackSelection?,
     deviceLanguageTag: String,
-): TrackDefaultsDecision {
-    val audio = selectAudioTrack(
-        tracks = candidates.audio.map { it.first },
+): TrackDefaultsDecision<T> {
+    val audio = audioTracks.playable()
+    val subtitles = subtitleTracks.playable()
+    val audioPick = selectAudioTrack(
+        tracks = audio.mapIndexed { index, track -> track.format.audioInfo("a$index") },
         sessionSelectionTrackId = null,
         sourceSelectionTrackId = null,
         semantic = remembered,
         profile = profile,
         deviceLanguageTag = deviceLanguageTag,
     )
-    val subtitleId = selectSubtitleTrack(
-        tracks = candidates.subtitles.map { it.first },
+    val subtitlePick = selectSubtitleTrack(
+        tracks = subtitles.mapIndexed { index, track -> track.format.subtitleInfo("s$index") },
         sessionSelectionTrackId = null,
         sourceSelectionTrackId = null,
         semantic = remembered,
@@ -109,8 +108,8 @@ internal fun decideTrackDefaults(
         deviceLanguageTag = deviceLanguageTag,
     )
     return TrackDefaultsDecision(
-        audio = audio?.let { chosen -> candidates.audio.firstOrNull { it.first.id == chosen.id }?.second },
-        subtitle = subtitleId?.let { id -> candidates.subtitles.firstOrNull { it.first.id == id }?.second },
+        audio = audioPick?.id?.removePrefix("a")?.toIntOrNull()?.let { audio.getOrNull(it)?.handle },
+        subtitle = subtitlePick?.removePrefix("s")?.toIntOrNull()?.let { subtitles.getOrNull(it)?.handle },
     )
 }
 
@@ -179,7 +178,13 @@ internal class PlayerTrackDefaults(
         val applyText = !viewerChoseText && (audioKey.isNotEmpty() || textKey.isNotEmpty()) &&
             (force || textKey != appliedTextKey)
         if (!applyAudio && !applyText) return
-        val decision = decideTrackDefaults(tracks.trackCandidates(), profile, remembered, deviceLanguageTag())
+        val decision = decideTrackDefaults(
+            audioTracks = tracks.trackCandidates(C.TRACK_TYPE_AUDIO),
+            subtitleTracks = tracks.trackCandidates(C.TRACK_TYPE_TEXT),
+            profile = profile,
+            remembered = remembered,
+            deviceLanguageTag = deviceLanguageTag(),
+        )
         val builder = player.trackSelectionParameters.buildUpon()
         if (applyAudio) {
             appliedAudioKey = audioKey

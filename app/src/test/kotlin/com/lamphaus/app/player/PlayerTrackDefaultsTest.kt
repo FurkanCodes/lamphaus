@@ -3,8 +3,6 @@ package com.lamphaus.app.player
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
-import androidx.media3.common.TrackGroup
-import androidx.media3.common.Tracks
 import com.lamphaus.core.model.MediaPlaybackSelection
 import com.lamphaus.core.model.ProfilePlaybackPreferences
 import com.lamphaus.core.model.SubtitleDefaultMode
@@ -36,23 +34,23 @@ class PlayerTrackDefaultsTest {
         .setSelectionFlags(if (forced) C.SELECTION_FLAG_FORCED else 0)
         .build()
 
-    private fun tracks(vararg formats: Pair<Format, Boolean>): Tracks = Tracks(
-        formats.map { (format, supported) ->
-            Tracks.Group(
-                TrackGroup(format),
-                false,
-                intArrayOf(if (supported) C.FORMAT_HANDLED else C.FORMAT_UNSUPPORTED_SUBTYPE),
-                booleanArrayOf(false),
-            )
-        },
-    )
+    /** Candidates by type, as the engine lists them; each handle is the format's id. */
+    private class Tracks(val audio: List<TrackCandidate<String>>, val subtitles: List<TrackCandidate<String>>)
+
+    private fun tracks(vararg formats: Pair<Format, Boolean>): Tracks {
+        val candidates = formats.map { (format, supported) -> TrackCandidate(format, supported, format.id.orEmpty()) }
+        return Tracks(
+            audio = candidates.filter { it.format.sampleMimeType.orEmpty().startsWith("audio/") },
+            subtitles = candidates.filterNot { it.format.sampleMimeType.orEmpty().startsWith("audio/") },
+        )
+    }
 
     private fun decide(
         tracks: Tracks,
         profile: ProfilePlaybackPreferences,
         remembered: MediaPlaybackSelection? = null,
         device: String = "en-US",
-    ) = decideTrackDefaults(tracks.trackCandidates(), profile, remembered, device)
+    ) = decideTrackDefaults(tracks.audio, tracks.subtitles, profile, remembered, device)
 
     @Test
     fun `profile audio language wins over the stream default`() {
@@ -60,7 +58,7 @@ class PlayerTrackDefaultsTest {
 
         val decision = decide(tracks, ProfilePlaybackPreferences(audioLanguageTag = "ja"))
 
-        assertEquals("ja", decision.audio?.format?.id)
+        assertEquals("ja", decision.audio)
     }
 
     @Test
@@ -69,7 +67,7 @@ class PlayerTrackDefaultsTest {
 
         val decision = decide(tracks, ProfilePlaybackPreferences())
 
-        assertEquals("ja", decision.audio?.format?.id)
+        assertEquals("ja", decision.audio)
     }
 
     @Test
@@ -78,7 +76,7 @@ class PlayerTrackDefaultsTest {
 
         val decision = decide(tracks, ProfilePlaybackPreferences(audioLanguageTag = "ja"))
 
-        assertEquals("en", decision.audio?.format?.id)
+        assertEquals("en", decision.audio)
     }
 
     @Test
@@ -93,7 +91,7 @@ class PlayerTrackDefaultsTest {
             preferredSubtitleLanguageTag = "en",
         )
 
-        assertEquals("addon-en", decide(tracks, profile, device = "tr-TR").subtitle?.format?.id)
+        assertEquals("addon-en", decide(tracks, profile, device = "tr-TR").subtitle)
     }
 
     @Test
@@ -106,7 +104,7 @@ class PlayerTrackDefaultsTest {
         val withoutForced = tracks(audio("en", "en") to true, subtitle("en-full", "en") to true)
         val profile = ProfilePlaybackPreferences(subtitleDefaultMode = SubtitleDefaultMode.FORCED_ONLY)
 
-        assertEquals("en-forced", decide(withForced, profile).subtitle?.format?.id)
+        assertEquals("en-forced", decide(withForced, profile).subtitle)
         assertNull(decide(withoutForced, profile).subtitle)
     }
 
@@ -126,8 +124,8 @@ class PlayerTrackDefaultsTest {
 
         val decision = decide(tracks, profile, remembered)
 
-        assertEquals("ja", decision.audio?.format?.id)
-        assertEquals("de", decision.subtitle?.format?.id)
+        assertEquals("ja", decision.audio)
+        assertEquals("de", decision.subtitle)
     }
 
     @Test

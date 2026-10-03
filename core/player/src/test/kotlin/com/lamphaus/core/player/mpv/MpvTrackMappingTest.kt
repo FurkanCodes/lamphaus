@@ -1,10 +1,7 @@
 package com.lamphaus.core.player.mpv
 
 import androidx.media3.common.C
-import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
-import androidx.media3.common.TrackGroup
-import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
 import com.lamphaus.core.player.EngineHandoffState
 import org.junit.Assert.assertEquals
@@ -13,20 +10,19 @@ import org.junit.Test
 
 /** Plan §1/§3: Media3 overrides and preferences reach mpv, and a hand-off keeps the viewer's tracks. */
 class MpvTrackMappingTest {
-    private fun group(type: String, mpvId: String, mime: String) =
-        TrackGroup(Format.Builder().setSampleMimeType(mime).build())
-            .copyWithId(MpvTrackMapping.groupId(type, mpvId))
-
     @Test
     fun `overrides select mpv ids and preferences become language lists`() {
-        val parameters = TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT.buildUpon()
-            .setOverrideForType(TrackSelectionOverride(group("audio", "2", MimeTypes.AUDIO_AC3), 0))
-            .setOverrideForType(TrackSelectionOverride(group("sub", "5", MimeTypes.APPLICATION_SUBRIP), 0))
-            .setPreferredAudioLanguages("ja", "en")
-            .setPreferredTextLanguages("en")
-            .build()
-
-        val plan = MpvTrackMapping.plan(parameters)
+        // TrackGroup needs the Android framework, so the override is given as (type, group id).
+        val plan = MpvTrackMapping.plan(
+            overrides = listOf(
+                C.TRACK_TYPE_AUDIO to MpvTrackMapping.groupId("audio", "2"),
+                C.TRACK_TYPE_TEXT to MpvTrackMapping.groupId("sub", "5"),
+                C.TRACK_TYPE_TEXT to "video-current",
+            ),
+            textDisabled = false,
+            preferredAudioLanguages = listOf("ja", "en"),
+            preferredTextLanguages = listOf("en"),
+        )
 
         assertEquals("2", plan.aid)
         assertEquals("5", plan.sid)

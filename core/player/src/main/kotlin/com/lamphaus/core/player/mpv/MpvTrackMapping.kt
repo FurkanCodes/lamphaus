@@ -49,24 +49,34 @@ internal object MpvTrackMapping {
 
     fun groupId(type: String, mpvId: String): String = "$type-$mpvId"
 
-    fun plan(parameters: TrackSelectionParameters): MpvTrackPlan {
+    fun plan(parameters: TrackSelectionParameters): MpvTrackPlan = plan(
+        overrides = parameters.overrides.values.map { override -> override.type to override.mediaTrackGroup.id },
+        textDisabled = C.TRACK_TYPE_TEXT in parameters.disabledTrackTypes,
+        preferredAudioLanguages = parameters.preferredAudioLanguages,
+        preferredTextLanguages = parameters.preferredTextLanguages,
+    )
+
+    /** [overrides] are (track type, track group id) pairs, the part of an override mpv needs. */
+    fun plan(
+        overrides: List<Pair<Int, String>>,
+        textDisabled: Boolean,
+        preferredAudioLanguages: List<String>,
+        preferredTextLanguages: List<String>,
+    ): MpvTrackPlan {
         var aid: String? = null
         var sid: String? = null
-        parameters.overrides.values.forEach { override ->
-            val groupId = override.mediaTrackGroup.id
+        overrides.forEach { (type, groupId) ->
             when {
-                override.type == C.TRACK_TYPE_AUDIO && groupId.startsWith("$AUDIO-") ->
-                    aid = groupId.removePrefix("$AUDIO-")
-                override.type == C.TRACK_TYPE_TEXT && groupId.startsWith("$SUBTITLE-") ->
-                    sid = groupId.removePrefix("$SUBTITLE-")
+                type == C.TRACK_TYPE_AUDIO && groupId.startsWith("$AUDIO-") -> aid = groupId.removePrefix("$AUDIO-")
+                type == C.TRACK_TYPE_TEXT && groupId.startsWith("$SUBTITLE-") -> sid = groupId.removePrefix("$SUBTITLE-")
             }
         }
-        if (C.TRACK_TYPE_TEXT in parameters.disabledTrackTypes) sid = "no"
+        if (textDisabled) sid = "no"
         return MpvTrackPlan(
             aid = aid,
             sid = sid,
-            alang = parameters.preferredAudioLanguages.joinToString(","),
-            slang = parameters.preferredTextLanguages.joinToString(","),
+            alang = preferredAudioLanguages.joinToString(","),
+            slang = preferredTextLanguages.joinToString(","),
         )
     }
 
