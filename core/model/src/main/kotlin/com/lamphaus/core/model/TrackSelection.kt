@@ -18,6 +18,8 @@ fun normalizeBcp47Tag(raw: String?): String {
     val cleaned = raw?.trim()?.replace('_', '-')?.takeIf(String::isNotEmpty) ?: return ""
     val subtags = cleaned.split("-").filter(String::isNotEmpty)
     if (subtags.isEmpty()) return ""
+    // OpenSubtitles' Brazilian Portuguese code carries its region in the code itself.
+    if (subtags.size == 1 && subtags[0].equals("pob", ignoreCase = true)) return "pt-BR"
     val language = ISO_639_2_TO_1[subtags[0].lowercase()] ?: subtags[0].lowercase()
     if (language == "und") return ""
     if (language.length < 2 || !language.all { it in 'a'..'z' }) return ""
@@ -35,7 +37,15 @@ fun normalizeBcp47Tag(raw: String?): String {
 
 /** Common ISO-639-2 codes returned by subtitle add-ons, including legacy bibliographic aliases. */
 private val ISO_639_2_TO_1 = mapOf(
+    "alb" to "sq",
+    "sqi" to "sq",
     "ara" to "ar",
+    "baq" to "eu",
+    "eus" to "eu",
+    "ben" to "bn",
+    "bos" to "bs",
+    "bul" to "bg",
+    "cat" to "ca",
     "chi" to "zh",
     "zho" to "zh",
     "cze" to "cs",
@@ -44,34 +54,68 @@ private val ISO_639_2_TO_1 = mapOf(
     "dut" to "nl",
     "nld" to "nl",
     "eng" to "en",
+    "est" to "et",
+    "fas" to "fa",
+    "per" to "fa",
+    "fil" to "tl",
+    "tgl" to "tl",
     "fin" to "fi",
     "fre" to "fr",
     "fra" to "fr",
     "ger" to "de",
     "deu" to "de",
+    "glg" to "gl",
     "gre" to "el",
     "ell" to "el",
     "heb" to "he",
     "hin" to "hi",
+    "hrv" to "hr",
+    "scr" to "hr",
     "hun" to "hu",
     "ice" to "is",
     "isl" to "is",
+    "ind" to "id",
     "ita" to "it",
     "jpn" to "ja",
     "kor" to "ko",
+    "lav" to "lv",
+    "lit" to "lt",
+    "mac" to "mk",
+    "mkd" to "mk",
+    "may" to "ms",
+    "msa" to "ms",
+    "nob" to "nb",
+    "nno" to "nn",
     "nor" to "no",
     "pol" to "pl",
     "por" to "pt",
     "rum" to "ro",
     "ron" to "ro",
     "rus" to "ru",
+    "slo" to "sk",
+    "slk" to "sk",
+    "slv" to "sl",
     "spa" to "es",
+    "scc" to "sr",
+    "srp" to "sr",
     "swe" to "sv",
+    "tam" to "ta",
+    "tel" to "te",
     "tha" to "th",
     "tur" to "tr",
     "ukr" to "uk",
+    "urd" to "ur",
     "vie" to "vi",
 )
+
+/**
+ * The id a track was given by its source. Media3 prefixes the tracks of a
+ * merged item (the stream plus add-on subtitles) with the source's index,
+ * "1:opensubtitles-42"; the add-on's own id is what follows.
+ */
+fun sourceTrackId(id: String?): String? = id?.replaceFirst(MERGED_TRACK_PREFIX, "")
+
+private val MERGED_TRACK_PREFIX = Regex("^\\d+:")
 
 /** Primary language subtag of a normalized tag ("en-US" → "en"). */
 fun baseLanguage(normalizedTag: String): String =
@@ -99,6 +143,8 @@ enum class TrackRole { FORCED, SDH, COMMENTARY, AUDIO_DESCRIPTION, ORIGINAL }
 fun subtitleRoles(label: String?, isForcedFlag: Boolean = false): Set<TrackRole> {
     val roles = mutableSetOf<TrackRole>()
     if (isForcedFlag) roles += TrackRole.FORCED
+    // "(HI)" / "[HI]" marks hearing-impaired files; a bare "hi" is Hindi.
+    if (label != null && HEARING_IMPAIRED_MARK.containsMatchIn(label)) roles += TrackRole.SDH
     // Providers attach labels like "English (CC)" or "Director's Commentary";
     // punctuation is stripped so word checks stay simple.
     val text = label?.lowercase()?.replace(Regex("[^a-z0-9]+"), " ") ?: return roles
@@ -109,6 +155,8 @@ fun subtitleRoles(label: String?, isForcedFlag: Boolean = false): Set<TrackRole>
     if ("original" in text) roles += TrackRole.ORIGINAL
     return roles
 }
+
+private val HEARING_IMPAIRED_MARK = Regex("""[(\[]\s*hi\s*[)\]]""", RegexOption.IGNORE_CASE)
 
 data class AudioTrackInfo(
     val id: String,
@@ -138,6 +186,7 @@ private fun orderedLanguages(profile: ProfilePlaybackPreferences, deviceLanguage
 /**
  * Audio selection precedence (plan §3): session id → source id → semantic
  * language → profile/secondary/device languages → stream default → first.
+ * An empty profile language means Original: the stream default comes first.
  */
 fun selectAudioTrack(
     tracks: List<AudioTrackInfo>,
@@ -157,11 +206,14 @@ fun selectAudioTrack(
     }
 
     val profilePrimary = profile.audioLanguageTag
+    if (profilePrimary.isBlank()) {
+        // Original: the stream's own default track is the original mix; only
+        // a stream that marks no default falls back to the device language.
+        tracks.firstOrNull { it.isDefault && TrackRole.COMMENTARY !in it.roles }?.let { return it }
+    }
     val languages = if (profilePrimary.isNotBlank()) {
         orderedLanguages(profile, deviceLanguageTag, profilePrimary)
     } else {
-        // Original → device language → stream default: "original" is carried
-        // by the stream's own default flag, tried after the device language.
         orderedLanguages(ProfilePlaybackPreferences(), deviceLanguageTag, normalizeBcp47Tag(deviceLanguageTag))
     }
     for (language in languages) {
@@ -170,7 +222,9 @@ fun selectAudioTrack(
             ?.let { return it }
         tracks.firstOrNull { languageMatches(it.languageTag, language) }?.let { return it }
     }
-    return tracks.firstOrNull { it.isDefault } ?: tracks.first()
+    return tracks.firstOrNull { it.isDefault }
+        ?: tracks.firstOrNull { TrackRole.COMMENTARY !in it.roles }
+        ?: tracks.first()
 }
 
 private fun prefersForced(semantic: MediaPlaybackSelection?, mode: SubtitleDefaultMode): Boolean =

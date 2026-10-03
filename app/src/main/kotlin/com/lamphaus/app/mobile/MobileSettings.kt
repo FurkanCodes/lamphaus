@@ -77,6 +77,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
@@ -102,6 +103,8 @@ import com.lamphaus.core.model.NextEpisodeThresholdMode
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
+import com.lamphaus.app.ui.playbackLanguageLabel
+import com.lamphaus.app.ui.playbackLanguageOptions
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
 import java.util.Locale
@@ -204,22 +207,50 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
     val profile = state.profilePlaybackPreferences
     val device = state.devicePlaybackConfig
     var choiceDialog by remember { mutableStateOf<PlaybackChoiceDialog?>(null) }
+    val displayLocale = LocalConfiguration.current.locales[0]
+    val originalLabel = stringResource(R.string.playback_language_original)
+    val deviceLanguageLabel = stringResource(R.string.playback_language_device)
+    val subtitlesOn = profile.subtitleDefaultMode != SubtitleDefaultMode.OFF
     SettingsPage(title = stringResource(R.string.playback)) {
         item {
             SettingsCard("Language and color defaults") {
                 ListItem(
-                    headlineContent = { Text("Default audio") },
-                    supportingContent = { Text("Original first, then the preferred language") },
-                    trailingContent = { Text(playbackLanguageLabel(profile.audioLanguageTag)) },
+                    headlineContent = { Text(stringResource(R.string.playback_default_audio)) },
+                    supportingContent = { Text(stringResource(R.string.playback_default_audio_description)) },
+                    trailingContent = {
+                        Text(playbackLanguageLabel(profile.audioLanguageTag, originalLabel, displayLocale))
+                    },
                     modifier = Modifier.clickable(role = Role.Button) { choiceDialog = PlaybackChoiceDialog.AUDIO },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 ListItem(
-                    headlineContent = { Text("Default subtitles") },
-                    supportingContent = { Text("Used when a title has no remembered choice") },
-                    trailingContent = { Text(subtitleDefaultLabel(profile.subtitleDefaultMode)) },
+                    headlineContent = { Text(stringResource(R.string.playback_default_subtitles)) },
+                    supportingContent = { Text(stringResource(R.string.playback_default_subtitles_description)) },
+                    trailingContent = { Text(stringResource(subtitleDefaultLabelRes(profile.subtitleDefaultMode))) },
                     modifier = Modifier.clickable(role = Role.Button) { choiceDialog = PlaybackChoiceDialog.SUBTITLES },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                // Depends on Default subtitles; disabled, with the reason, while it is Off (MOB-SET-05).
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.playback_subtitle_language)) },
+                    supportingContent = {
+                        Text(
+                            stringResource(
+                                if (subtitlesOn) R.string.playback_subtitle_language_description
+                                else R.string.playback_subtitle_language_disabled,
+                            ),
+                        )
+                    },
+                    trailingContent = {
+                        Text(playbackLanguageLabel(profile.preferredSubtitleLanguageTag, deviceLanguageLabel, displayLocale))
+                    },
+                    modifier = Modifier
+                        .clickable(enabled = subtitlesOn, role = Role.Button) {
+                            choiceDialog = PlaybackChoiceDialog.SUBTITLE_LANGUAGE
+                        }
+                        .alpha(if (subtitlesOn) 1f else 0.38f),
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
@@ -358,6 +389,15 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     },
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.end_prompt_auto_close),
+                    description = stringResource(R.string.end_prompt_auto_close_description),
+                    checked = playback.endPromptAutoClose,
+                    onCheckedChange = {
+                        viewModel.setPlaybackSettings(playback.copy(endPromptAutoClose = it))
+                    },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 NextEpisodeThresholdControls(
                     playback = playback,
                     onUpdate = viewModel::setPlaybackSettings,
@@ -367,14 +407,19 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
     }
     choiceDialog?.let { dialog ->
         val options = when (dialog) {
-            PlaybackChoiceDialog.AUDIO -> PLAYER_LANGUAGE_OPTIONS.map { (tag, label) ->
-                PlaybackChoice(label, profile.audioLanguageTag == tag) {
-                    viewModel.setProfilePlaybackPreferences(profile.copy(audioLanguageTag = tag))
+            PlaybackChoiceDialog.AUDIO -> playbackLanguageOptions(originalLabel, displayLocale).map { option ->
+                PlaybackChoice(option.label, profile.audioLanguageTag == option.tag) {
+                    viewModel.setProfilePlaybackPreferences(profile.copy(audioLanguageTag = option.tag))
                 }
             }
             PlaybackChoiceDialog.SUBTITLES -> SubtitleDefaultMode.entries.map { mode ->
-                PlaybackChoice(subtitleDefaultLabel(mode), profile.subtitleDefaultMode == mode) {
+                PlaybackChoice(stringResource(subtitleDefaultLabelRes(mode)), profile.subtitleDefaultMode == mode) {
                     viewModel.setProfilePlaybackPreferences(profile.copy(subtitleDefaultMode = mode))
+                }
+            }
+            PlaybackChoiceDialog.SUBTITLE_LANGUAGE -> playbackLanguageOptions(deviceLanguageLabel, displayLocale).map { option ->
+                PlaybackChoice(option.label, profile.preferredSubtitleLanguageTag == option.tag) {
+                    viewModel.setProfilePlaybackPreferences(profile.copy(preferredSubtitleLanguageTag = option.tag))
                 }
             }
             PlaybackChoiceDialog.FRAME_RATE -> FrameRateMatching.entries.map { mode ->
@@ -416,8 +461,9 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             title = {
                 Text(
                     when (dialog) {
-                        PlaybackChoiceDialog.AUDIO -> "Default audio"
-                        PlaybackChoiceDialog.SUBTITLES -> "Default subtitles"
+                        PlaybackChoiceDialog.AUDIO -> stringResource(R.string.playback_default_audio)
+                        PlaybackChoiceDialog.SUBTITLES -> stringResource(R.string.playback_default_subtitles)
+                        PlaybackChoiceDialog.SUBTITLE_LANGUAGE -> stringResource(R.string.playback_subtitle_language)
                         PlaybackChoiceDialog.FRAME_RATE -> "Match frame rate"
                         PlaybackChoiceDialog.AUDIO_OUTPUT -> "Audio output"
                         PlaybackChoiceDialog.DOWNMIX -> "Downmix"
@@ -427,7 +473,8 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                 )
             },
             text = {
-                Column {
+                // The language lists are longer than a dialog; they scroll (MOB-CMP-04).
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     options.forEach { option ->
                         ListItem(
                             headlineContent = { Text(option.label) },
@@ -449,7 +496,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
     }
 }
 
-private enum class PlaybackChoiceDialog { AUDIO, SUBTITLES, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOLBY_VISION, DECODER }
+private enum class PlaybackChoiceDialog { AUDIO, SUBTITLES, SUBTITLE_LANGUAGE, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOLBY_VISION, DECODER }
 
 @Composable
 private fun PlaybackEngineChoiceRow(title: String, description: String, value: String, onClick: () -> Unit) {
@@ -464,24 +511,11 @@ private fun PlaybackEngineChoiceRow(title: String, description: String, value: S
 
 private data class PlaybackChoice(val label: String, val selected: Boolean, val onClick: () -> Unit)
 
-private val PLAYER_LANGUAGE_OPTIONS = listOf(
-    "" to "Original / device default",
-    "en" to "English",
-    "tr" to "Turkish",
-    "de" to "German",
-    "es" to "Spanish",
-    "fr" to "French",
-    "ja" to "Japanese",
-    "ko" to "Korean",
-)
-
-private fun playbackLanguageLabel(tag: String): String =
-    PLAYER_LANGUAGE_OPTIONS.firstOrNull { it.first == tag }?.second ?: Locale.forLanguageTag(tag).displayLanguage
-
-private fun subtitleDefaultLabel(mode: SubtitleDefaultMode): String = when (mode) {
-    SubtitleDefaultMode.OFF -> "Off"
-    SubtitleDefaultMode.FORCED_ONLY -> "Forced only"
-    SubtitleDefaultMode.PREFERRED_LANGUAGE -> "Preferred language"
+@StringRes
+private fun subtitleDefaultLabelRes(mode: SubtitleDefaultMode): Int = when (mode) {
+    SubtitleDefaultMode.OFF -> R.string.playback_subtitles_off
+    SubtitleDefaultMode.FORCED_ONLY -> R.string.playback_subtitles_forced
+    SubtitleDefaultMode.PREFERRED_LANGUAGE -> R.string.playback_subtitles_preferred
 }
 
 private fun frameRateMatchingLabel(mode: FrameRateMatching): String = when (mode) {

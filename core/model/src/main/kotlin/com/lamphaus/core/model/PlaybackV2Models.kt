@@ -59,7 +59,7 @@ enum class SubtitleFontFamily { SYSTEM, SANS_SERIF, SERIF, MONOSPACE }
  */
 @Serializable
 data class ProfilePlaybackPreferences(
-    /** Primary audio language; empty means Original → device language → stream default. */
+    /** Primary audio language; empty means Original → stream default → device language. */
     val audioLanguageTag: String = "",
     /** Secondary audio language; empty means none. */
     val secondaryAudioLanguageTag: String = "",

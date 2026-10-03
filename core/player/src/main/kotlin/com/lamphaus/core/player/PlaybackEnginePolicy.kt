@@ -126,4 +126,10 @@ data class EngineHandoffState(
     val subtitleTrackId: String? = null,
     val subtitleDelayMillis: Long = 0,
     val audioDelayMillis: Long = 0,
+    /** Language of the playing audio; the replacement engine matches by language, not id. */
+    val audioLanguage: String? = null,
+    val subtitleLanguage: String? = null,
+    val subtitleForced: Boolean = false,
+    /** The text track type was off: subtitles stay off on the replacement engine. */
+    val subtitlesOff: Boolean = false,
 )

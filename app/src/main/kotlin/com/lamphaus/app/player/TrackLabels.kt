@@ -16,6 +16,10 @@ internal fun Format.trackTitle(index: Int): String = trackTitle(language, label,
 internal fun Format.trackDetails(trackType: Int): String? =
     trackDetails(trackType, sourceMimeType(), channelCount, selectionFlags, roleFlags, label)
 
+/** The same facts as [trackDetails], one badge each: codec, layout, Forced, SDH, … */
+internal fun Format.trackBadges(trackType: Int): List<String> =
+    trackBadges(trackType, sourceMimeType(), channelCount, selectionFlags, roleFlags, label)
+
 /**
  * Subtitles parsed during extraction report Media3's internal cue format;
  * the original subtitle format (SRT, ASS, PGS, …) is carried in `codecs`.
@@ -44,19 +48,37 @@ internal fun trackDetails(
     selectionFlags: Int,
     roleFlags: Int,
     label: String?,
-): String? {
+): String? = trackBadges(trackType, sampleMimeType, channelCount, selectionFlags, roleFlags, label)
+    .joinToString(" · ")
+    .ifBlank { null }
+
+internal fun trackBadges(
+    trackType: Int,
+    sampleMimeType: String?,
+    channelCount: Int,
+    selectionFlags: Int,
+    roleFlags: Int,
+    label: String?,
+): List<String> {
     val name = label.orEmpty().lowercase(Locale.ROOT)
     return buildList {
         sampleMimeType?.let { add(friendlyCodecName(it, atmos = "atmos" in name)) }
         if (trackType == C.TRACK_TYPE_AUDIO) channelLayout(channelCount)?.let(::add)
         if (selectionFlags and C.SELECTION_FLAG_FORCED != 0 || "forced" in name) add("Forced")
-        if (roleFlags and C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND != 0 || "sdh" in name || "hearing" in name) add("SDH")
+        if (roleFlags and C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND != 0 || "sdh" in name || "hearing" in name ||
+            HEARING_IMPAIRED_MARK.containsMatchIn(name)
+        ) {
+            add("SDH")
+        }
         if (roleFlags and C.ROLE_FLAG_CAPTION != 0) add("Captions")
         if (roleFlags and C.ROLE_FLAG_COMMENTARY != 0 || "commentary" in name) add("Commentary")
         if (roleFlags and C.ROLE_FLAG_DESCRIBES_VIDEO != 0) add("Audio description")
         if (selectionFlags and C.SELECTION_FLAG_DEFAULT != 0) add("Default")
-    }.distinct().joinToString(" · ").ifBlank { null }
+    }.distinct()
 }
+
+/** "(HI)", "[CC]": hearing-impaired files named by their release; a bare "hi" is Hindi. */
+private val HEARING_IMPAIRED_MARK = Regex("""[(\[]\s*(hi|cc)\s*[)\]]""")
 
 internal fun channelLayout(channels: Int): String? = when (channels) {
     Format.NO_VALUE, 0 -> null

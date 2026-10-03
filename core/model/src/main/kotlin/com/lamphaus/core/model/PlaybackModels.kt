@@ -29,6 +29,12 @@ data class PlaybackSettings(
      * prompt instead of starting on its own; takes precedence over auto-play.
      */
     val askBeforeNextEpisode: Boolean = false,
+    /**
+     * The end-of-playback prompts (Up next, Still watching?, Finished) close
+     * the player after a minute without an answer. Off: they wait until
+     * answered, and only Back or a choice closes them.
+     */
+    val endPromptAutoClose: Boolean = false,
 )
 
 @Serializable
