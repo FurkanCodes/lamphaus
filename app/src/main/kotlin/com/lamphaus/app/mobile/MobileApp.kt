@@ -669,7 +669,12 @@ private fun MobileSignedInApp(
                             // Unset means on for phones and tablets.
                             trailersEnabled = state.trailers != false,
                             resolveTrailer = viewModel::trailerSource,
-                            onOpenPerson = if (viewModel.personPagesAvailable) viewModel::openPerson else null,
+                            // People come from the viewer's own TMDB key; without it the cast stays plain text.
+                            onOpenPerson = if (viewModel.personPagesAvailable && state.tmdbKeyInAccount) {
+                                viewModel::openPerson
+                            } else {
+                                null
+                            },
                             newEpisodePrompt = newEpisodePrompt,
                             onEnableNewEpisodes = enableNewEpisodes,
                             onDismissNewEpisodes = viewModel::dismissNewEpisodePrompt,

@@ -1597,7 +1597,7 @@ class AppViewModel(
             .onFailure { showMessage("Could not save artwork. Try again.") }
     }
 
-    /** Whether cast members can open their titles: needs the cloud's TMDB lookups. */
+    /** Whether the cloud's TMDB lookups exist; cast also needs [AppUiState.tmdbKeyInAccount]. */
     val personPagesAvailable: Boolean get() = container.personCreditsRepository.available
 
     /** Opens a cast or crew member's titles above the current details page (MOB-SRCH-01). */
@@ -2986,6 +2986,21 @@ class AppViewModel(
             }
             launch {
                 syncSettings(userId)
+            }
+            // Which of the viewer's own keys are saved decides key-backed UI
+            // such as tappable cast. Quiet: Settings reports failures itself.
+            launch {
+                container.cloudSyncGateway.artworkProviderStatuses(userId).onSuccess { providers ->
+                    mutableState.update { current ->
+                        if ((current.account as? AccountState.SignedIn)?.userId != userId) {
+                            current
+                        } else {
+                            current.copy(
+                                artworkProviders = providers.sortedWith(compareBy({ it.sortOrder }, { it.provider.value })),
+                            )
+                        }
+                    }
+                }
             }
             // One cloud probe decides how the account boots on this device:
             // non-empty → the collector above adopts those rows and nothing is

@@ -416,6 +416,12 @@ data class AppUiState(
     val allMedia: List<MediaPreview>
         get() = sections.flatMap(CatalogSection::items).distinctBy(MediaPreview::stableKey)
 
+    /** The viewer's own TMDB key is saved to the account, so cloud TMDB lookups can use it.
+     *  Local-only keys never leave the device, so the cloud cannot. */
+    val tmdbKeyInAccount: Boolean
+        get() = !localOnlyArtworkKeys &&
+            artworkProviders.any { it.provider == ArtworkProviderId.TMDB && it.configured }
+
     /** Everything account-scoped resets; device-local preferences survive.
      *  [account] must be carried over: rebuilding with the Loading default
      *  would strand the UI on the loading screen, since no further auth
