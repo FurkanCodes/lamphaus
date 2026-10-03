@@ -112,6 +112,18 @@
                 <data android:scheme="stremio" />
             </intent-filter>
         </activity>
+        <!-- Continue watching home-screen widget (MOB-WGT-01). -->
+        <receiver
+            android:name=".widget.ContinueWatchingWidgetReceiver"
+            android:exported="false"
+            android:label="@string/continue_watching">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/continue_watching_widget_info" />
+        </receiver>
         <!-- WorkManager starts on demand rather than at every launch (QA-08, SHR-PROD-16). -->
         <provider
             android:name="androidx.startup.InitializationProvider"

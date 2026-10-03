@@ -102,6 +102,8 @@ internal class NewEpisodeWorker(
             profileId,
             NewEpisodeCheckState(checkedAtEpochMillis = now, notifiedVideoIds = result.announcedVideoIds),
         )
+        // A new episode can turn an up-next card into "New episode".
+        if (result.alerts.isNotEmpty()) com.lamphaus.app.widget.ContinueWatchingWidget.refresh(applicationContext)
         return Result.success()
     }
 

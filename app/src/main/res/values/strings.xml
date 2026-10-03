@@ -635,4 +635,12 @@
         <item quantity="one">%1$s and %2$d more</item>
         <item quantity="other">%1$s and %2$d more</item>
     </plurals>
+    <!-- Continue watching widget (MOB-WGT-01) -->
+    <string name="widget_continue_watching_description">Pick up where you left off and see new episodes of series you follow.</string>
+    <string name="widget_signed_out">Sign in to Lamphaus to continue watching here.</string>
+    <string name="widget_empty">Nothing to continue yet. Tap to browse.</string>
+    <plurals name="widget_minutes_left">
+        <item quantity="one">%d min left</item>
+        <item quantity="other">%d min left</item>
+    </plurals>
 </resources>

@@ -1385,6 +1385,8 @@ class PlayerActivity : ComponentActivity() {
                     "duration=${progress.durationMillis}ms completed=${progress.completed}",
             )
             if (!final) return@launch
+            // The home-screen widget shows where this playback stopped (MOB-WGT-01).
+            com.lamphaus.app.widget.ContinueWatchingWidget.refresh(applicationContext)
             (container.accountGateway.state.value as? AccountState.SignedIn)?.let { signedIn ->
                 container.cloudSyncGateway.saveProgress(signedIn.userId, progress)
                     .onSuccess { Log.d(PROGRESS_LOG_TAG, "synced to cloud user=${signedIn.userId}") }

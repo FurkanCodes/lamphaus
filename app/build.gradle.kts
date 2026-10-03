@@ -211,6 +211,8 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
     baselineProfile(project(":benchmark"))
 
     testImplementation(libs.junit)

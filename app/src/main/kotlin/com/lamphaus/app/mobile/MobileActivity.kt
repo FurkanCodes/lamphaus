@@ -32,10 +32,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
+import com.lamphaus.app.widget.ContinueWatchingWidget
 import com.lamphaus.app.notify.NewEpisodeWorker
 import com.lamphaus.core.data.cloud.AccountState
 import androidx.credentials.exceptions.NoCredentialException
 private const val BACK_PRESS_EXIT_WINDOW_MILLIS = 2_000L
+private const val WIDGET_REFRESH_DEBOUNCE_MILLIS = 2_000L
 
 
 class MobileActivity : ComponentActivity() {
@@ -74,6 +78,7 @@ class MobileActivity : ComponentActivity() {
         })
         handleIncomingIntent(intent)
         observeNewEpisodeAlerts()
+        observeWidgetContent()
         // Update checks never delay first display; the coordinator schedules
         // them asynchronously (plan §4, SHR-ARC-10).
         (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
@@ -169,6 +174,23 @@ class MobileActivity : ComponentActivity() {
                 .filterNotNull()
                 .distinctUntilChanged()
                 .collect { enabled -> NewEpisodeWorker.sync(applicationContext, enabled) }
+        }
+    }
+
+    /**
+     * Redraws the Continue watching widget when what it shows changes:
+     * another profile, new progress (including synced from another device),
+     * or a changed up-next set (MOB-WGT-01).
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private fun observeWidgetContent() {
+        lifecycleScope.launch {
+            viewModel.state
+                .map { Triple(it.activeProfileId, it.progress.maxOfOrNull { row -> row.updatedAtEpochMillis }, it.upNext.map { item -> item.episode.id }) }
+                .distinctUntilChanged()
+                .drop(1)
+                .debounce(WIDGET_REFRESH_DEBOUNCE_MILLIS)
+                .collect { ContinueWatchingWidget.refresh(applicationContext) }
         }
     }
 
