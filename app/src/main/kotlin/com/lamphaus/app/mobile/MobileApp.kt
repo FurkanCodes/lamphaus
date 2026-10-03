@@ -594,35 +594,52 @@ private fun MobileSignedInApp(
                 onSave = viewModel::saveArtworkSelection,
             )
         }
+        state.personPage != null && !state.personPage.showingTitle -> {
+            BackHandler { viewModel.closePerson() }
+            MobilePersonScreen(
+                page = state.personPage,
+                onBack = viewModel::closePerson,
+                onRetry = viewModel::retryPerson,
+                onMedia = viewModel::openPersonTitle,
+                progress = state.progress,
+                inLibrary = { media -> state.library.any { it.mediaKey == media.stableKey } },
+            )
+        }
         state.selectedDetail != null -> {
-            BackHandler { viewModel.clearDetail() }
+            // A title opened from a person page goes back to that page (MOB-NAV-10).
+            val backFromDetail = if (state.personPage?.showingTitle == true) viewModel::returnToPerson else viewModel::clearDetail
+            BackHandler { backFromDetail() }
             val detailProgress = state.progress.lastOrNull {
                 it.mediaKey == state.selectedDetail.preview.stableKey && it.isResumable()
             }
             val detailInLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey }
-            MobileDetailScreen(
-                detail = state.selectedDetail,
-                enrichment = state.detailEnrichment,
-                inLibrary = detailInLibrary,
-                watchedEpisodeIds = watchedEpisodeIds,
-                spoilerProtection = state.spoilerProtection,
-                onBack = viewModel::clearDetail,
-                resumeProgress = detailProgress,
-                onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
-                onLibrary = {
-                    val preview = state.selectedDetail.preview
-                    if (detailInLibrary) viewModel.removeFromLibrary(preview.stableKey) else viewModel.addToLibrary(preview)
-                },
-                onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
-                onOpenMedia = viewModel::loadDetail,
-                progress = state.progress,
-                onOpenMenu = viewModel::openContentMenu,
-                recapEnabled = state.seriesRecap,
-                seasonTimeLeftEnabled = state.fitsTonight,
-                // Unset means on for phones and tablets.
-                trailersEnabled = state.trailers != false,
-                resolveTrailer = viewModel::trailerSource,
-            )
+            // Keeps the page's scroll while a person page covers it (MOB-NAV-10).
+            destinationStates.SaveableStateProvider("detail:${state.selectedDetail.preview.stableKey}") {
+                MobileDetailScreen(
+                    detail = state.selectedDetail,
+                    enrichment = state.detailEnrichment,
+                    inLibrary = detailInLibrary,
+                    watchedEpisodeIds = watchedEpisodeIds,
+                    spoilerProtection = state.spoilerProtection,
+                    onBack = backFromDetail,
+                    resumeProgress = detailProgress,
+                    onPlay = { episode -> viewModel.openSources(state.selectedDetail.preview, episode) },
+                    onLibrary = {
+                        val preview = state.selectedDetail.preview
+                        if (detailInLibrary) viewModel.removeFromLibrary(preview.stableKey) else viewModel.addToLibrary(preview)
+                    },
+                    onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
+                    onOpenMedia = viewModel::loadDetail,
+                    progress = state.progress,
+                    onOpenMenu = viewModel::openContentMenu,
+                    recapEnabled = state.seriesRecap,
+                    seasonTimeLeftEnabled = state.fitsTonight,
+                    // Unset means on for phones and tablets.
+                    trailersEnabled = state.trailers != false,
+                    resolveTrailer = viewModel::trailerSource,
+                    onOpenPerson = if (viewModel.personPagesAvailable) viewModel::openPerson else null,
+                )
+            }
         }
         settingsOpen -> {
             BackHandler { settingsOpen = false }

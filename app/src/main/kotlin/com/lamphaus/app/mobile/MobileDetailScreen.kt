@@ -158,6 +158,8 @@ internal fun MobileDetailScreen(
     seasonTimeLeftEnabled: Boolean = true,
     trailersEnabled: Boolean = false,
     resolveTrailer: suspend (media: MediaPreview, maxHeight: Int, refresh: Boolean) -> TrailerSource? = { _, _, _ -> null },
+    /** Opens a cast member's titles; null when person pages are unavailable (MOB-SRCH-01). */
+    onOpenPerson: ((PersonCredit) -> Unit)? = null,
 ) {
     if (detail == null) return
     var trailerOpen by rememberSaveable(detail.preview.stableKey) { mutableStateOf(false) }
@@ -285,7 +287,7 @@ internal fun MobileDetailScreen(
             }
             if (cast.isNotEmpty()) {
                 item(key = "cast", contentType = "cast") {
-                    Box(section(5)) { CastRow(cast) }
+                    Box(section(5)) { CastRow(cast, onOpenPerson) }
                 }
             }
             if (similar.isNotEmpty()) {
@@ -920,7 +922,7 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun CastRow(cast: List<PersonCredit>) {
+private fun CastRow(cast: List<PersonCredit>, onOpenPerson: ((PersonCredit) -> Unit)?) {
     Column(Modifier.fillMaxWidth().padding(top = 32.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionTitle(stringResource(R.string.cast))
         LazyRow(
@@ -928,7 +930,25 @@ private fun CastRow(cast: List<PersonCredit>) {
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             items(cast.take(20), key = { it.personId ?: it.name }) { person ->
-                Column(Modifier.width(84.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                // Only TMDB-resolved people have titles to show; provider-only
+                // names stay plain text rather than leading nowhere.
+                val open = onOpenPerson?.takeIf { person.personId != null }
+                val openLabel = stringResource(R.string.person_open_titles)
+                Column(
+                    Modifier
+                        .width(84.dp)
+                        .then(
+                            if (open != null) {
+                                Modifier
+                                    .clip(RoundedCornerShape(MobileTokens.radiusCard))
+                                    .clickable(onClickLabel = openLabel, role = Role.Button) { open(person) }
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .semantics(mergeDescendants = true) {},
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     Box(
                         Modifier
                             .size(76.dp)

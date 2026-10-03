@@ -158,6 +158,7 @@ class AppViewModel(
     private var searchJob: Job? = null
     private var browseJob: Job? = null
     private val pageJobs = mutableMapOf<String, Job>()
+    private var personJob: Job? = null
     private var detailJob: Job? = null
     private var enrichmentJob: Job? = null
     private var sourceJob: Job? = null
@@ -1597,12 +1598,77 @@ class AppViewModel(
             .onFailure { showMessage("Could not save artwork. Try again.") }
     }
 
+    /** Whether cast members can open their titles: needs the cloud's TMDB lookups. */
+    val personPagesAvailable: Boolean get() = container.personCreditsRepository.available
+
+    /** Opens a cast or crew member's titles above the current details page (MOB-SRCH-01). */
+    fun openPerson(credit: com.lamphaus.core.model.PersonCredit) {
+        val personId = credit.personId ?: return
+        val origin = state.value.selectedDetail?.preview ?: return
+        mutableState.update {
+            it.copy(personPage = PersonPageState(personId, credit.name, credit.profileUrl, origin))
+        }
+        loadPerson(personId)
+    }
+
+    fun retryPerson() {
+        val page = state.value.personPage ?: return
+        mutableState.update { it.copy(personPage = page.copy(loading = true, failed = false)) }
+        loadPerson(page.personId)
+    }
+
+    private fun loadPerson(personId: String) {
+        personJob?.cancel()
+        personJob = viewModelScope.launch {
+            val result = container.personCreditsRepository.filmography(personId)
+            mutableState.update { current ->
+                val page = current.personPage?.takeIf { it.personId == personId } ?: return@update current
+                current.copy(
+                    personPage = result.fold(
+                        onSuccess = { filmography ->
+                            page.copy(
+                                filmography = filmography,
+                                name = filmography.name.ifBlank { page.name },
+                                profileUrl = filmography.profileUrl ?: page.profileUrl,
+                                loading = false,
+                                failed = false,
+                            )
+                        },
+                        onFailure = { page.copy(loading = false, failed = true) },
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Back from the person page: its origin details page is still underneath. */
+    fun closePerson() {
+        personJob?.cancel()
+        mutableState.update { it.copy(personPage = null) }
+    }
+
+    /** Opens one of the person's titles; Back returns to the person page. */
+    fun openPersonTitle(media: MediaPreview) {
+        mutableState.update { current ->
+            current.copy(personPage = current.personPage?.copy(showingTitle = true))
+        }
+        loadDetail(media)
+    }
+
+    /** Back from a title opened from the person page: show the person again over its origin. */
+    fun returnToPerson() {
+        val page = state.value.personPage ?: return
+        mutableState.update { it.copy(personPage = page.copy(showingTitle = false)) }
+        loadDetail(page.origin)
+    }
+
     fun clearDetail() {
         detailJob?.cancel()
         enrichmentJob?.cancel()
         mutableState.update {
             it.copy(
                 selectedDetail = null,
+                personPage = null,
                 refreshing = false,
                 detailEnrichment = null,
                 detailEnrichmentLoading = false,

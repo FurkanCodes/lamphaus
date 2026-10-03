@@ -379,6 +379,8 @@ data class AppUiState(
     val upNextDismissed: Set<String> = emptySet(),
     /** Device-local engagement choices: alerts, recap, idle ambient. */
     val engagement: EngagementSettings = EngagementSettings(),
+    /** A cast member's page opened from the details page (MOB-SRCH-01); null when closed. */
+    val personPage: PersonPageState? = null,
     /** The active profile's recent searches, newest first (MOB-SRCH-01). */
     val searchHistory: List<String> = emptyList(),
     /** Imported Nuvio-compatible stream badges; null when none are imported. */
@@ -463,3 +465,19 @@ data class EngagementSettings(
         )
     }
 }
+
+/**
+ * A cast or crew member's titles. [origin] is the details page it was opened
+ * from, so Back returns there; [showingTitle] is true while one of the
+ * person's titles is open on top of it.
+ */
+data class PersonPageState(
+    val personId: String,
+    val name: String,
+    val profileUrl: String? = null,
+    val origin: MediaPreview,
+    val filmography: com.lamphaus.core.model.PersonFilmography? = null,
+    val loading: Boolean = true,
+    val failed: Boolean = false,
+    val showingTitle: Boolean = false,
+)

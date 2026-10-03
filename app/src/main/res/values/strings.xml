@@ -609,4 +609,9 @@
     <string name="search_recent_remove">Remove %1$s from recent searches</string>
     <string name="search_clear_query">Clear search</string>
     <string name="search_by_voice">Search by voice</string>
+    <!-- Cast member pages (MOB-SRCH-01) -->
+    <string name="person_open_titles">see their titles</string>
+    <string name="person_known_for">Known for %1$s</string>
+    <string name="person_titles_failed">Titles could not be loaded.</string>
+    <string name="person_titles_empty">No titles to show for this person.</string>
 </resources>
