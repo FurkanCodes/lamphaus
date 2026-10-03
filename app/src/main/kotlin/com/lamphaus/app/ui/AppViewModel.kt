@@ -173,12 +173,6 @@ class AppViewModel(
             size > 24
     }
 
-    /** Episodes looked up for Continue Watching "up next", with when they were fetched. Main-confined. */
-    private val episodesByKey = object : LinkedHashMap<String, Pair<Long, List<Episode>>>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<Episode>>>): Boolean =
-            size > 50
-    }
-
     /** Trailer ids found in provider metadata for catalog items that had none. Main-confined. */
     private val trailerIdsByKey = object : LinkedHashMap<String, List<String>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>): Boolean =
@@ -1187,7 +1181,10 @@ class AppViewModel(
             }
             state.value.selectedDetail
                 ?.takeIf { it.preview.stableKey == media.stableKey }
-                ?.let { recentlyLoadedDetails[media.stableKey] = it }
+                ?.let {
+                    recentlyLoadedDetails[media.stableKey] = it
+                    container.providerMetadataRepository.rememberEpisodes(media, it.episodes)
+                }
         }
     }
 
@@ -2143,44 +2140,16 @@ class AppViewModel(
         return ids
     }
 
-    /**
-     * The first provider metadata for [media] that satisfies [wanted], asking
-     * the title's own add-ons first. Responses come from the provider cache
-     * when fresh, so repeated lookups stay cheap.
-     */
-    private suspend fun providerMeta(media: MediaPreview, wanted: (MediaDetail) -> Boolean): MediaDetail? {
-        val providers = state.value.providers
-            .filter(ProviderSubscription::enabled)
-            .sortedWith(
-                compareBy<ProviderSubscription> { if (it.id in media.providerIds) 0 else 1 }
-                    .thenBy(ProviderSubscription::sortOrder)
-                    .thenBy(ProviderSubscription::id),
-            )
-        for (provider in providers) {
-            val manifest = container.providerClient.manifest(provider.manifestUrl)
-            if (manifest !is ProviderResult.Success ||
-                !container.providerAggregator.supports(manifest.value, "meta", media.rawType, media.id)
-            ) {
-                continue
-            }
-            val meta = (container.providerClient.meta(provider.manifestUrl, provider.id, media.rawType, media.id)
-                as? ProviderResult.Success<MediaDetail>)?.value
-            if (meta != null && wanted(meta)) return meta
-        }
-        return null
-    }
+    /** The first provider metadata for [media] that satisfies [wanted] (see ProviderMetadataRepository). */
+    private suspend fun providerMeta(media: MediaPreview, wanted: (MediaDetail) -> Boolean): MediaDetail? =
+        container.providerMetadataRepository.findMeta(media, wanted)
 
     /** A series' episodes: the loaded detail, else provider metadata (kept for a few hours). */
-    private suspend fun seriesEpisodes(media: MediaPreview, nowEpochMillis: Long): List<Episode> {
+    private suspend fun seriesEpisodes(media: MediaPreview): List<Episode> {
         (state.value.selectedDetail?.takeIf { it.preview.stableKey == media.stableKey }
             ?: recentlyLoadedDetails[media.stableKey])
             ?.episodes?.takeIf { it.isNotEmpty() }?.let { return it }
-        episodesByKey[media.stableKey]
-            ?.takeIf { (fetchedAt) -> nowEpochMillis - fetchedAt < SERIES_EPISODES_TTL_MILLIS }
-            ?.let { (_, episodes) -> return episodes }
-        val episodes = providerMeta(media) { it.episodes.isNotEmpty() }?.episodes.orEmpty()
-        episodesByKey[media.stableKey] = nowEpochMillis to episodes
-        return episodes
+        return container.providerMetadataRepository.getSeriesEpisodes(media)
     }
 
     /**
@@ -2196,19 +2165,7 @@ class AppViewModel(
             .collectLatest { (progress, dismissed) ->
                 // Progress lands in bursts (sync, playback pulses); settle first.
                 delay(UP_NEXT_SETTLE_MILLIS)
-                val now = System.currentTimeMillis()
-                val completed = progress.filter(WatchProgress::completed).mapTo(HashSet()) { it.videoId }
-                val items = coroutineScope {
-                    upNextCandidates(progress, dismissed, now).map { row ->
-                        async {
-                            val media = row.preview ?: return@async null
-                            runCatching { seriesEpisodes(media, now) }
-                                .onFailure { if (it is CancellationException) throw it }
-                                .getOrNull()
-                                ?.let { episodes -> upNextAfter(media, row, episodes, completed, now) }
-                        }
-                    }.awaitAll().filterNotNull()
-                }
+                val items = computeUpNext(progress, dismissed, System.currentTimeMillis(), ::seriesEpisodes)
                 mutableState.update { it.copy(upNext = items) }
             }
     }
@@ -3063,7 +3020,6 @@ class AppViewModel(
         private const val MAX_DISCOVERED_PROVIDERS = 50
         private const val WATCH_NEXT_OPEN_WAIT_MILLIS = 10_000L
         private const val UP_NEXT_SETTLE_MILLIS = 800L
-        private const val SERIES_EPISODES_TTL_MILLIS = 6L * 60 * 60 * 1000
         private const val PAIRING_POLL_MILLIS = 3_000L
         private const val PAIRING_DEVICE_LABEL = "Living room TV"
         private const val DEVELOPMENT_SOURCE_ID = "lamphaus.dev.source"

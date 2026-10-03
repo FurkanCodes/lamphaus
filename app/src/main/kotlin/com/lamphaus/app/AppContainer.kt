@@ -1,5 +1,6 @@
 package com.lamphaus.app
 
+import kotlinx.coroutines.flow.first
 import android.annotation.SuppressLint
 import android.content.Context
 import android.provider.Settings
@@ -139,6 +140,16 @@ class AppContainer(context: Context) {
         )
     }
     val providerAggregator = ProviderAggregator(providerClient)
+
+    /**
+     * Provider metadata outside a details page: up-next episodes, trailers,
+     * the new-episode check, and the widget read through one owner (SHR-ARC-04).
+     */
+    val providerMetadataRepository = com.lamphaus.core.data.repository.ProviderMetadataRepository(
+        client = providerClient,
+        aggregator = providerAggregator,
+        providers = { libraryRepository.providers().first() },
+    )
 
     /**
      * Shared Supabase client, present only when cloud credentials are provided via
