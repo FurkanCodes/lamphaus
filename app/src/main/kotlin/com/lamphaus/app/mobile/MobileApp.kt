@@ -131,6 +131,7 @@ import com.lamphaus.app.ui.CatalogSection
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.MediaPreview
+import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.app.R
 
@@ -613,6 +614,16 @@ private fun MobileSignedInApp(
                 it.mediaKey == state.selectedDetail.preview.stableKey && it.isResumable()
             }
             val detailInLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey }
+            val alertsDeniedMessage = stringResource(R.string.new_episodes_permission_denied)
+            val enableNewEpisodes = rememberEnableNewEpisodeAlerts { granted ->
+                viewModel.setNewEpisodeAlerts(granted)
+                if (!granted) viewModel.reportMessage(alertsDeniedMessage)
+            }
+            // Asked once, on a followed series, after the benefit is clear (SHR-PROD-16).
+            val newEpisodePrompt = detailInLibrary &&
+                state.selectedDetail.preview.type == MediaType.SERIES &&
+                !state.engagement.newEpisodeAlerts &&
+                !state.engagement.newEpisodePromptAnswered
             // Keeps the page's scroll while a person page covers it (MOB-NAV-10).
             destinationStates.SaveableStateProvider("detail:${state.selectedDetail.preview.stableKey}") {
                 MobileDetailScreen(
@@ -638,6 +649,9 @@ private fun MobileSignedInApp(
                     trailersEnabled = state.trailers != false,
                     resolveTrailer = viewModel::trailerSource,
                     onOpenPerson = if (viewModel.personPagesAvailable) viewModel::openPerson else null,
+                    newEpisodePrompt = newEpisodePrompt,
+                    onEnableNewEpisodes = enableNewEpisodes,
+                    onDismissNewEpisodes = viewModel::dismissNewEpisodePrompt,
                 )
             }
         }

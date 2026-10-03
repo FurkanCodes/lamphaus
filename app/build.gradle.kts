@@ -210,6 +210,7 @@ dependencies {
     implementation(libs.play.services.cast.tv)
     implementation(libs.zxing.core)
     implementation(libs.androidx.profileinstaller)
+    implementation(libs.androidx.work.runtime)
     baselineProfile(project(":benchmark"))
 
     testImplementation(libs.junit)

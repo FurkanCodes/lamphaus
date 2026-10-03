@@ -166,6 +166,10 @@ internal fun MobileDetailScreen(
     resolveTrailer: suspend (media: MediaPreview, maxHeight: Int, refresh: Boolean) -> TrailerSource? = { _, _, _ -> null },
     /** Opens a cast member's titles; null when person pages are unavailable (MOB-SRCH-01). */
     onOpenPerson: ((PersonCredit) -> Unit)? = null,
+    /** Shows the one-time new-episode invitation under the actions (SHR-PROD-16). */
+    newEpisodePrompt: Boolean = false,
+    onEnableNewEpisodes: () -> Unit = {},
+    onDismissNewEpisodes: () -> Unit = {},
 ) {
     if (detail == null) return
     DetailTint(detail.preview) {
@@ -259,6 +263,11 @@ internal fun MobileDetailScreen(
                             trailersEnabled && detail.preview.trailerYtIds.isNotEmpty()
                         },
                     )
+                }
+                if (newEpisodePrompt) {
+                    constrained("new-episodes", section(1)) {
+                        NewEpisodePromptCard(onTurnOn = onEnableNewEpisodes, onNotNow = onDismissNewEpisodes)
+                    }
                 }
                 recap?.let { episode ->
                     constrained("recap", section(2)) {

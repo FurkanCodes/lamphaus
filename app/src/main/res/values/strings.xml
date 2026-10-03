@@ -614,4 +614,25 @@
     <string name="person_known_for">Known for %1$s</string>
     <string name="person_titles_failed">Titles could not be loaded.</string>
     <string name="person_titles_empty">No titles to show for this person.</string>
+    <!-- New-episode notifications (SHR-PROD-16) -->
+    <string name="notifications">Notifications</string>
+    <string name="notifications_series">Series</string>
+    <string name="new_episodes_setting">New episodes</string>
+    <string name="new_episodes_setting_description">A notification when a series in your Library or one you are watching gets a new episode</string>
+    <string name="notifications_blocked">Notifications are off for Lamphaus</string>
+    <string name="notifications_blocked_description">Turn them on in system settings to get new-episode alerts.</string>
+    <string name="open_settings">Open settings</string>
+    <string name="new_episodes_prompt_title">Know when new episodes arrive</string>
+    <string name="new_episodes_prompt_body">Get a notification when a series you follow has a new episode. You can change this anytime in Settings.</string>
+    <string name="not_now">Not now</string>
+    <string name="turn_on">Turn on</string>
+    <string name="new_episodes_permission_denied">Notifications are off. Turn them on in Settings → Notifications.</string>
+    <string name="notification_channel_new_episodes">New episodes</string>
+    <string name="notification_channel_new_episodes_description">New episodes of series you follow</string>
+    <string name="notification_new_episode_public">New episode available</string>
+    <string name="notification_new_episodes_summary">New episodes</string>
+    <plurals name="notification_new_episodes_more">
+        <item quantity="one">%1$s and %2$d more</item>
+        <item quantity="other">%1$s and %2$d more</item>
+    </plurals>
 </resources>

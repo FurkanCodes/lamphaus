@@ -29,6 +29,11 @@ import androidx.core.net.toUri
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
+import com.lamphaus.app.notify.NewEpisodeWorker
+import com.lamphaus.core.data.cloud.AccountState
 import androidx.credentials.exceptions.NoCredentialException
 private const val BACK_PRESS_EXIT_WINDOW_MILLIS = 2_000L
 
@@ -68,6 +73,7 @@ class MobileActivity : ComponentActivity() {
             }
         })
         handleIncomingIntent(intent)
+        observeNewEpisodeAlerts()
         // Update checks never delay first display; the coordinator schedules
         // them asynchronously (plan §4, SHR-ARC-10).
         (application as LamphausApplication).container.updateCoordinator.onColdLaunch()
@@ -145,11 +151,34 @@ class MobileActivity : ComponentActivity() {
         viewModel.completeEmailLink(email, link)
     }
 
+    /**
+     * Keeps the new-episode check scheduled exactly while the viewer has
+     * opted in and is signed in (SHR-PROD-16). The auth flow's Loading phase
+     * is ignored so a cold launch never cancels a running schedule.
+     */
+    private fun observeNewEpisodeAlerts() {
+        lifecycleScope.launch {
+            viewModel.state
+                .map { state ->
+                    when (state.account) {
+                        is AccountState.SignedIn -> state.engagement.newEpisodeAlerts
+                        AccountState.SignedOut -> false
+                        AccountState.Loading -> null
+                    }
+                }
+                .filterNotNull()
+                .distinctUntilChanged()
+                .collect { enabled -> NewEpisodeWorker.sync(applicationContext, enabled) }
+        }
+    }
+
     private fun handleIncomingIntent(incoming: Intent?) {
         val data = incoming?.data ?: return
         val scheme = data.scheme?.lowercase()
         if (scheme != "http" && scheme != "https") {
-            if (data.host.equals("pair", ignoreCase = true)) {
+            if (scheme == TitleLinks.SCHEME && data.host.equals(TitleLinks.HOST, ignoreCase = true)) {
+                TitleLinks.mediaKeyFrom(data)?.let(viewModel::openFollowedTitle)
+            } else if (data.host.equals("pair", ignoreCase = true)) {
                 val code = data.getQueryParameter("code") ?: data.pathSegments.firstOrNull()
                 if (code.isNullOrBlank()) viewModel.reportMessage("That pairing link is incomplete.")
                 else viewModel.claimPairingSession(code)

@@ -2109,6 +2109,36 @@ class AppViewModel(
         }
     }
 
+    /**
+     * Opens a title from a notification or widget link (MOB-NOT-05). Only
+     * titles this profile already follows open, found in Library, Continue
+     * Watching, or up next, so a crafted link cannot inject arbitrary
+     * metadata; anything else is ignored.
+     */
+    fun openFollowedTitle(mediaKey: String) {
+        viewModelScope.launch {
+            val media = withTimeoutOrNull(WATCH_NEXT_OPEN_WAIT_MILLIS) {
+                state.map { current ->
+                    current.library.firstOrNull { it.mediaKey == mediaKey }?.preview
+                        ?: current.progress.firstOrNull { it.mediaKey == mediaKey }?.preview
+                        ?: current.upNext.firstOrNull { it.media.stableKey == mediaKey }?.media
+                }.filterNotNull().first()
+            } ?: return@launch
+            clearDetail()
+            loadDetail(media)
+        }
+    }
+
+    /** Device-local opt-in for new-episode notifications (SHR-PROD-16). */
+    fun setNewEpisodeAlerts(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setNewEpisodeAlerts(enabled)
+    }
+
+    /** "Not now" on the new-episode invitation: it never shows again (MOB-NOT-02). */
+    fun dismissNewEpisodePrompt() = viewModelScope.launch {
+        container.preferences.answerNewEpisodePrompt()
+    }
+
     fun setBedtimeMinutes(minutes: Int) = viewModelScope.launch {
         container.preferences.setBedtimeMinutes(minutes)
     }
