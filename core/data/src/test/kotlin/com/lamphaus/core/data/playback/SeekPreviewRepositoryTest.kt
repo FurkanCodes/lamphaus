@@ -89,14 +89,29 @@ class SeekPreviewRepositoryTest {
     }
 
     @Test
-    fun `available manifest loads once with st and is cached`() = runTest {
+    fun `scale maps the playing position onto the sprites' timeline`() {
+        // Playing runs 2% long (scale 1.02): 61.2 s here is 60 s in the sprites.
+        val track = SeekPreviewTrack(SeekPreviewVtt.parse(vtt, manifestUrl), scale = 1.02)
+        assertEquals(60_000L, track.cueAt(61_200)?.startMillis)
+        assertEquals(10_000L, track.cueAt(61_100)?.startMillis)
+    }
+
+    @Test
+    fun `scale from the server reaches the track`() = runTest {
+        val repository = SeekPreviewRepository(FakeRemote(SeekPreviewManifest.Available(manifestUrl, scale = 2.0)), FakeDownloader(vtt))
+        val track = repository.track(movie(), null, 8_160_000)
+        assertEquals(10_000L, track?.cueAt(20_000)?.startMillis)
+    }
+
+    @Test
+    fun `available manifest loads once from its signed URL untouched and is cached`() = runTest {
         val remote = FakeRemote(SeekPreviewManifest.Available(manifestUrl))
         val downloader = FakeDownloader(vtt)
         val repository = SeekPreviewRepository(remote, downloader)
         assertNotNull(repository.track(movie(), null, 8_160_000))
         assertNotNull(repository.track(movie(), null, 8_160_000))
         assertEquals(1, remote.requests.size)
-        assertEquals("$manifestUrl&st=1", downloader.urls.single())
+        assertEquals(manifestUrl, downloader.urls.single())
         assertEquals(SeekPreviewRequest(type = "movie", id = "tt0133093", durationMs = 8_160_000), remote.requests.single())
     }
 

@@ -21,8 +21,12 @@ data class SeekPreviewRequest(
 
 /** What the server answered for a [SeekPreviewRequest]. */
 sealed interface SeekPreviewManifest {
-    /** A signed sprite manifest; fetching it needs no credential. */
-    data class Available(val vttUrl: String) : SeekPreviewManifest
+    /**
+     * A signed sprite manifest; fetching it needs no credential. Its URL is
+     * used exactly as given: the signature covers the query. [scale] is the
+     * playing duration over the sprites' source duration (Seekr's `scale`).
+     */
+    data class Available(val vttUrl: String, val scale: Double = 1.0) : SeekPreviewManifest
 
     data class Unavailable(val reason: Reason) : SeekPreviewManifest
 
@@ -75,7 +79,8 @@ class SupabaseSeekPreviewRemoteSource(
         val wire = json.decodeFromString<WireManifest>(body)
         val vttUrl = wire.vttUrl
         if (wire.available && vttUrl != null && vttUrl.startsWith("https://")) {
-            return SeekPreviewManifest.Available(vttUrl)
+            val scale = wire.scale?.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
+            return SeekPreviewManifest.Available(vttUrl, scale)
         }
         return SeekPreviewManifest.Unavailable(
             when (wire.reason) {
@@ -91,6 +96,7 @@ class SupabaseSeekPreviewRemoteSource(
     private data class WireManifest(
         val available: Boolean = false,
         val vttUrl: String? = null,
+        val scale: Double? = null,
         val reason: String? = null,
     )
 

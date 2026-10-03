@@ -116,15 +116,15 @@ class SeekPreviewRepository(
                 null
             }
             is SeekPreviewManifest.Available -> {
-                // `st=1`: cue times arrive already on the playing timeline.
-                val separator = if ('?' in manifest.vttUrl) '&' else '?'
-                val vtt = downloader.text("${manifest.vttUrl}${separator}st=1") ?: return null
+                // The signed URL is fetched untouched: any added parameter
+                // breaks its signature and the host refuses it.
+                val vtt = downloader.text(manifest.vttUrl) ?: return null
                 val cues = SeekPreviewVtt.parse(vtt, manifest.vttUrl)
                 if (cues.isEmpty()) {
                     missing += cacheKey
                     null
                 } else {
-                    SeekPreviewTrack(cues).also { tracks[cacheKey] = it }
+                    SeekPreviewTrack(cues, manifest.scale).also { tracks[cacheKey] = it }
                 }
             }
         }
