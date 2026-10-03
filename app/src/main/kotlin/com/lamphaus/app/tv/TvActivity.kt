@@ -4,7 +4,9 @@ import android.app.SearchManager
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
-import android.view.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -73,7 +75,13 @@ class TvActivity : ComponentActivity() {
         if (savedInstanceState == null) watchNextKey?.let(viewModel::openWatchNext)
         setContent {
             CompositionLocalProvider(LocalTvAmbientHost provides ambientHost) {
-                Box(Modifier.fillMaxSize()) {
+                // Every key resets the idle ambient; seen top-down before the
+                // focused item, a key that ends it never reaches the page (TV-AMB-01).
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .onPreviewKeyEvent { event -> ambientHost.onKey(down = event.type == KeyEventType.KeyDown) },
+                ) {
                     TvApp(
                         viewModel = viewModel,
                         initialSearch = intent?.getStringExtra(SearchManager.QUERY),
@@ -91,12 +99,6 @@ class TvActivity : ComponentActivity() {
         // an opaque background, so the splash-coloured window background would
         // only add a redundant full-screen pass to every frame.
         window.decorView.post { window.setBackgroundDrawable(null) }
-    }
-
-    /** Every key resets the idle ambient; a key that ends it never reaches the page (TV-AMB-01). */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (ambientHost.onKey(down = event.action == KeyEvent.ACTION_DOWN)) return true
-        return super.dispatchKeyEvent(event)
     }
 
     override fun onResume() {
