@@ -68,6 +68,14 @@ class MpvPlayer(
     @Volatile private var selectedSubtitleId: String? = null
     @Volatile private var subtitleDelayMillis = 0L
     @Volatile private var audioDelayMillis = 0L
+    /** The session's track parameters: the panels' and defaults policy's overrides, mapped onto mpv ids. */
+    @Volatile private var trackParameters: TrackSelectionParameters = TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT
+    /** Add-on subtitles of the loaded item, added once the file is open. */
+    @Volatile private var pendingSubtitles: List<MediaItem.SubtitleConfiguration> = emptyList()
+    /** Add-on subtitle URL → the add-on's subtitle id, so mpv's external tracks keep their identity. */
+    @Volatile private var addonSubtitleIds: Map<String, String> = emptyMap()
+    /** Tracks to restore after a hand-off from Media3, matched once mpv lists its tracks. */
+    @Volatile private var pendingRestore: EngineHandoffState? = null
 
     private val handler = Handler(looper)
     private val observedProperties = CopyOnWriteArrayList(
@@ -138,15 +146,26 @@ class MpvPlayer(
         estimatedFrameRate = 0f
         tracksSnapshot = Tracks.EMPTY
         mediaItem = item
+        val subtitles = item.localConfiguration?.subtitleConfigurations.orEmpty()
+        pendingSubtitles = subtitles
+        addonSubtitleIds = subtitles.mapNotNull { config -> config.id?.let { config.uri.toString() to it } }.toMap()
+        // mpv's own first pick follows the same languages and off state the
+        // session asked for, before the defaults policy sees the tracks.
+        applyTrackPlan(MpvTrackMapping.plan(trackParameters))
         MpvLibrary.command(handle, args)
         invalidateState()
     }
 
+    /**
+     * Restores a Media3 session's timing and tracks (plan §1). Tracks are
+     * matched once mpv has opened the file and added the add-on subtitles:
+     * the same add-on subtitle, else the same languages.
+     */
     fun restore(state: EngineHandoffState) {
         setSubtitleDelayMillis(state.subtitleDelayMillis)
         setAudioDelayMillis(state.audioDelayMillis)
-        state.audioTrackId?.let { id -> selectTrack("aid", id) }
-        state.subtitleTrackId?.let { id -> selectTrack("sid", id) }
+        pendingRestore = state
+        if (fileLoaded && pendingSubtitles.isEmpty()) applyAfterLoad(final = true)
     }
 
     fun setSubtitleDelayMillis(millis: Long) {
@@ -283,9 +302,71 @@ class MpvPlayer(
     }
 
     private fun selectTrack(property: String, mpvTrackId: String) {
-        if (property == "aid") selectedAudioId = mpvTrackId else selectedSubtitleId = mpvTrackId
-        MpvLibrary.setPropertyString(handle, property, mpvTrackId)
+        setTrackProperty(property, mpvTrackId)
         invalidateState()
+    }
+
+    /** Sets `aid`/`sid` without a state refresh, for use inside SimpleBasePlayer handlers. */
+    private fun setTrackProperty(property: String, value: String) {
+        if (property == "aid") {
+            selectedAudioId = value
+        } else {
+            selectedSubtitleId = value.takeUnless { it == "no" }
+        }
+        MpvLibrary.setPropertyString(handle, property, value)
+    }
+
+    private fun applyTrackPlan(plan: MpvTrackPlan) {
+        MpvLibrary.setPropertyString(handle, "alang", plan.alang)
+        MpvLibrary.setPropertyString(handle, "slang", plan.slang)
+        plan.aid?.let { setTrackProperty("aid", it) }
+        plan.sid?.let { setTrackProperty("sid", it) }
+    }
+
+    /**
+     * The file is open: add its add-on subtitles off the event thread (each
+     * is a download), then restore a hand-off's tracks or re-apply the
+     * session's overrides against mpv's now-known ids.
+     */
+    private fun onFileLoaded() {
+        val subtitles = pendingSubtitles
+        if (subtitles.isEmpty()) {
+            applyAfterLoad(final = true)
+            return
+        }
+        applyAfterLoad(final = false)
+        Thread(
+            {
+                subtitles.forEach { config ->
+                    if (released || handle == 0L) return@Thread
+                    // "auto": listed but not selected; the defaults policy or the viewer picks.
+                    runCatching {
+                        MpvLibrary.command(
+                            handle,
+                            listOf("sub-add", config.uri.toString(), "auto", config.label.orEmpty(), config.language.orEmpty()),
+                        )
+                    }
+                }
+                if (released || handle == 0L) return@Thread
+                pendingSubtitles = emptyList()
+                applyAfterLoad(final = true)
+                refreshTracks()
+                handler.post { if (!released) invalidateState() }
+            },
+            "lamphaus-mpv-subtitles",
+        ).apply { isDaemon = true; start() }
+    }
+
+    private fun applyAfterLoad(final: Boolean) {
+        val restore = pendingRestore
+        if (restore == null) {
+            applyTrackPlan(MpvTrackMapping.plan(trackParameters))
+            return
+        }
+        val (aid, sid) = MpvTrackMapping.restoreSelection(trackEntries(), restore, addonSubtitleIds)
+        aid?.let { setTrackProperty("aid", it) }
+        sid?.let { setTrackProperty("sid", it) }
+        if (final) pendingRestore = null
     }
 
     // ── SimpleBasePlayer plumbing ────────────────────────────────────────
@@ -326,7 +407,7 @@ class MpvPlayer(
             .setPlaybackParameters(PlaybackParameters(speed))
             .setVolume(volume)
             .setVideoSize(androidx.media3.common.VideoSize(videoWidth, videoHeight))
-            .setTrackSelectionParameters(TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT)
+            .setTrackSelectionParameters(trackParameters)
         if (item != null) {
             val itemData = MediaItemData.Builder(item.mediaId)
                 .setMediaItem(item)
@@ -402,7 +483,8 @@ class MpvPlayer(
     ): ListenableFuture<*> {
         val item = mediaItems.firstOrNull() ?: return Futures.immediateVoidFuture()
         mediaItem = item
-        load(item, startPositionMs.coerceAtLeast(0), emptyMap())
+        val uri = item.localConfiguration?.uri?.toString().orEmpty()
+        load(item, startPositionMs.coerceAtLeast(0), com.lamphaus.core.player.PlaybackHeaderRegistry.get(uri))
         prepared = true
         return Futures.immediateVoidFuture()
     }
@@ -428,9 +510,18 @@ class MpvPlayer(
         return Futures.immediateVoidFuture()
     }
 
+    /**
+     * The panels and the defaults policy select tracks through Media3
+     * overrides; mpv gets the matching `aid`/`sid` and language lists, and
+     * reports the parameters back through [getState] (plan §3).
+     */
     override fun handleSetTrackSelectionParameters(
         trackSelectionParameters: TrackSelectionParameters,
-    ): ListenableFuture<*> = Futures.immediateVoidFuture()
+    ): ListenableFuture<*> {
+        trackParameters = trackSelectionParameters
+        applyTrackPlan(MpvTrackMapping.plan(trackSelectionParameters))
+        return Futures.immediateVoidFuture()
+    }
 
     // ── mpv event pump ───────────────────────────────────────────────────
 
@@ -441,7 +532,10 @@ class MpvPlayer(
                     try {
                         val event = MpvLibrary.waitEvent(handle, 0.1)
                         when (event) {
-                            EVENT_FILE_LOADED -> fileLoaded = true
+                            EVENT_FILE_LOADED -> {
+                                fileLoaded = true
+                                onFileLoaded()
+                            }
                             EVENT_END_FILE -> {
                                 // reason: 0=eof-implicit... mpv: 2 stop, 3 quit, 4 eof, 6 error
                                 val reason = endFileReason()
@@ -484,35 +578,51 @@ class MpvPlayer(
         refreshTracks()
     }
 
+    /** mpv's `track-list`, audio and subtitle entries only. */
+    private fun trackEntries(): List<MpvTrackEntry> {
+        val raw = MpvLibrary.getPropertyString(handle, "track-list") ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            (0 until array.length()).mapNotNull { i ->
+                val entry = array.optJSONObject(i) ?: return@mapNotNull null
+                val type = entry.optString("type")
+                if (type != MpvTrackMapping.AUDIO && type != MpvTrackMapping.SUBTITLE) return@mapNotNull null
+                MpvTrackEntry(
+                    type = type,
+                    id = entry.optInt("id").toString(),
+                    language = entry.optString("lang").takeIf(String::isNotEmpty),
+                    title = entry.optString("title").takeIf(String::isNotEmpty),
+                    codec = entry.optString("codec").takeIf(String::isNotEmpty),
+                    external = entry.optBoolean("external"),
+                    externalFilename = entry.optString("external-filename").takeIf(String::isNotEmpty),
+                    forced = entry.optBoolean("forced"),
+                    default = entry.optBoolean("default"),
+                    selected = entry.optBoolean("selected"),
+                    channelCount = entry.optInt("demux-channel-count", if (type == MpvTrackMapping.AUDIO) 2 else 0),
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
     private fun refreshTracks() {
         val groups = mutableListOf<Tracks.Group>()
-        MpvLibrary.getPropertyString(handle, "track-list")?.let { raw ->
-            runCatching {
-                val array = JSONArray(raw)
-                for (i in 0 until array.length()) {
-                    val entry = array.optJSONObject(i) ?: continue
-                    val type = entry.optString("type")
-                    if (type != "audio" && type != "sub") continue
-                    val id = entry.optInt("id").toString()
-                    val selected = entry.optBoolean("selected")
-                    val language = entry.optString("lang").takeIf(String::isNotEmpty)
-                    val label = entry.optString("title").takeIf(String::isNotEmpty)
-                    val format = Format.Builder()
-                        .setId("${type}_$id")
-                        .setLabel(label)
-                        .setLanguage(language)
-                        .setSampleMimeType(if (type == "audio") "audio/mp4a-latm" else "text/x-ssa")
-                        .setChannelCount(entry.optInt("demux-channel-count", if (type == "audio") 2 else 0))
-                        .build()
-                    val group = TrackGroup(format).copyWithId("$type-$id")
-                    groups += Tracks.Group(
-                        group,
-                        /* isAdaptive = */ false,
-                        intArrayOf(C.FORMAT_HANDLED),
-                        booleanArrayOf(selected),
-                    )
-                }
-            }
+        val addonIds = addonSubtitleIds
+        trackEntries().forEach { entry ->
+            val format = Format.Builder()
+                .setId(MpvTrackMapping.formatId(entry, addonIds))
+                .setLabel(entry.title)
+                .setLanguage(entry.language)
+                .setSampleMimeType(MpvTrackMapping.mimeType(entry.type, entry.codec))
+                .setSelectionFlags(MpvTrackMapping.selectionFlags(entry))
+                .setChannelCount(entry.channelCount)
+                .build()
+            val group = TrackGroup(format).copyWithId(MpvTrackMapping.groupId(entry.type, entry.id))
+            groups += Tracks.Group(
+                group,
+                /* isAdaptive = */ false,
+                intArrayOf(C.FORMAT_HANDLED),
+                booleanArrayOf(entry.selected),
+            )
         }
         mpvVideoFormat(videoWidth, videoHeight, containerFrameRate, estimatedFrameRate)?.let { format ->
             groups += Tracks.Group(

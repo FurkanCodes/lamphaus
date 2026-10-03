@@ -54,7 +54,6 @@ import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.ProfilePlaybackPreferences
-import com.lamphaus.core.model.SubtitleDefaultMode
 import com.lamphaus.core.model.StreamCandidate
 import com.lamphaus.core.model.SubtitleTrack
 import com.lamphaus.core.model.WatchProgress
@@ -104,12 +103,9 @@ class PlayerActivity : ComponentActivity() {
     private val nextEpisodeMessageState = mutableStateOf<String?>(null)
     private val spoilerProtectionState = mutableStateOf(SpoilerProtectionSettings())
     private val nextEpisodeDismissedVideoId = mutableStateOf<String?>(null)
-    /** Seconds left on "Still watching?"; null while it is not shown. */
-    private val stillWatchingState = mutableStateOf<Int?>(null)
-    private var stillWatchingJob: Job? = null
-    /** Seconds left on the "Up next" Yes/No prompt; null while it is not shown. */
-    private val upNextPromptState = mutableStateOf<Int?>(null)
-    private var upNextPromptJob: Job? = null
+    /** The end-of-playback screen (Up next, Still watching?, Finished); null while none is shown. */
+    private val endPromptState = mutableStateOf<PlayerEndPrompt?>(null)
+    private var endPromptJob: Job? = null
     private val episodeSwitchState = mutableStateOf<EpisodeSwitchState?>(null)
     private var episodeSwitchJob: Job? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -127,6 +123,12 @@ class PlayerActivity : ComponentActivity() {
     private val audioDelayState = mutableStateOf(0L)
     private val pictureInPictureState = mutableStateOf(false)
     private val profilePlaybackPreferencesState = mutableStateOf(ProfilePlaybackPreferences())
+    /** Profile language defaults and this title's remembered choice, applied once tracks are known. */
+    private val trackDefaults = PlayerTrackDefaults(
+        deviceLanguageTag = { resources.configuration.locales[0].toLanguageTag() },
+    )
+    private val audioFollowsDefaultsState = mutableStateOf(true)
+    private var rememberedSelection: com.lamphaus.core.model.MediaPlaybackSelection? = null
     private val streamInfoState = mutableStateOf<String?>(null)
     private val playbackStartupPhaseState = mutableStateOf(PlaybackStartupPhase.LOADING)
     private var displayTickJob: Job? = null
@@ -210,11 +212,13 @@ class PlayerActivity : ComponentActivity() {
             val profileId = activePlaybackProfileId()
                 ?: return@launch
             val preferences = container.playbackPreferencesRepository.profilePreferences(profileId)
+            val remembered = container.playbackPreferencesRepository.mediaSelection(profileId, playback.mediaKey)
             profilePlaybackPreferencesState.value = preferences
+            rememberedSelection = remembered
             subtitleStyleState.value = preferences.subtitleStyle
-            // The controller often connects after profile preferences load;
-            // apply them to the live session instead of losing this race.
-            controllerState.value?.let { applyTrackDefaults(it, preferences) }
+            // The controller may connect before or after this; either way the
+            // defaults are decided against the real tracks once they exist.
+            trackDefaults.update(preferences, remembered)
         }
         registerAudioRouteListener()
         connect(playback)
@@ -253,14 +257,17 @@ class PlayerActivity : ComponentActivity() {
                     sources = playerSourcesState.value,
                     onLoadSources = ::loadPlayerSources,
                     onSelectSource = ::selectPlayerSource,
-                    stillWatchingSecondsLeft = stillWatchingState.value,
+                    endPrompt = endPromptState.value,
                     onStillWatchingContinue = ::continueWatching,
                     onStillWatchingStop = ::stopWatching,
-                    upNextSecondsLeft = upNextPromptState.value,
+                    onWatchAgain = ::watchAgain,
                     onUpNextYes = ::acceptUpNext,
                     onUpNextNo = ::declineUpNext,
                     episodeSwitch = episodeSwitchState.value,
                     onSelectEpisode = ::selectEpisode,
+                    audioFollowsDefaults = audioFollowsDefaultsState.value,
+                    onTrackChosen = ::onViewerTrackChoice,
+                    onTrackDefaults = ::restoreTrackDefaults,
                     nextEpisodeMessage = nextEpisodeMessageState.value,
                     spoilerProtection = spoilerProtectionState.value,
                     nextEpisodeDismissed =
@@ -319,8 +326,9 @@ class PlayerActivity : ComponentActivity() {
                     val delayed = com.lamphaus.core.player.DelayedCuePlayer(mediaController)
                     uiPlayer = delayed
                     controllerState.value = mediaController
-                    applyTrackDefaults(mediaController, profilePlaybackPreferencesState.value)
+                    resetTrackSelection(mediaController, profilePlaybackPreferencesState.value)
                     mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
+                    trackDefaults.attach(mediaController)
                     mediaController.addListener(object : Player.Listener {
                         override fun onRenderedFirstFrame() {
                             PerfTrace.mark(PerfTrace.FIRST_VIDEO_FRAME)
@@ -486,30 +494,47 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun applyTrackDefaults(player: Player, preferences: ProfilePlaybackPreferences) {
-        val parameters = player.trackSelectionParameters.buildUpon()
+    /**
+     * The session player outlives this activity, so each playback starts from
+     * clean parameters: no override or language list from the last title.
+     * Subtitles start off, and Media3 may not enable a default- or
+     * forced-flagged subtitle on its own; [PlayerTrackDefaults] turns on the
+     * one the profile asks for once the tracks are known (plan §3). The audio
+     * language is pre-set only so the first pick usually needs no switch.
+     */
+    private fun resetTrackSelection(player: Player, preferences: ProfilePlaybackPreferences) {
         val audioLanguages = listOf(
             preferences.audioLanguageTag,
             preferences.secondaryAudioLanguageTag,
         ).filter(String::isNotBlank).distinct()
-        if (audioLanguages.isNotEmpty()) {
-            parameters.setPreferredAudioLanguages(*audioLanguages.toTypedArray())
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverrides()
+            .setPreferredAudioLanguages(*audioLanguages.toTypedArray())
+            .setPreferredTextLanguages()
+            .setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT or C.SELECTION_FLAG_FORCED)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .build()
+    }
+
+    /** The viewer picked [format] (null: subtitles off); remembered for this title (plan §3). */
+    private fun onViewerTrackChoice(trackType: Int, format: Format?) {
+        trackDefaults.onViewerChoice(trackType)
+        if (trackType == C.TRACK_TYPE_AUDIO) audioFollowsDefaultsState.value = false
+        val playback = request ?: return
+        val now = System.currentTimeMillis()
+        val selection = format?.facts()?.rememberedSelection(trackType, rememberedSelection, now)
+            ?: rememberedSelection.withSubtitlesOff(now)
+        rememberedSelection = selection
+        container.applicationScope.launch {
+            val profileId = activePlaybackProfileId() ?: return@launch
+            container.playbackPreferencesRepository.saveMediaSelection(profileId, playback.mediaKey, selection)
         }
-        val subtitleLanguages = preferredSubtitleLanguages(
-            preferences,
-            deviceLanguageTag = resources.configuration.locales[0].toLanguageTag(),
-        )
-        when (preferences.subtitleDefaultMode) {
-            SubtitleDefaultMode.OFF -> parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-            SubtitleDefaultMode.FORCED_ONLY -> parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            SubtitleDefaultMode.PREFERRED_LANGUAGE -> {
-                parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                if (subtitleLanguages.isNotEmpty()) {
-                    parameters.setPreferredTextLanguages(*subtitleLanguages.toTypedArray())
-                }
-            }
-        }
-        player.trackSelectionParameters = parameters.build()
+    }
+
+    /** "Automatic" in the audio or subtitle panel: back to the defaults for [trackType]. */
+    private fun restoreTrackDefaults(trackType: Int) {
+        if (trackType == C.TRACK_TYPE_AUDIO) audioFollowsDefaultsState.value = true
+        trackDefaults.restoreDefaults(trackType)
     }
 
     /**
@@ -550,75 +575,93 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * End of an episode (PLY-AUTO-01): with the card not dismissed, Ask
-     * before next episode shows "Up next" and waits for a Yes; otherwise,
-     * with auto-play on, the next aired episode starts after the card's
-     * countdown, and after [AutoPlayPolicy.STILL_WATCHING_AFTER] automatic
-     * starts in a row the viewer is asked first.
+     * End of playback (PLY-AUTO-01): with no aired next episode, or the
+     * card dismissed or turned off, the Finished screen offers Watch again
+     * or Close. Otherwise Ask before next episode shows "Up next" and waits
+     * for a Yes; with auto-play on, the next aired episode starts after the
+     * card's countdown, and after [AutoPlayPolicy.STILL_WATCHING_AFTER]
+     * automatic starts in a row the viewer is asked first.
      */
     private fun onEpisodeEnded() {
         val current = request ?: return
-        val next = current.nextEpisode ?: return
+        if (pictureInPictureState.value) return
+        val next = current.nextEpisode
         val settings = playbackSettingsState.value
-        if (!settings.nextEpisodeEnabled || !next.hasAired()) return
+        // A movie, the last episode there is, or a next episode still to air:
+        // say so and offer Watch again or Close instead of a frozen last frame.
+        if (next == null || !next.hasAired()) {
+            showEndPrompt { secondsLeft -> PlayerEndPrompt.Finished(secondsLeft) }
+            return
+        }
+        if (!settings.nextEpisodeEnabled || nextEpisodeDismissedVideoId.value == current.videoId) {
+            showEndPrompt { secondsLeft -> PlayerEndPrompt.Finished(secondsLeft) }
+            return
+        }
+        // Neither asking nor auto-play: the next-episode card stays up with its Play action.
         if (!settings.askBeforeNextEpisode && !settings.autoPlayNextEpisode) return
-        if (nextEpisodeDismissedVideoId.value == current.videoId || pictureInPictureState.value) return
         when {
-            settings.askBeforeNextEpisode -> askUpNext()
-            AutoPlayPolicy.shouldAskStillWatching(current.autoPlayStreak) -> askStillWatching()
+            settings.askBeforeNextEpisode -> showEndPrompt { secondsLeft -> PlayerEndPrompt.UpNext(secondsLeft) }
+            AutoPlayPolicy.shouldAskStillWatching(current.autoPlayStreak) ->
+                showEndPrompt { secondsLeft -> PlayerEndPrompt.StillWatching(secondsLeft) }
             else -> playNextEpisode(automatic = true)
         }
     }
 
-    /** Same unanswered-prompt guard as "Still watching?": no answer closes the player. */
-    private fun askUpNext() {
-        upNextPromptJob?.cancel()
-        upNextPromptJob = lifecycleScope.launch {
+    /**
+     * Shows an end-of-playback screen (PLY-AUTO-01). It waits for an answer
+     * unless Close the player when no one answers is on; then it counts down
+     * and closes the player when the minute runs out.
+     */
+    private fun showEndPrompt(prompt: (secondsLeft: Int?) -> PlayerEndPrompt) {
+        endPromptJob?.cancel()
+        if (!playbackSettingsState.value.endPromptAutoClose) {
+            endPromptState.value = prompt(null)
+            return
+        }
+        endPromptJob = lifecycleScope.launch {
             for (secondsLeft in AutoPlayPolicy.STILL_WATCHING_TIMEOUT_SECONDS downTo 1) {
-                upNextPromptState.value = secondsLeft
+                endPromptState.value = prompt(secondsLeft)
                 delay(1_000)
             }
-            upNextPromptState.value = null
+            endPromptState.value = null
             finish()
         }
+    }
+
+    private fun clearEndPrompt() {
+        endPromptJob?.cancel()
+        endPromptState.value = null
     }
 
     /** "Yes": the viewer chose the next episode, so it starts and the streak resets. */
     private fun acceptUpNext() {
-        upNextPromptJob?.cancel()
-        upNextPromptState.value = null
+        clearEndPrompt()
         playNextEpisode(automatic = false)
     }
 
     private fun declineUpNext() {
-        upNextPromptJob?.cancel()
-        upNextPromptState.value = null
+        clearEndPrompt()
         finish()
-    }
-
-    private fun askStillWatching() {
-        stillWatchingJob?.cancel()
-        stillWatchingJob = lifecycleScope.launch {
-            for (secondsLeft in AutoPlayPolicy.STILL_WATCHING_TIMEOUT_SECONDS downTo 1) {
-                stillWatchingState.value = secondsLeft
-                delay(1_000)
-            }
-            stillWatchingState.value = null
-            finish()
-        }
     }
 
     /** "Continue": the viewer is here, so the next episode starts and the streak resets. */
     private fun continueWatching() {
-        stillWatchingJob?.cancel()
-        stillWatchingState.value = null
+        clearEndPrompt()
         playNextEpisode(automatic = false)
     }
 
     private fun stopWatching() {
-        stillWatchingJob?.cancel()
-        stillWatchingState.value = null
+        clearEndPrompt()
         finish()
+    }
+
+    /** Finished screen: the same title again from the start, in this session. */
+    private fun watchAgain() {
+        clearEndPrompt()
+        controller?.run {
+            seekTo(0)
+            play()
+        }
     }
 
     /**
@@ -1012,6 +1055,7 @@ class PlayerActivity : ComponentActivity() {
         }
         (attachedPlayerView as? androidx.media3.ui.PlayerView)?.player = null
         attachedPlayerView = null
+        trackDefaults.detach()
         (uiPlayer as? com.lamphaus.core.player.DelayedCuePlayer)?.release()
         uiPlayer = null
         controllerFuture?.let(MediaController::releaseFuture)

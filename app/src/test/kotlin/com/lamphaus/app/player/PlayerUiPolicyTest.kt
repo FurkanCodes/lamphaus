@@ -34,6 +34,8 @@ class PlayerUiPolicyTest {
         assertEquals("en", normalizedSubtitleLanguageKey("en-US"))
         assertEquals("en", normalizedSubtitleLanguageKey("EN_gb".replace('_', '-')))
         assertEquals("pt", normalizedSubtitleLanguageKey("pt-BR"))
+        assertEquals("en", normalizedSubtitleLanguageKey("eng"))
+        assertEquals("pt", normalizedSubtitleLanguageKey("pob"))
     }
 
     @Test
@@ -69,18 +71,5 @@ class PlayerUiPolicyTest {
         assertEquals(20_000L, remoteSeekStepMillis(3))
         assertEquals(30_000L, remoteSeekStepMillis(8))
         assertEquals(60_000L, remoteSeekStepMillis(40))
-    }
-
-    @Test
-    fun `subtitle languages fall back from preferred to secondary to device`() {
-        val prefs = com.lamphaus.core.model.ProfilePlaybackPreferences(
-            preferredSubtitleLanguageTag = "tr",
-            secondarySubtitleLanguageTag = "en",
-        )
-        assertEquals(listOf("tr", "en"), preferredSubtitleLanguages(prefs, deviceLanguageTag = "en-US"))
-        assertEquals(
-            listOf("de-DE"),
-            preferredSubtitleLanguages(com.lamphaus.core.model.ProfilePlaybackPreferences(), "de-DE"),
-        )
     }
 }

@@ -26,4 +26,20 @@ class TrackLabelsTest {
         assertEquals("French", trackTitle("fr", "French", 0))
         assertEquals("Track 3", trackTitle(null, null, 2))
     }
+
+    @Test
+    fun `badges list each fact and read hearing-impaired release names`() {
+        assertEquals(
+            listOf("SRT", "SDH"),
+            trackBadges(C.TRACK_TYPE_TEXT, MimeTypes.APPLICATION_SUBRIP, -1, 0, 0, "Show.S01E01.en.[HI].srt"),
+        )
+        assertEquals(
+            listOf("SRT"),
+            trackBadges(C.TRACK_TYPE_TEXT, MimeTypes.APPLICATION_SUBRIP, -1, 0, 0, "hi"),
+        )
+        assertEquals(
+            listOf("Dolby Digital", "5.1", "Default"),
+            trackBadges(C.TRACK_TYPE_AUDIO, MimeTypes.AUDIO_AC3, 6, C.SELECTION_FLAG_DEFAULT, 0, null),
+        )
+    }
 }

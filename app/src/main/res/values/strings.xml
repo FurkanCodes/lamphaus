@@ -135,7 +135,9 @@
     <string name="player_subtitle_language_unknown">Unknown</string>
     <string name="player_subtitle_no_tracks_title">No matching tracks</string>
     <string name="player_subtitle_no_tracks_body">This source did not report a subtitle for that language.</string>
-    <string name="player_subtitle_embedded_track">Embedded subtitle</string>
+    <string name="player_subtitle_origin_all">All</string>
+    <string name="player_subtitle_origin_built_in">Built-in</string>
+    <string name="player_subtitle_origin_addon">Add-on</string>
     <string name="player_caption_preview">A quiet night for a great story.</string>
     <plurals name="player_subtitle_track_count">
         <item quantity="one">%1$d track</item>
@@ -145,6 +147,18 @@
         <item quantity="one">%1$d track · Active</item>
         <item quantity="other">%1$d tracks · Active</item>
     </plurals>
+    <string name="playback_default_audio">Default audio</string>
+    <string name="playback_default_audio_description">Original keeps each title\'s own soundtrack; a language picks that dub when the source has it.</string>
+    <string name="playback_language_original">Original</string>
+    <string name="playback_default_subtitles">Default subtitles</string>
+    <string name="playback_default_subtitles_description">Used when a title has no remembered choice.</string>
+    <string name="playback_subtitles_off">Off</string>
+    <string name="playback_subtitles_forced">Forced only</string>
+    <string name="playback_subtitles_preferred">Preferred language</string>
+    <string name="playback_subtitle_language">Subtitle language</string>
+    <string name="playback_subtitle_language_description">Turned on in this language, or its forced track when Forced only is chosen.</string>
+    <string name="playback_subtitle_language_disabled">Off while Default subtitles is Off.</string>
+    <string name="playback_language_device">Device language</string>
     <string name="episode_playback">Episode playback</string>
     <string name="skip_intro">Skip intro</string>
     <string name="skip_intro_description">Show a skip button when exact intro timestamps are available.</string>
@@ -170,10 +184,15 @@
     <string name="player_episodes">Episodes</string>
     <string name="episode_source_unavailable">No playable source for this episode.</string>
     <string name="still_watching_title">Still watching?</string>
-    <plurals name="still_watching_body">
-        <item quantity="one">Playback stops in %d second.</item>
-        <item quantity="other">Playback stops in %d seconds.</item>
-    </plurals>
+    <string name="still_watching_question">Keep watching?</string>
+    <string name="player_finished_movie">Finished</string>
+    <string name="player_finished_series">All caught up</string>
+    <string name="player_finished_series_body">You have watched every released episode.</string>
+    <string name="player_finished_next_soon">Next episode</string>
+    <string name="player_finished_watch_again">Watch again</string>
+    <string name="player_finished_close">Close</string>
+    <string name="end_prompt_auto_close">Close the player when no one answers</string>
+    <string name="end_prompt_auto_close_description">Up next, Still watching?, and the end of a movie or series close the player after a minute without an answer. Off: they wait for you.</string>
     <string name="still_watching_continue">Continue watching</string>
     <string name="still_watching_stop">Stop</string>
     <string name="next_episode_finding_source">Finding source…</string>
@@ -225,6 +244,8 @@
     <string name="detail_revenue">Revenue</string>
     <string name="player_sources">Sources</string>
     <string name="player_source_playing">Playing now</string>
+    <string name="player_sources_built_in">Built-in</string>
+    <string name="player_sources_failed">Sources could not be loaded. Close and reopen this panel to try again.</string>
     <string name="player_dismiss">Dismiss</string>
     <string name="player_ends_at">Ends at %1$s</string>
     <string name="player_info_rating">Rated</string>

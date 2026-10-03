@@ -99,6 +99,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -152,7 +153,6 @@ import androidx.tv.material3.Switch
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.R
 import com.lamphaus.core.data.perf.PerfTrace
-import com.lamphaus.app.ui.StreamBadgeRow
 import com.lamphaus.app.ui.StreamBadgeMatcher
 import com.lamphaus.app.ui.LocalStreamBadges
 import com.lamphaus.app.ui.rememberFitsTonightSection
@@ -164,7 +164,6 @@ import com.lamphaus.app.ui.recapEpisodeTitle
 import com.lamphaus.app.ui.seriesRecap
 import com.lamphaus.app.ui.LocalSourceFit
 import com.lamphaus.app.ui.SourceFitAdvisor
-import com.lamphaus.app.ui.sourceFitLabel
 import com.lamphaus.app.ui.LocalAccountPhotoUrl
 import com.lamphaus.app.ui.ArtworkResolver
 import com.lamphaus.app.ui.rememberReducedMotion
@@ -184,12 +183,13 @@ import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.MediaMetadataPresentation
 import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.SourcePickerState
+import com.lamphaus.app.ui.PlaybackLanguageOption
+import com.lamphaus.app.ui.playbackLanguageLabel
+import com.lamphaus.app.ui.playbackLanguageOptions
 import com.lamphaus.app.ui.artworkImageUrl
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.numberParts
-import com.lamphaus.app.ui.sourcePresentation
-import com.lamphaus.app.ui.sourceQuality
 import com.lamphaus.app.ui.sourceItemKeys
 import com.lamphaus.app.ui.SpoilerBlurLayer
 import com.lamphaus.app.ui.SpoilerContent
@@ -2505,196 +2505,6 @@ internal fun TvSourcePickerScreen(
 }
 
 @Composable
-private fun TvSourceCard(
-    source: StreamCandidate,
-    providerLabel: String?,
-    showProvider: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val presentation = remember(source, providerLabel) { source.sourcePresentation(providerLabel) }
-    val badgeMatcher = LocalStreamBadges.current
-    val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
-    val fitAdvisor = LocalSourceFit.current
-    val fit = remember(source, fitAdvisor) { fitAdvisor.fitFor(source) }
-    val quality = remember(source) { sourceQuality(source) }
-    // Provider names often carry their own line breaks and open with the
-    // add-on's name, which the card and filters already show; the title keeps
-    // only what tells this source apart, on one line.
-    val title = remember(presentation, providerLabel) {
-        val lines = presentation.title.lines().map(String::trim).filter(String::isNotEmpty)
-        val distinct = if (lines.size > 1 && lines.first().equals(providerLabel, ignoreCase = true)) lines.drop(1) else lines
-        distinct.joinToString("  ·  ")
-    }
-    val badges = remember(presentation, quality) {
-        presentation.badges.filterNot { it.equals(quality, ignoreCase = true) }.take(4)
-    }
-    val transportLabel = stringResource(presentation.transport.labelRes)
-    TvFocusableSurface(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        containerColor = TvSurfaceTokens.card,
-    ) { focused ->
-        val primaryColor = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground
-        val secondaryColor = primaryColor.copy(alpha = 0.72f)
-        Row(
-            Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            TvQualityTile(quality = quality, fallback = transportLabel)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                if (showProvider && providerLabel != null) {
-                    Text(
-                        providerLabel.uppercase(),
-                        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Text(
-                    title,
-                    color = primaryColor,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                // Imported badges replace Lamphaus's own labels, as in Nuvio.
-                if (badgeMatcher.isActive) {
-                    StreamBadgeRow(importedBadges)
-                } else if (badges.isNotEmpty()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        badges.forEach { badge -> TvSourceBadge(badge, focused) }
-                    }
-                }
-                presentation.description?.let { description ->
-                    Text(
-                        description,
-                        color = secondaryColor,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Text(
-                    listOfNotNull(presentation.size, transportLabel).joinToString("  ·  "),
-                    color = secondaryColor,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                )
-                fit?.let {
-                    Text(
-                        sourceFitLabel(it),
-                        color = secondaryColor,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            TvIcon(
-                Icons.Outlined.PlayArrow,
-                contentDescription = null,
-                tint = if (focused) primaryColor else Color.Transparent,
-                modifier = Modifier.align(Alignment.CenterVertically).size(24.dp),
-            )
-        }
-    }
-}
-
-/** Resolution at a glance: 4K gold, HD instrument blue, 720p teal, otherwise the transport. */
-@Composable
-private fun TvQualityTile(quality: String?, fallback: String) {
-    val (container, content) = when (quality) {
-        "4K" -> Color(0xFFE9C46A) to Color(0xFF2B1F00)
-        "1440p", "1080p" -> TvFocusTokens.beam to Color(0xFF003062)
-        "720p" -> Color(0xFF9FD8C8) to Color(0xFF00382E)
-        else -> Color.White.copy(alpha = 0.10f) to MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Box(
-        Modifier.size(56.dp).background(container, TvShapeTokens.card),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            quality ?: fallback,
-            color = content,
-            style = if (quality != null) MaterialTheme.typography.titleSmall else MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-/** Placeholder cards in the final card geometry while the first add-on answers (TV-CNT-02). */
-@Composable
-private fun TvSourceSkeletons() {
-    val pulse = rememberSkeletonPulse(label = "source loading")
-    val color = MaterialTheme.colorScheme.surfaceVariant
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        repeat(4) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(TvShapeTokens.card)
-                    .background(TvSurfaceTokens.card)
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Box(Modifier.size(56.dp).clip(TvShapeTokens.card).skeletonPulseBackground(color) { pulse.value })
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.fillMaxWidth(0.3f).height(10.dp).skeletonPulseBackground(color) { pulse.value })
-                    Box(Modifier.fillMaxWidth(0.8f).height(14.dp).skeletonPulseBackground(color) { pulse.value })
-                    Box(Modifier.fillMaxWidth(0.55f).height(10.dp).skeletonPulseBackground(color) { pulse.value })
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TvFilterChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    count: Int? = null,
-) {
-    TvFocusableSurface(
-        onClick = onClick,
-        modifier = modifier.semantics { this.selected = selected },
-        containerColor = if (selected) TvSurfaceTokens.selectedFilter else TvSurfaceTokens.card,
-    ) { focused ->
-        val color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground
-        Row(
-            Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                label,
-                color = color,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            count?.let {
-                Text(
-                    it.toString(),
-                    color = color.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
-}
-@Composable
 internal fun TvSeasonChips(
     seasonNumbers: List<Int>,
     selectedSeason: Int?,
@@ -2719,31 +2529,6 @@ internal fun TvSeasonChips(
             )
         }
     }
-}
-
-@Composable
-private fun TvSourceBadge(
-    label: String,
-    focused: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Text(
-        text = label,
-        modifier = modifier
-            .background(
-                color = if (focused) {
-                    TvFocusTokens.focusedContent.copy(alpha = 0.10f)
-                } else {
-                    TvFocusTokens.beam.copy(alpha = 0.16f)
-                },
-                shape = RoundedCornerShape(3.dp),
-            )
-            .padding(horizontal = 7.dp, vertical = 3.dp),
-        color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-    )
 }
 
 @Composable
@@ -3598,6 +3383,11 @@ private fun TvSettings(
 private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
     val profile = state.profilePlaybackPreferences
     val device = state.devicePlaybackConfig
+    val displayLocale = LocalConfiguration.current.locales[0]
+    val originalLabel = stringResource(R.string.playback_language_original)
+    val deviceLanguageLabel = stringResource(R.string.playback_language_device)
+    var languageDialog by remember { mutableStateOf<TvLanguageDialog?>(null) }
+    val subtitlesOn = profile.subtitleDefaultMode != SubtitleDefaultMode.OFF
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -3635,28 +3425,47 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
         item {
-            TvSettingsChoiceRow(
-                title = "Default audio",
-                description = "Original first, then your preferred language",
-                value = tvPlaybackLanguageLabel(profile.audioLanguageTag),
-                onClick = {
-                    val index = TV_PLAYER_LANGUAGE_OPTIONS.indexOfFirst { it.first == profile.audioLanguageTag }
-                    val next = TV_PLAYER_LANGUAGE_OPTIONS[(index + 1).coerceAtLeast(0) % TV_PLAYER_LANGUAGE_OPTIONS.size]
-                    viewModel.setProfilePlaybackPreferences(profile.copy(audioLanguageTag = next.first))
+            TvSettingsToggleRow(
+                title = stringResource(R.string.end_prompt_auto_close),
+                description = stringResource(R.string.end_prompt_auto_close_description),
+                checked = state.playbackSettings.endPromptAutoClose,
+                onCheckedChange = {
+                    viewModel.setPlaybackSettings(state.playbackSettings.copy(endPromptAutoClose = it))
                 },
             )
         }
         item {
             TvSettingsChoiceRow(
-                title = "Default subtitles",
-                description = "Applied when this title has no remembered choice",
-                value = tvSubtitleDefaultLabel(profile.subtitleDefaultMode),
+                title = stringResource(R.string.playback_default_audio),
+                description = stringResource(R.string.playback_default_audio_description),
+                value = playbackLanguageLabel(profile.audioLanguageTag, originalLabel, displayLocale),
+                onClick = { languageDialog = TvLanguageDialog.AUDIO },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = stringResource(R.string.playback_default_subtitles),
+                description = stringResource(R.string.playback_default_subtitles_description),
+                value = stringResource(subtitleDefaultLabelRes(profile.subtitleDefaultMode)),
                 onClick = {
                     val entries = SubtitleDefaultMode.entries
                     viewModel.setProfilePlaybackPreferences(
                         profile.copy(subtitleDefaultMode = entries[(entries.indexOf(profile.subtitleDefaultMode) + 1) % entries.size]),
                     )
                 },
+            )
+        }
+        item {
+            // Depends on Default subtitles (MOB-SET-05 applied to TV settings).
+            TvSettingsChoiceRow(
+                title = stringResource(R.string.playback_subtitle_language),
+                description = stringResource(
+                    if (subtitlesOn) R.string.playback_subtitle_language_description
+                    else R.string.playback_subtitle_language_disabled,
+                ),
+                value = playbackLanguageLabel(profile.preferredSubtitleLanguageTag, deviceLanguageLabel, displayLocale),
+                enabled = subtitlesOn,
+                onClick = { languageDialog = TvLanguageDialog.SUBTITLES },
             )
         }
         item {
@@ -3775,6 +3584,30 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
     }
+    languageDialog?.let { dialog ->
+        TvPlaybackLanguageDialog(
+            title = stringResource(
+                if (dialog == TvLanguageDialog.AUDIO) R.string.playback_default_audio
+                else R.string.playback_subtitle_language,
+            ),
+            options = remember(dialog, displayLocale) {
+                playbackLanguageOptions(
+                    if (dialog == TvLanguageDialog.AUDIO) originalLabel else deviceLanguageLabel,
+                    displayLocale,
+                )
+            },
+            selectedTag = if (dialog == TvLanguageDialog.AUDIO) profile.audioLanguageTag
+            else profile.preferredSubtitleLanguageTag,
+            onSelect = { tag ->
+                viewModel.setProfilePlaybackPreferences(
+                    if (dialog == TvLanguageDialog.AUDIO) profile.copy(audioLanguageTag = tag)
+                    else profile.copy(preferredSubtitleLanguageTag = tag),
+                )
+                languageDialog = null
+            },
+            onDismiss = { languageDialog = null },
+        )
+    }
 }
 
 @Composable
@@ -3783,9 +3616,11 @@ private fun TvSettingsChoiceRow(
     description: String,
     value: String,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     TvFocusableSurface(
         onClick = onClick,
+        enabled = enabled,
         role = Role.Button,
         modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp),
     ) { focused ->
@@ -3808,24 +3643,89 @@ private fun TvSettingsChoiceRow(
     }
 }
 
-private val TV_PLAYER_LANGUAGE_OPTIONS = listOf(
-    "" to "Original / device",
-    "en" to "English",
-    "tr" to "Turkish",
-    "de" to "German",
-    "es" to "Spanish",
-    "fr" to "French",
-    "ja" to "Japanese",
-    "ko" to "Korean",
-)
+private enum class TvLanguageDialog { AUDIO, SUBTITLES }
 
-private fun tvPlaybackLanguageLabel(tag: String): String =
-    TV_PLAYER_LANGUAGE_OPTIONS.firstOrNull { it.first == tag }?.second ?: java.util.Locale.forLanguageTag(tag).displayLanguage
+/**
+ * One language from the shared playback list, as a focusable radio list over
+ * the settings page. Focus starts on the stored choice; Back dismisses.
+ */
+@Composable
+private fun TvPlaybackLanguageDialog(
+    title: String,
+    options: List<PlaybackLanguageOption>,
+    selectedTag: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val selectedIndex = options.indexOfFirst { it.tag == selectedTag }.coerceAtLeast(0)
+    val selectedFocus = remember { FocusRequester() }
+    val listState = rememberLazyListState(selectedIndex)
+    Dialog(onDismissRequest = onDismiss) {
+        LaunchedEffect(Unit) { runCatching { selectedFocus.requestFocus() } }
+        Surface(
+            modifier = Modifier.width(452.dp),
+            colors = SurfaceDefaults.colors(containerColor = TvSurfaceTokens.elevated),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.semantics { heading() },
+                )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                ) {
+                    itemsIndexed(options, key = { _, option -> option.tag.ifEmpty { "fallback" } }) { index, option ->
+                        val selected = option.tag == selectedTag
+                        TvFocusableSurface(
+                            onClick = { onSelect(option.tag) },
+                            role = Role.RadioButton,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics { this.selected = selected }
+                                .then(if (index == selectedIndex) Modifier.focusRequester(selectedFocus) else Modifier),
+                        ) { focused ->
+                            val content = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    option.label,
+                                    modifier = Modifier.weight(1f),
+                                    color = content,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (selected) {
+                                    TvIcon(
+                                        Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        tint = if (focused) content else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
-private fun tvSubtitleDefaultLabel(mode: SubtitleDefaultMode): String = when (mode) {
-    SubtitleDefaultMode.OFF -> "Off"
-    SubtitleDefaultMode.FORCED_ONLY -> "Forced only"
-    SubtitleDefaultMode.PREFERRED_LANGUAGE -> "Preferred language"
+@StringRes
+private fun subtitleDefaultLabelRes(mode: SubtitleDefaultMode): Int = when (mode) {
+    SubtitleDefaultMode.OFF -> R.string.playback_subtitles_off
+    SubtitleDefaultMode.FORCED_ONLY -> R.string.playback_subtitles_forced
+    SubtitleDefaultMode.PREFERRED_LANGUAGE -> R.string.playback_subtitles_preferred
 }
 
 private fun tvFrameRateMatchingLabel(mode: FrameRateMatching): String = when (mode) {

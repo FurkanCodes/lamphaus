@@ -32,6 +32,17 @@ class PlaybackSettingsMappingTest {
         assertEquals(2f, settings.nextEpisodeThresholdMinutesBeforeEnd)
         assertTrue(settings.autoPlayNextEpisode)
         assertFalse(settings.askBeforeNextEpisode)
+        assertFalse(settings.endPromptAutoClose)
+    }
+
+    @Test
+    fun `end prompt auto close is read back`() {
+        val settings = playbackSettingsFromKeys(
+            true, true, true, null, null, null,
+            endPromptAutoClose = true,
+        )
+
+        assertTrue(settings.endPromptAutoClose)
     }
 
     @Test

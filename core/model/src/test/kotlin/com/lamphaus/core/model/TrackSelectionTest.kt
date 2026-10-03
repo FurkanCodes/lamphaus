@@ -43,6 +43,17 @@ class TrackSelectionTest {
         assertEquals("en", normalizeBcp47Tag("eng"))
         assertEquals("tr", normalizeBcp47Tag("tur"))
         assertEquals("de-DE", normalizeBcp47Tag("deu-DE"))
+        assertEquals("pt-BR", normalizeBcp47Tag("pob"))
+        assertEquals("hr", normalizeBcp47Tag("hrv"))
+        assertEquals("id", normalizeBcp47Tag("ind"))
+    }
+
+    @Test
+    fun `merged track ids drop the source index`() {
+        assertEquals("opensubtitles-42", sourceTrackId("1:opensubtitles-42"))
+        assertEquals("opensubtitles-42", sourceTrackId("opensubtitles-42"))
+        assertEquals("sub_3", sourceTrackId("sub_3"))
+        assertNull(sourceTrackId(null))
     }
 
     @Test
@@ -84,10 +95,45 @@ class TrackSelectionTest {
     }
 
     @Test
-    fun `audio original default prefers device language then stream default`() {
-        val tracks = listOf(audio("fr", "fr"), audio("default-en", "en", isDefault = true), audio("it", "it"))
+    fun `audio original keeps the stream default over the device language`() {
+        val tracks = listOf(audio("ja-original", "ja", isDefault = true), audio("en-dub", "en"))
         val selected = selectAudioTrack(tracks, null, null, null, ProfilePlaybackPreferences(), "en")
-        assertEquals("default-en", selected?.id)
+        assertEquals("ja-original", selected?.id)
+    }
+
+    @Test
+    fun `audio original without a default falls to the device language`() {
+        val tracks = listOf(audio("fr", "fr"), audio("en", "en"), audio("it", "it"))
+        val selected = selectAudioTrack(tracks, null, null, null, ProfilePlaybackPreferences(), "en")
+        assertEquals("en", selected?.id)
+    }
+
+    @Test
+    fun `audio last resort skips commentary`() {
+        val tracks = listOf(audio("commentary", "fr", roles = setOf(TrackRole.COMMENTARY)), audio("main", "fr"))
+        val selected = selectAudioTrack(tracks, null, null, null, profile, "en")
+        assertEquals("main", selected?.id)
+    }
+
+    @Test
+    fun `preferred subtitle language matches three letter add-on codes`() {
+        val tracks = listOf(subtitle("tr", "tur"), subtitle("en", "eng"), subtitle("br", "pob"))
+        val preferred = ProfilePlaybackPreferences(
+            subtitleDefaultMode = SubtitleDefaultMode.PREFERRED_LANGUAGE,
+            preferredSubtitleLanguageTag = "en",
+        )
+        assertEquals("en", selectSubtitleTrack(tracks, null, null, null, preferred, "tr"))
+        assertEquals(
+            "br",
+            selectSubtitleTrack(tracks, null, null, null, preferred.copy(preferredSubtitleLanguageTag = "pt-BR"), "en"),
+        )
+    }
+
+    @Test
+    fun `preferred subtitle language falls to the device language`() {
+        val tracks = listOf(subtitle("de", "de"), subtitle("tr", "tr"))
+        val preferred = ProfilePlaybackPreferences(subtitleDefaultMode = SubtitleDefaultMode.PREFERRED_LANGUAGE)
+        assertEquals("tr", selectSubtitleTrack(tracks, null, null, null, preferred, "tr-TR"))
     }
 
     @Test
@@ -180,6 +226,8 @@ class TrackSelectionTest {
         assertEquals(setOf(TrackRole.FORCED), subtitleRoles("Forced"))
         assertEquals(setOf(TrackRole.SDH), subtitleRoles("English SDH"))
         assertEquals(setOf(TrackRole.SDH), subtitleRoles("English (CC)"))
+        assertEquals(setOf(TrackRole.SDH), subtitleRoles("Show.S01E01.en [HI].srt"))
+        assertTrue(subtitleRoles("hi").isEmpty())
         assertEquals(setOf(TrackRole.COMMENTARY), subtitleRoles("Director's commentary"))
         assertEquals(setOf(TrackRole.AUDIO_DESCRIPTION), subtitleRoles("Audio Description"))
         assertTrue(subtitleRoles(null, isForcedFlag = true).contains(TrackRole.FORCED))

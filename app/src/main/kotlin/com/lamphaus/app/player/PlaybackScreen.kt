@@ -51,6 +51,16 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.focus.focusRestorer
+import com.lamphaus.app.tv.LamphausTvTheme
+import com.lamphaus.app.tv.TvFilterChip
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -231,7 +241,26 @@ private data class TrackOption(
     val languageKey: String,
     val group: TrackGroup,
     val trackIndex: Int,
+    /** Codec, layout, and role badges (SRT, 5.1, Forced, SDH, Default). */
+    val badges: List<String> = emptyList(),
+    /** Where the track comes from: the stream itself, or a subtitle add-on. */
+    val origin: TrackOrigin = TrackOrigin.BuiltIn,
+    val format: androidx.media3.common.Format? = null,
 )
+
+/** A subtitle's source, shown as a chip and used as a filter (Nuvio's Built-in / add-on tabs). */
+private sealed interface TrackOrigin {
+    val key: String
+
+    data object BuiltIn : TrackOrigin {
+        override val key = "built-in"
+    }
+
+    /** [name] is the add-on's display name; null when the add-on did not give one. */
+    data class Addon(val name: String?) : TrackOrigin {
+        override val key = "addon:${name.orEmpty()}"
+    }
+}
 
 private data class SubtitleLanguageRailItem(
     val key: String,
@@ -276,14 +305,22 @@ internal fun PlaybackScreen(
     sources: PlayerSourcesState = PlayerSourcesState(),
     onLoadSources: () -> Unit = {},
     onSelectSource: (PlayerSourceOption) -> Unit = {},
-    stillWatchingSecondsLeft: Int? = null,
+    /** The end-of-playback screen showing now, if any (PLY-AUTO-01). */
+    endPrompt: PlayerEndPrompt? = null,
     onStillWatchingContinue: () -> Unit = {},
     onStillWatchingStop: () -> Unit = {},
-    upNextSecondsLeft: Int? = null,
     onUpNextYes: () -> Unit = {},
     onUpNextNo: () -> Unit = {},
+    /** Finished screen: play this title again from the start. */
+    onWatchAgain: () -> Unit = {},
     episodeSwitch: EpisodeSwitchState? = null,
     onSelectEpisode: (com.lamphaus.core.model.Episode) -> Unit = {},
+    /** Audio follows the profile defaults (the panel's Automatic row); null reads the player's overrides. */
+    audioFollowsDefaults: Boolean? = null,
+    /** The viewer picked a track (null format: subtitles off). */
+    onTrackChosen: ((trackType: Int, format: androidx.media3.common.Format?) -> Unit)? = null,
+    /** The viewer chose Automatic: hand the track type back to the defaults. */
+    onTrackDefaults: ((trackType: Int) -> Unit)? = null,
 ) {
     val nextEpisodeLoading = nextEpisodeProgress != NextEpisodeProgress.Idle
     var snapshot by remember(player) { mutableStateOf(player?.snapshot() ?: PlayerSnapshot()) }
@@ -419,7 +456,9 @@ internal fun PlaybackScreen(
         nextEpisode.hasAired() &&
         timingReady
     val nextEpisodeCardVisible = nextEpisodeReady && !nextEpisodeDismissed
-    val endPromptShown = stillWatchingSecondsLeft != null || upNextSecondsLeft != null
+    val endPromptShown = endPrompt != null && !inPictureInPicture
+    // The end screen replaces the chrome; Watch again brings the chrome back with playback.
+    LaunchedEffect(endPromptShown) { if (endPromptShown) controlsVisible = false }
     val nextEpisodeSkipInCard = nextEpisodeCardVisible && !wideLayout && !isTelevision &&
         activeSegment?.type == PlaybackSegmentType.ENDING
 
@@ -1059,6 +1098,13 @@ internal fun PlaybackScreen(
                     player = player,
                     snapshot = snapshot,
                     isTelevision = isTelevision,
+                    trackActions = remember(player, onTrackChosen, onTrackDefaults) {
+                        PlayerTrackActions(player, onTrackChosen, onTrackDefaults)
+                    },
+                    audioAutomatic = audioFollowsDefaults ?: (player?.hasOverride(C.TRACK_TYPE_AUDIO) == false),
+                    addonSubtitles = remember(request.source.subtitles) {
+                        request.source.subtitles.associate { it.id to it.providerName }
+                    },
                     audioDelayMillis = audioDelayMillis,
                     onAudioDelay = onAudioDelay,
                     onOpenEditor = { opened ->
@@ -1101,24 +1147,36 @@ internal fun PlaybackScreen(
         }
 
         // Topmost: nothing else may cover or take input from the prompt.
-        stillWatchingSecondsLeft?.takeUnless { inPictureInPicture }?.let { secondsLeft ->
-            StillWatchingPrompt(
-                secondsLeft = secondsLeft,
-                isTelevision = isTelevision,
-                onContinue = onStillWatchingContinue,
-                onStop = onStillWatchingStop,
-            )
-        }
-        if (upNextSecondsLeft != null && nextEpisode != null && !inPictureInPicture) {
-            UpNextPrompt(
-                episode = nextEpisode,
-                secondsLeft = upNextSecondsLeft,
-                blurArtwork = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched = false),
-                hideSynopsis = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched = false),
-                isTelevision = isTelevision,
-                onYes = onUpNextYes,
-                onNo = onUpNextNo,
-            )
+        if (endPromptShown) {
+            when (endPrompt) {
+                is PlayerEndPrompt.StillWatching -> StillWatchingPrompt(
+                    secondsLeft = endPrompt.secondsLeft,
+                    isTelevision = isTelevision,
+                    onContinue = onStillWatchingContinue,
+                    onStop = onStillWatchingStop,
+                    nextEpisode = nextEpisode,
+                    blurArtwork = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched = false),
+                )
+                is PlayerEndPrompt.UpNext -> if (nextEpisode != null) {
+                    UpNextPrompt(
+                        episode = nextEpisode,
+                        secondsLeft = endPrompt.secondsLeft,
+                        blurArtwork = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched = false),
+                        hideSynopsis = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_SYNOPSIS, watched = false),
+                        isTelevision = isTelevision,
+                        onYes = onUpNextYes,
+                        onNo = onUpNextNo,
+                    )
+                }
+                is PlayerEndPrompt.Finished -> FinishedPrompt(
+                    request = request,
+                    secondsLeft = endPrompt.secondsLeft,
+                    isTelevision = isTelevision,
+                    onWatchAgain = onWatchAgain,
+                    onClose = onExit,
+                )
+                null -> Unit
+            }
         }
     }
     }
@@ -1434,6 +1492,9 @@ private fun PlayerSettingsPanel(
     player: Player?,
     snapshot: PlayerSnapshot,
     isTelevision: Boolean,
+    trackActions: PlayerTrackActions,
+    audioAutomatic: Boolean,
+    addonSubtitles: Map<String, String?>,
     audioDelayMillis: Long,
     onAudioDelay: (Long) -> Unit,
     onOpenEditor: (PlayerEditor) -> Unit,
@@ -1461,13 +1522,18 @@ private fun PlayerSettingsPanel(
     })
     val options = when (panel) {
         PlayerPanel.AUDIO -> snapshot.tracks.options(C.TRACK_TYPE_AUDIO)
-        PlayerPanel.SUBTITLES -> snapshot.tracks.options(C.TRACK_TYPE_TEXT)
+        PlayerPanel.SUBTITLES -> snapshot.tracks.options(C.TRACK_TYPE_TEXT, addonSubtitles)
         else -> emptyList()
     }
-    val audioUsesAutoSelection = player?.hasOverride(C.TRACK_TYPE_AUDIO) == false
-    LaunchedEffect(panel) { if (isTelevision) firstFocus.requestFocus() }
+    val audioUsesAutoSelection = audioAutomatic
+    LaunchedEffect(panel) { if (isTelevision) runCatching { firstFocus.requestFocus() } }
     PlayerOverlayLayout(
-        title,
+        // "Subtitles · 14": how many tracks this source offers, at a glance.
+        if ((panel == PlayerPanel.SUBTITLES || panel == PlayerPanel.AUDIO) && options.isNotEmpty()) {
+            "$title · ${options.size}"
+        } else {
+            title
+        },
         isTelevision,
         onClose,
         tvWidth = if (panel == PlayerPanel.SUBTITLES) 844.dp else 724.dp,
@@ -1478,13 +1544,13 @@ private fun PlayerSettingsPanel(
                 if (isTelevision) {
                     Row(Modifier.fillMaxWidth().heightIn(max = 360.dp),
                         horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                        PlayerTrackList(options, C.TRACK_TYPE_AUDIO, player, true,
+                        PlayerTrackList(options, C.TRACK_TYPE_AUDIO, trackActions, true,
                             audioUsesAutoSelection, firstFocus, modifier = Modifier.weight(1f))
                         PlayerAudioTimingControls(audioDelayMillis, onAudioDelay,
                             Modifier.width(268.dp).verticalScroll(rememberScrollState()))
                     }
                 } else {
-                    PlayerTrackList(options, C.TRACK_TYPE_AUDIO, player, true,
+                    PlayerTrackList(options, C.TRACK_TYPE_AUDIO, trackActions, true,
                         audioUsesAutoSelection, firstFocus, compactRows = true,
                         modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                         footer = { PlayerAudioTimingControls(audioDelayMillis, onAudioDelay) })
@@ -1494,7 +1560,7 @@ private fun PlayerSettingsPanel(
                 if (isTelevision) {
                     TvSubtitleRailPanel(
                         options = options,
-                        player = player,
+                        actions = trackActions,
                         firstFocus = firstFocus,
                         subtitleStyle = subtitleStyle,
                         subtitleDelayMillis = subtitleDelayMillis,
@@ -1503,8 +1569,9 @@ private fun PlayerSettingsPanel(
                         modifier = Modifier.fillMaxWidth().weight(1f),
                     )
                 } else {
-                    PlayerTrackList(options, C.TRACK_TYPE_TEXT, player, false, false, firstFocus,
-                        compactRows = true, modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                    PlayerTrackList(options, C.TRACK_TYPE_TEXT, trackActions, false, false, firstFocus,
+                        compactRows = true, showOriginFilters = true,
+                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                         footer = {
                             MobileSubtitleToolbar(subtitleStyle, subtitleDelayMillis,
                                 { onOpenEditor(PlayerEditor.TIMING) }, { onOpenEditor(PlayerEditor.STYLE) })
@@ -1593,7 +1660,7 @@ private fun MobileSubtitleToolbar(
 @Composable
 private fun TvSubtitleRailPanel(
     options: List<TrackOption>,
-    player: Player?,
+    actions: PlayerTrackActions,
     firstFocus: FocusRequester,
     subtitleStyle: SubtitleStyle,
     subtitleDelayMillis: Long,
@@ -1607,6 +1674,16 @@ private fun TvSubtitleRailPanel(
     val activeLanguageKey = options.firstOrNull(TrackOption::selected)?.languageKey
         ?: SUBTITLE_LANGUAGE_OFF
     val groupedOptions = options.groupBy(TrackOption::languageKey)
+    // The order is fixed while the panel is open: choosing a track only moves
+    // the check mark, so the row the viewer pressed stays where it was, in
+    // view and focused (TV-FOC-01). It is decided again only when the source
+    // reports a different set of tracks.
+    val languageOrder = remember(groupedOptions.keys) {
+        groupedOptions.keys.sortedWith(
+            compareBy<String> { it != activeLanguageKey }
+                .thenBy { subtitleLanguageDisplayName(it, displayLocale, unknownLabel).lowercase(displayLocale) },
+        )
+    }
     val languageItems = buildList {
         add(
             SubtitleLanguageRailItem(
@@ -1615,19 +1692,17 @@ private fun TvSubtitleRailPanel(
                 trackCount = 0,
             ),
         )
-        groupedOptions.entries
-            .map { (languageKey, tracks) ->
-                SubtitleLanguageRailItem(
-                    key = languageKey,
-                    label = subtitleLanguageDisplayName(languageKey, displayLocale, unknownLabel),
-                    trackCount = tracks.size,
+        languageOrder.forEach { languageKey ->
+            groupedOptions[languageKey]?.let { tracks ->
+                add(
+                    SubtitleLanguageRailItem(
+                        key = languageKey,
+                        label = subtitleLanguageDisplayName(languageKey, displayLocale, unknownLabel),
+                        trackCount = tracks.size,
+                    ),
                 )
             }
-            .sortedWith(
-                compareBy<SubtitleLanguageRailItem> { it.key != activeLanguageKey }
-                    .thenBy { it.label.lowercase(displayLocale) },
-            )
-            .forEach(::add)
+        }
     }
     var browsedLanguageKey by remember { mutableStateOf(activeLanguageKey) }
     LaunchedEffect(activeLanguageKey, languageItems.map(SubtitleLanguageRailItem::key)) {
@@ -1635,9 +1710,12 @@ private fun TvSubtitleRailPanel(
             browsedLanguageKey = activeLanguageKey
         }
     }
-    val visibleOptions = groupedOptions[browsedLanguageKey].orEmpty()
-        .sortedByDescending(TrackOption::selected)
+    val browsedOptions = rememberStableTrackOrder(groupedOptions[browsedLanguageKey].orEmpty())
+    var originFilter by remember(browsedLanguageKey) { mutableStateOf<String?>(null) }
+    val origins = browsedOptions.originCounts()
+    val visibleOptions = browsedOptions.filter { originFilter == null || it.origin.key == originFilter }
     val activeLanguageIndex = languageItems.indexOfFirst { it.key == activeLanguageKey }.coerceAtLeast(0)
+    val initialLanguageIndex = remember { activeLanguageIndex }
 
     Row(
         modifier = modifier.fillMaxHeight(),
@@ -1649,7 +1727,7 @@ private fun TvSubtitleRailPanel(
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                state = rememberLazyListState(activeLanguageIndex),
+                state = rememberLazyListState(initialLanguageIndex),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 itemsIndexed(languageItems, key = { _, item -> item.key }) { index, item ->
@@ -1670,10 +1748,10 @@ private fun TvSubtitleRailPanel(
                             )
                         },
                         selected = item.key == activeLanguageKey,
-                        modifier = if (index == activeLanguageIndex) Modifier.focusRequester(firstFocus) else Modifier,
+                        modifier = if (index == initialLanguageIndex) Modifier.focusRequester(firstFocus) else Modifier,
                     ) {
                         browsedLanguageKey = item.key
-                        if (isOff) player?.clearTrackOverride(C.TRACK_TYPE_TEXT, disabled = true)
+                        if (isOff) actions.turnOff(C.TRACK_TYPE_TEXT)
                     }
                 }
             }
@@ -1688,23 +1766,54 @@ private fun TvSubtitleRailPanel(
                     title = stringResource(R.string.player_subtitle_off),
                     body = stringResource(R.string.player_subtitle_off_description),
                 )
-                visibleOptions.isEmpty() -> PlayerRailEmptyState(
+                browsedOptions.isEmpty() -> PlayerRailEmptyState(
                     title = stringResource(R.string.player_subtitle_no_tracks_title),
                     body = stringResource(R.string.player_subtitle_no_tracks_body),
                 )
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    itemsIndexed(visibleOptions, key = { _, item -> item.id }) { _, option ->
-                        PlayerChoiceRow(
-                            title = option.title,
-                            supportingText = option.supportingText
-                                ?: stringResource(R.string.player_subtitle_embedded_track),
-                            selected = option.selected,
-                            enabled = option.supported,
-                        ) {
-                            player?.selectTrack(C.TRACK_TYPE_TEXT, option)
+                else -> {
+                    if (origins.size > 1) {
+                        // The details screen's chips, in its theme (TV-FOC-02).
+                        LamphausTvTheme {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                item("all") {
+                                    TvFilterChip(
+                                        label = stringResource(R.string.player_subtitle_origin_all),
+                                        count = browsedOptions.size,
+                                        selected = originFilter == null,
+                                        onClick = { originFilter = null },
+                                    )
+                                }
+                                items(origins, key = { it.first.key }) { (origin, count) ->
+                                    TvFilterChip(
+                                        label = trackOriginLabel(origin),
+                                        count = count,
+                                        selected = originFilter == origin.key,
+                                        onClick = { originFilter = origin.key },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    val selectedIndex = visibleOptions.indexOfFirst(TrackOption::selected).coerceAtLeast(0)
+                    val selectedFocus = remember { FocusRequester() }
+                    val trackListState = remember(browsedLanguageKey, originFilter) { LazyListState(selectedIndex) }
+                    LazyColumn(
+                        state = trackListState,
+                        // Entering the list lands on the chosen track, else where the viewer last was.
+                        modifier = Modifier.fillMaxWidth().weight(1f).focusRestorer(selectedFocus),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        itemsIndexed(visibleOptions, key = { _, item -> item.id }) { index, option ->
+                            PlayerChoiceRow(
+                                title = option.title,
+                                supportingText = null,
+                                badges = listOf(trackOriginLabel(option.origin)) + option.badges,
+                                selected = option.selected,
+                                enabled = option.supported,
+                                modifier = if (index == selectedIndex) Modifier.focusRequester(selectedFocus) else Modifier,
+                            ) {
+                                actions.choose(C.TRACK_TYPE_TEXT, option)
+                            }
                         }
                     }
                 }
@@ -1726,11 +1835,58 @@ private fun TvSubtitleRailPanel(
     }
 }
 
+/**
+ * Keeps [options] in the order they had when this list first saw them, the
+ * selected track first. Choosing another track updates the rows in place
+ * instead of moving the chosen one out from under focus.
+ */
+@Composable
+private fun rememberStableTrackOrder(options: List<TrackOption>, selectedFirst: Boolean = true): List<TrackOption> {
+    val order = remember(options.map(TrackOption::id).toSet()) {
+        (if (selectedFirst) options.sortedByDescending(TrackOption::selected) else options).map(TrackOption::id)
+    }
+    val byId = options.associateBy(TrackOption::id)
+    return order.mapNotNull(byId::get)
+}
+
+/** Each source of subtitles in [this] list with its track count, built-in first. */
+private fun List<TrackOption>.originCounts(): List<Pair<TrackOrigin, Int>> =
+    groupBy(TrackOption::origin)
+        .map { (origin, tracks) -> origin to tracks.size }
+        .sortedBy { (origin, _) -> if (origin == TrackOrigin.BuiltIn) 0 else 1 }
+
+@Composable
+private fun trackOriginLabel(origin: TrackOrigin): String = when (origin) {
+    TrackOrigin.BuiltIn -> stringResource(R.string.player_subtitle_origin_built_in)
+    is TrackOrigin.Addon -> origin.name ?: stringResource(R.string.player_subtitle_origin_addon)
+}
+
+/** The panels' track actions: the player change, then the activity hears the viewer chose (plan §3). */
+private class PlayerTrackActions(
+    private val player: Player?,
+    private val onChosen: ((Int, androidx.media3.common.Format?) -> Unit)?,
+    private val onDefaults: ((Int) -> Unit)?,
+) {
+    fun choose(trackType: Int, option: TrackOption) {
+        onChosen?.invoke(trackType, option.format)
+        player?.selectTrack(trackType, option)
+    }
+
+    fun turnOff(trackType: Int) {
+        onChosen?.invoke(trackType, null)
+        player?.clearTrackOverride(trackType, disabled = true)
+    }
+
+    fun automatic(trackType: Int) {
+        if (onDefaults != null) onDefaults.invoke(trackType) else player?.clearTrackOverride(trackType, disabled = false)
+    }
+}
+
 @Composable
 private fun PlayerRailColumn(
     title: String,
     modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier = modifier,
@@ -1967,78 +2123,118 @@ private fun PlayerRailEmptyState(
 private fun PlayerTrackList(
     options: List<TrackOption>,
     trackType: Int,
-    player: Player?,
+    actions: PlayerTrackActions,
     includeAutomatic: Boolean,
     automaticSelected: Boolean,
     firstFocus: FocusRequester,
     modifier: Modifier = Modifier,
     compactRows: Boolean = false,
+    showOriginFilters: Boolean = false,
     footer: (@Composable () -> Unit)? = null,
 ) {
-    val initialIndex = remember(options.map(TrackOption::id)) {
-        if (automaticSelected) 0 else (options.indexOfFirst(TrackOption::selected) + 1).coerceAtLeast(0)
+    // Fixed order while open, so choosing a track never moves it out of view (TV-FOC-01, MOB-A11Y-05).
+    val ordered = rememberStableTrackOrder(options, selectedFirst = false)
+    var originFilter by remember { mutableStateOf<String?>(null) }
+    val origins = if (showOriginFilters) ordered.originCounts() else emptyList()
+    val visible = ordered.filter { originFilter == null || it.origin.key == originFilter }
+    val showOrigin = showOriginFilters && origins.size > 1
+    // The list opens on the chosen row; the first rows are Automatic or Off.
+    val initialIndex = remember {
+        if (includeAutomatic && automaticSelected) 0 else (visible.indexOfFirst(TrackOption::selected) + 1).coerceAtLeast(0)
     }
-    LazyColumn(
-        modifier = modifier,
-        state = rememberLazyListState(initialIndex),
-        contentPadding = PaddingValues(vertical = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        if (includeAutomatic) {
-            item("automatic") {
-                PlayerChoiceRow(
-                    title = stringResource(R.string.player_automatic),
-                    supportingText = options.firstOrNull(TrackOption::selected)?.let { selected ->
-                        listOfNotNull(selected.title, selected.supportingText).joinToString(" · ")
-                    } ?: stringResource(R.string.player_best_track),
-                    selected = automaticSelected,
-                    compact = compactRows,
-                    modifier = if (initialIndex == 0) Modifier.focusRequester(firstFocus) else Modifier,
-                ) {
-                    player?.clearTrackOverride(trackType, disabled = false)
+    val listState = remember(originFilter) { LazyListState(if (originFilter == null) initialIndex else 0) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (showOrigin) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item("all") {
+                    FilterChip(
+                        selected = originFilter == null,
+                        onClick = { originFilter = null },
+                        label = { Text("${stringResource(R.string.player_subtitle_origin_all)}  ${ordered.size}") },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
                 }
-            }
-        } else {
-            item("off") {
-                PlayerChoiceRow(
-                    title = stringResource(R.string.player_subtitle_off),
-                    supportingText = stringResource(R.string.player_subtitle_no_captions),
-                    selected = options.none(TrackOption::selected),
-                    compact = compactRows,
-                    modifier = if (initialIndex == 0) Modifier.focusRequester(firstFocus) else Modifier,
-                ) {
-                    player?.clearTrackOverride(trackType, disabled = true)
+                items(origins, key = { it.first.key }) { (origin, count) ->
+                    FilterChip(
+                        selected = originFilter == origin.key,
+                        onClick = { originFilter = origin.key },
+                        label = { Text("${trackOriginLabel(origin)}  $count") },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
                 }
             }
         }
-        if (options.isEmpty()) {
-            item("empty") {
-                Text(
-                    text = if (trackType == C.TRACK_TYPE_AUDIO) {
-                        stringResource(R.string.player_no_audio)
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            state = listState,
+            contentPadding = PaddingValues(vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (includeAutomatic) {
+                item("automatic") {
+                    PlayerChoiceRow(
+                        title = stringResource(R.string.player_automatic),
+                        supportingText = options.firstOrNull(TrackOption::selected)?.let { selected ->
+                            listOfNotNull(selected.title, selected.supportingText).joinToString(" · ")
+                        } ?: stringResource(R.string.player_best_track),
+                        selected = automaticSelected,
+                        compact = compactRows,
+                        modifier = if (initialIndex == 0) Modifier.focusRequester(firstFocus) else Modifier,
+                    ) {
+                        actions.automatic(trackType)
+                    }
+                }
+            } else {
+                item("off") {
+                    PlayerChoiceRow(
+                        title = stringResource(R.string.player_subtitle_off),
+                        supportingText = stringResource(R.string.player_subtitle_no_captions),
+                        selected = options.none(TrackOption::selected),
+                        compact = compactRows,
+                        modifier = if (initialIndex == 0) Modifier.focusRequester(firstFocus) else Modifier,
+                    ) {
+                        actions.turnOff(trackType)
+                    }
+                }
+            }
+            if (options.isEmpty()) {
+                item("empty") {
+                    Text(
+                        text = if (trackType == C.TRACK_TYPE_AUDIO) {
+                            stringResource(R.string.player_no_audio)
+                        } else {
+                            stringResource(R.string.player_no_subtitles)
+                        },
+                        color = PlayerOnSurfaceMuted,
+                        fontFamily = PlayerFont,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                    )
+                }
+            }
+            itemsIndexed(visible, key = { _, item -> item.id }) { index, option ->
+                PlayerChoiceRow(
+                    title = option.title,
+                    supportingText = null,
+                    badges = if (trackType == C.TRACK_TYPE_TEXT) {
+                        listOf(trackOriginLabel(option.origin)) + option.badges
                     } else {
-                        stringResource(R.string.player_no_subtitles)
+                        option.badges
                     },
-                    color = PlayerOnSurfaceMuted,
-                    fontFamily = PlayerFont,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
-                )
+                    selected = option.selected && (!includeAutomatic || !automaticSelected),
+                    enabled = option.supported,
+                    compact = compactRows,
+                    modifier = if (originFilter == null && index + 1 == initialIndex) {
+                        Modifier.focusRequester(firstFocus)
+                    } else {
+                        Modifier
+                    },
+                ) {
+                    actions.choose(trackType, option)
+                }
             }
+            if (footer != null) item("tools") { footer() }
         }
-        itemsIndexed(options, key = { _, item -> item.id }) { index, option ->
-            PlayerChoiceRow(
-                title = option.title,
-                supportingText = option.supportingText,
-                selected = option.selected && (!includeAutomatic || !automaticSelected),
-                enabled = option.supported,
-                compact = compactRows,
-                modifier = if (index + 1 == initialIndex) Modifier.focusRequester(firstFocus) else Modifier,
-            ) {
-                player?.selectTrack(trackType, option)
-            }
-        }
-        if (footer != null) item("tools") { footer() }
     }
 }
 
@@ -2094,6 +2290,8 @@ internal fun PlayerChoiceRow(
     enabled: Boolean = true,
     compact: Boolean = false,
     actionRole: Role = Role.RadioButton,
+    /** Short facts under the title as chips (Built-in, SRT, Forced); read as part of the row. */
+    badges: List<String> = emptyList(),
     onClick: () -> Unit,
 ) {
     val interactionModifier = when (actionRole) {
@@ -2104,7 +2302,22 @@ internal fun PlayerChoiceRow(
     if (!LocalPlayerTelevision.current) {
         ListItem(
             headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
-            supportingContent = supportingText?.let { { Text(it, style = MaterialTheme.typography.bodyMedium) } },
+            supportingContent = if (supportingText == null && badges.isEmpty()) {
+                null
+            } else {
+                {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        supportingText?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                        if (badges.isNotEmpty()) {
+                            PlayerBadgeRow(
+                                badges,
+                                content = MaterialTheme.colorScheme.onSurfaceVariant,
+                                outline = MaterialTheme.colorScheme.outlineVariant,
+                            )
+                        }
+                    }
+                }
+            },
             trailingContent = {
                 when (actionRole) {
                     Role.Button -> Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null)
@@ -2169,12 +2382,50 @@ internal fun PlayerChoiceRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (badges.isNotEmpty()) {
+                PlayerBadgeRow(
+                    badges,
+                    content = if (focused) PlayerFocusedContent else PlayerOnSurfaceMuted,
+                    outline = if (focused) PlayerFocusedContent.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.22f),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
         if (selected) {
             Icon(
                 imageVector = Icons.Rounded.Check,
                 contentDescription = null,
                 tint = if (focused) PlayerFocusedContent else PlayerPrimary,
+            )
+        }
+    }
+}
+
+/** Outlined chips for a track's facts; they wrap rather than clip at large font scales (MOB-TYP-03). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PlayerBadgeRow(
+    badges: List<String>,
+    content: Color,
+    outline: Color,
+    modifier: Modifier = Modifier,
+) {
+    FlowRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        badges.forEach { badge ->
+            Text(
+                text = badge,
+                color = content,
+                fontFamily = PlayerFont,
+                fontWeight = FontWeight.Medium,
+                fontSize = 12.sp,
+                maxLines = 1,
+                modifier = Modifier
+                    .border(1.dp, outline, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
     }
@@ -2799,20 +3050,34 @@ private fun PlaybackException.safeMessage(): String = when (errorCode) {
     else -> "Playback stopped unexpectedly. Try again or choose another source."
 }
 
-private fun Tracks.options(trackType: Int): List<TrackOption> = groups
+/**
+ * The panel rows for [trackType]. [addonSubtitles] maps add-on subtitle ids
+ * (carried as the track's format id) to their add-on's name, which marks the
+ * track's origin and is dropped from its title since the chip shows it.
+ */
+private fun Tracks.options(
+    trackType: Int,
+    addonSubtitles: Map<String, String?> = emptyMap(),
+): List<TrackOption> = groups
     .filter { it.type == trackType }
     .flatMapIndexed { groupIndex, group ->
         (0 until group.length).map { trackIndex ->
             val format = group.getTrackFormat(trackIndex)
+            val addon = com.lamphaus.core.model.sourceTrackId(format.id)?.takeIf(addonSubtitles::containsKey)
+            val addonName = addon?.let(addonSubtitles::get)?.takeIf(String::isNotBlank)
+            val label = addonName?.let { name -> format.label?.removePrefix(name)?.removePrefix(" · ") } ?: format.label
             TrackOption(
                 id = "$trackType:$groupIndex:$trackIndex:${format.id.orEmpty()}",
-                title = format.trackTitle(trackIndex),
+                title = trackTitle(format.language, label, trackIndex),
                 supportingText = format.trackDetails(trackType),
                 selected = group.isTrackSelected(trackIndex),
                 supported = group.isTrackSupported(trackIndex, true),
                 languageKey = normalizedSubtitleLanguageKey(format.language),
                 group = group.mediaTrackGroup,
                 trackIndex = trackIndex,
+                badges = format.trackBadges(trackType),
+                origin = if (addon != null) TrackOrigin.Addon(addonName) else TrackOrigin.BuiltIn,
+                format = format,
             )
         }
     }

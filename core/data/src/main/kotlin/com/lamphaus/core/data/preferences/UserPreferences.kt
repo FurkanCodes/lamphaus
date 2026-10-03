@@ -131,6 +131,7 @@ class UserPreferences(private val context: Context) {
                 thresholdMinutes = values[PLAYBACK_NEXT_EPISODE_MINUTES],
                 autoPlayNext = values[PLAYBACK_AUTO_PLAY_NEXT],
                 askBeforeNext = values[PLAYBACK_ASK_BEFORE_NEXT],
+                endPromptAutoClose = values[PLAYBACK_END_PROMPT_AUTO_CLOSE],
             ),
             devicePlayback = devicePlaybackConfigFromKeys(
                 engine = values[PLAYBACK_ENGINE],
@@ -303,6 +304,7 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_NEXT_EPISODE_MINUTES] = settings.nextEpisodeThresholdMinutesBeforeEnd
             it[PLAYBACK_AUTO_PLAY_NEXT] = settings.autoPlayNextEpisode
             it[PLAYBACK_ASK_BEFORE_NEXT] = settings.askBeforeNextEpisode
+            it[PLAYBACK_END_PROMPT_AUTO_CLOSE] = settings.endPromptAutoClose
         }
     }
 
@@ -389,6 +391,7 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_NEXT_EPISODE_MINUTES = floatPreferencesKey("playback_next_episode_minutes")
         val PLAYBACK_AUTO_PLAY_NEXT = booleanPreferencesKey("playback_auto_play_next")
         val PLAYBACK_ASK_BEFORE_NEXT = booleanPreferencesKey("playback_ask_before_next")
+        val PLAYBACK_END_PROMPT_AUTO_CLOSE = booleanPreferencesKey("playback_end_prompt_auto_close")
         val PLAYBACK_ENGINE = stringPreferencesKey("playback_engine")
         val PLAYBACK_DOLBY_VISION = stringPreferencesKey("playback_dolby_vision")
         val PLAYBACK_FRAME_RATE_MATCHING = stringPreferencesKey("playback_frame_rate_matching")
@@ -416,6 +419,7 @@ internal fun playbackSettingsFromKeys(
     thresholdMinutes: Float?,
     autoPlayNext: Boolean? = null,
     askBeforeNext: Boolean? = null,
+    endPromptAutoClose: Boolean? = null,
 ): PlaybackSettings = PlaybackSettings(
     skipIntroEnabled = skipIntro ?: true,
     skipEndingEnabled = skipEnding ?: true,
@@ -428,6 +432,7 @@ internal fun playbackSettingsFromKeys(
         NextEpisodePolicy.clampedMinutesBeforeEnd(thresholdMinutes ?: 2f),
     autoPlayNextEpisode = autoPlayNext ?: true,
     askBeforeNextEpisode = askBeforeNext ?: false,
+    endPromptAutoClose = endPromptAutoClose ?: false,
 )
 
 /**

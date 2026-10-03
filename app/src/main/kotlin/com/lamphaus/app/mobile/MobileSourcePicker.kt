@@ -58,6 +58,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +69,7 @@ import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.LocalStreamBadges
 import com.lamphaus.app.ui.LocalSourceFit
+import com.lamphaus.core.model.SourceFit
 import com.lamphaus.app.ui.sourceFitLabel
 import com.lamphaus.app.ui.MediaArtwork
 import com.lamphaus.app.ui.SourcePickerState
@@ -280,10 +283,17 @@ private fun ProviderFilters(picker: SourcePickerState, onProvider: (String?) -> 
 }
 
 @Composable
-private fun FilterPill(label: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+internal fun FilterPill(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Row(
-        Modifier
-            .heightIn(min = 40.dp)
+        modifier
+            .heightIn(min = 48.dp)
+            .semantics { this.selected = selected }
             .clip(RoundedCornerShape(20.dp))
             .background(if (selected) MobileTokens.textPrimary else MobileTokens.surfaceRaised)
             .clickable(role = Role.Tab, onClick = onClick)
@@ -313,25 +323,33 @@ private fun qualityColors(quality: String?): Pair<Color, Color> = when (quality)
 }
 
 @Composable
-private fun SourceCard(
+internal fun SourceCard(
     source: StreamCandidate,
     providerLabel: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** How it plays here; the player passes its own, the sources screen asks [LocalSourceFit]. */
+    fit: SourceFit? = LocalSourceFit.current.let { advisor -> remember(source, advisor) { advisor.fitFor(source) } },
+    showProvider: Boolean = true,
+    /** The source playing now, in the player's Sources panel: marked, and choosing it does nothing. */
+    playing: Boolean = false,
 ) {
     val presentation = remember(source, providerLabel) { source.sourcePresentation(providerLabel) }
     val badgeMatcher = LocalStreamBadges.current
     val importedBadges = remember(source, badgeMatcher) { badgeMatcher.badgesFor(source) }
-    val fitAdvisor = LocalSourceFit.current
-    val fit = remember(source, fitAdvisor) { fitAdvisor.fitFor(source) }
     val quality = remember(source) { sourceQuality(source) }
     val (tileColor, tileInk) = qualityColors(quality)
     Row(
         modifier
             .clip(RoundedCornerShape(16.dp))
             .background(MobileTokens.surfaceRaised)
-            .border(1.dp, MobileTokens.hairline, RoundedCornerShape(16.dp))
-            .clickable(role = Role.Button, onClick = onClick)
+            .border(
+                width = if (playing) 2.dp else 1.dp,
+                color = if (playing) MobileTokens.accent else MobileTokens.hairline,
+                shape = RoundedCornerShape(16.dp),
+            )
+            .semantics { selected = playing }
+            .clickable(enabled = !playing, role = Role.Button, onClick = onClick)
             .padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -352,7 +370,15 @@ private fun SourceCard(
             )
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            providerLabel?.let {
+            if (playing) {
+                Text(
+                    stringResource(R.string.player_source_playing),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = MobileTokens.accent,
+                    maxLines = 1,
+                )
+            }
+            providerLabel?.takeIf { showProvider }?.let {
                 Text(
                     it.uppercase(),
                     style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold),
@@ -403,19 +429,21 @@ private fun SourceCard(
                 )
             }
         }
-        Box(
-            Modifier
-                .size(40.dp)
-                .background(MobileTokens.textPrimary, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Rounded.PlayArrow, stringResource(R.string.play), tint = Color.Black, modifier = Modifier.size(24.dp))
+        if (!playing) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .background(MobileTokens.textPrimary, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.PlayArrow, stringResource(R.string.play), tint = Color.Black, modifier = Modifier.size(24.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun SourceSkeleton(modifier: Modifier = Modifier) {
+internal fun SourceSkeleton(modifier: Modifier = Modifier) {
     val pulse by rememberInfiniteTransition(label = "source skeleton").animateFloat(
         initialValue = 0.45f,
         targetValue = 0.85f,

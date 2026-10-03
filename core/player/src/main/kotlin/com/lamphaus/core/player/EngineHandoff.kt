@@ -1,6 +1,7 @@
 package com.lamphaus.core.player
 
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -49,25 +50,35 @@ object EngineHandoff {
     }
 
     /**
-     * Captures everything the replacement engine must restore. Track ids are
-     * the Media3-selected track group ids of the currently selected audio and
-     * subtitle tracks; the MPV engine resolves them against its track list.
+     * Captures everything the replacement engine must restore. Track formats
+     * carry the selected tracks' ids (kept by add-on subtitles on both
+     * engines) and languages; the MPV engine numbers container tracks its own
+     * way, so it matches those by language.
      */
-    fun snapshot(player: Player): EngineHandoffState = EngineHandoffState(
-        positionMillis = player.currentPosition.coerceAtLeast(0),
-        playWhenReady = player.playWhenReady,
-        speed = player.playbackParameters.speed,
-        audioTrackId = selectedTrackId(player, C.TRACK_TYPE_AUDIO),
-        subtitleTrackId = selectedTrackId(player, C.TRACK_TYPE_TEXT),
-    )
+    fun snapshot(player: Player): EngineHandoffState {
+        val audio = selectedFormat(player, C.TRACK_TYPE_AUDIO)
+        val subtitle = selectedFormat(player, C.TRACK_TYPE_TEXT)
+        return EngineHandoffState(
+            positionMillis = player.currentPosition.coerceAtLeast(0),
+            playWhenReady = player.playWhenReady,
+            speed = player.playbackParameters.speed,
+            audioTrackId = audio?.id,
+            subtitleTrackId = subtitle?.id,
+            audioLanguage = audio?.language,
+            subtitleLanguage = subtitle?.language,
+            subtitleForced = subtitle != null && subtitle.selectionFlags and C.SELECTION_FLAG_FORCED != 0,
+            subtitlesOff = subtitle == null &&
+                C.TRACK_TYPE_TEXT in player.trackSelectionParameters.disabledTrackTypes,
+        )
+    }
 
-    private fun selectedTrackId(player: Player, trackType: Int): String? {
+    private fun selectedFormat(player: Player, trackType: Int): Format? {
         val tracks: Tracks = player.currentTracks
         tracks.groups.forEach { group ->
             if (group.type != trackType) return@forEach
             for (index in 0 until group.length) {
                 if (group.isTrackSelected(index)) {
-                    return group.getTrackFormat(index).id
+                    return group.getTrackFormat(index)
                 }
             }
         }

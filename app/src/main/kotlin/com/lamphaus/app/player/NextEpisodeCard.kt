@@ -177,116 +177,6 @@ internal fun NextEpisodeCard(
     }
 }
 
-/**
- * Nuvio's "Up next" at an episode's end when Ask before next episode is on
- * (PLY-AUTO-01): the next episode's still, code, title, and synopsis over a
- * Yes/No question. Yes starts it; No, Back, or no answer before the
- * countdown ends closes the player. Spoiler protection veils the still and
- * leaves the synopsis out. Side by side when there is room, stacked on a
- * narrow window; the panel scrolls rather than clips at large font scales.
- */
-@Composable
-internal fun UpNextPrompt(
-    episode: Episode,
-    secondsLeft: Int,
-    blurArtwork: Boolean,
-    hideSynopsis: Boolean,
-    isTelevision: Boolean,
-    onYes: () -> Unit,
-    onNo: () -> Unit,
-) {
-    val yesFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { yesFocus.requestFocus() } }
-    BackHandler(onBack = onNo)
-    val title = stringResource(R.string.up_next_title)
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.72f))
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .semantics { paneTitle = title },
-        contentAlignment = Alignment.Center,
-    ) {
-        BoxWithConstraints(Modifier.widthIn(max = 640.dp).padding(24.dp)) {
-            val sideBySide = maxWidth >= 520.dp
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(PlayerSurface, RoundedCornerShape(if (isTelevision) 4.dp else 16.dp))
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                if (sideBySide) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        NextEpisodeThumbnail(
-                            episode,
-                            blurArtwork,
-                            Modifier.width(if (isTelevision) 240.dp else 208.dp).aspectRatio(16f / 9f),
-                        )
-                        UpNextDetails(episode, title, hideSynopsis, Modifier.weight(1f))
-                    }
-                } else {
-                    NextEpisodeThumbnail(episode, blurArtwork, Modifier.fillMaxWidth().aspectRatio(16f / 9f))
-                    UpNextDetails(episode, title, hideSynopsis)
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = stringResource(R.string.up_next_question),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = PlayerOnSurface,
-                    )
-                    Text(
-                        text = pluralStringResource(R.plurals.up_next_closes_in, secondsLeft, secondsLeft),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PlayerOnSurfaceMuted,
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-                ) {
-                    PlayerTextButton(stringResource(R.string.up_next_no), onClick = onNo)
-                    PlayerTextButton(
-                        stringResource(R.string.up_next_yes),
-                        onClick = onYes,
-                        modifier = Modifier.focusRequester(yesFocus),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun UpNextDetails(episode: Episode, title: String, hideSynopsis: Boolean, modifier: Modifier = Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = PlayerOnSurfaceMuted,
-            modifier = Modifier.semantics { heading() },
-        )
-        Text(
-            text = episodeDisplayLabel(episode),
-            style = MaterialTheme.typography.titleLarge,
-            color = PlayerOnSurface,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        episode.overview?.takeUnless { hideSynopsis || it.isBlank() }?.let { overview ->
-            Text(
-                text = overview,
-                style = MaterialTheme.typography.bodyMedium,
-                color = PlayerOnSurfaceMuted,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
 @Composable
 private fun PlayPill(aired: Boolean, modifier: Modifier = Modifier) {
     val tint = if (aired) PlayerOnSurface else PlayerOnSurface.copy(alpha = 0.7f)
@@ -325,7 +215,7 @@ private fun statusText(
 
 /** "S1 · E2 • Title", or the bare title when the episode carries no numbering. */
 @Composable
-private fun episodeDisplayLabel(episode: Episode): String {
+internal fun episodeDisplayLabel(episode: Episode): String {
     val season = episode.season
     val number = episode.episode
     val code = when {
@@ -338,7 +228,7 @@ private fun episodeDisplayLabel(episode: Episode): String {
 
 /** 16:9-ish thumbnail with Nuvio's bottom shade and the shared spoiler veil. */
 @Composable
-private fun NextEpisodeThumbnail(episode: Episode, blurArtwork: Boolean, modifier: Modifier = Modifier) {
+internal fun NextEpisodeThumbnail(episode: Episode, blurArtwork: Boolean, modifier: Modifier = Modifier) {
     SpoilerBlurLayer(
         hidden = blurArtwork,
         veilColor = PlayerSurface,

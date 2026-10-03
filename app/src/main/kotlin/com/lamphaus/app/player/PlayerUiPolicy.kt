@@ -34,13 +34,9 @@ internal fun formatSignedDelay(millis: Long): String = when {
  * en-GB both live under English) while keeping malformed tags reachable.
  */
 internal fun normalizedSubtitleLanguageKey(languageTag: String?): String {
-    val normalized = languageTag
-        ?.trim()
-        ?.takeIf(String::isNotEmpty)
-        ?.let(Locale::forLanguageTag)
-        ?.language
-        ?.lowercase(Locale.ROOT)
-        .orEmpty()
+    // Add-ons report ISO 639-2 codes ("eng", "pob") beside the containers'
+    // two-letter ones; both land under the same language.
+    val normalized = com.lamphaus.core.model.baseLanguage(com.lamphaus.core.model.normalizeBcp47Tag(languageTag))
     return normalized.takeIf { it.isNotEmpty() && it != SUBTITLE_LANGUAGE_UNKNOWN }
         ?: SUBTITLE_LANGUAGE_UNKNOWN
 }
@@ -92,17 +88,3 @@ internal val CUE_KEYS = setOf(
     androidx.compose.ui.input.key.Key.DirectionLeft,
     androidx.compose.ui.input.key.Key.DirectionRight,
 )
-
-/**
- * Subtitle languages in fallback order: preferred, then secondary, then the
- * device language — an empty preference means the device language
- * ([com.lamphaus.core.model.ProfilePlaybackPreferences]).
- */
-internal fun preferredSubtitleLanguages(
-    preferences: com.lamphaus.core.model.ProfilePlaybackPreferences,
-    deviceLanguageTag: String,
-): List<String> = listOf(
-    preferences.preferredSubtitleLanguageTag,
-    preferences.secondarySubtitleLanguageTag,
-    deviceLanguageTag,
-).filter(String::isNotBlank).distinctBy { Locale.forLanguageTag(it).language }
