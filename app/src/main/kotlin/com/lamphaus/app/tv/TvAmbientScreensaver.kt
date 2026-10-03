@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +47,7 @@ import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.WatchProgress
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import java.util.Date
 
 /** One screensaver frame: a title's backdrop with its logo or name. */
@@ -222,14 +224,22 @@ internal fun TvIdleAmbient(
     val resumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val enabled = state.engagement.tvIdleAmbient
     LaunchedEffect(resumed) { if (resumed) host.markActive() }
-    LaunchedEffect(enabled, host.eligible, host.lastInputAtMillis, resumed) {
-        if (!enabled || !host.eligible || !resumed) {
+    // Keys are read in a snapshot flow, not in composition, so D-pad presses
+    // never recompose anything here (QA-08); off by default, it costs nothing.
+    LaunchedEffect(enabled, resumed) {
+        if (!enabled || !resumed) {
             host.showing = false
             return@LaunchedEffect
         }
-        val idleFor = android.os.SystemClock.elapsedRealtime() - host.lastInputAtMillis
-        delay((IDLE_AMBIENT_MILLIS - idleFor).coerceAtLeast(0))
-        host.showing = true
+        snapshotFlow { host.eligible to host.lastInputAtMillis }.collectLatest { (eligible, lastInput) ->
+            if (!eligible) {
+                host.showing = false
+                return@collectLatest
+            }
+            val idleFor = android.os.SystemClock.elapsedRealtime() - lastInput
+            delay((IDLE_AMBIENT_MILLIS - idleFor).coerceAtLeast(0))
+            host.showing = true
+        }
     }
     if (host.showing) {
         val slides = remember(state.progress, state.library, state.sections) {
