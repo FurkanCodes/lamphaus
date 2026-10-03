@@ -206,6 +206,7 @@ import com.lamphaus.app.ui.RatingBadge
 import com.lamphaus.app.ui.RatingBadgeChip
 import com.lamphaus.app.ui.metadataImdbScore
 import com.lamphaus.app.ui.orderedRatingScores
+import com.lamphaus.app.ui.ratingDetailsUrl
 import com.lamphaus.app.ui.ratingValueText
 
 import com.lamphaus.core.data.cloud.AccountState
@@ -2927,6 +2928,7 @@ private fun TvDetailScreen(
     selectedRating?.let { rating ->
         TvRatingDetailsDialog(
             rating = rating,
+            detailsUrl = ratingDetailsUrl(rating, detail.preview),
             fetchedAtEpochMillis = enrichment?.fetchedAtEpochMillis,
             onDismiss = { selectedRating = null },
         )
