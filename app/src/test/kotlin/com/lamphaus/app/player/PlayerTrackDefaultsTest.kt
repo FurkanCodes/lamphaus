@@ -1,7 +1,6 @@
 package com.lamphaus.app.player
 
 import androidx.media3.common.C
-import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import com.lamphaus.core.model.MediaPlaybackSelection
 import com.lamphaus.core.model.ProfilePlaybackPreferences
@@ -18,30 +17,39 @@ import org.junit.Test
  * that stays off without a forced track.
  */
 class PlayerTrackDefaultsTest {
-    private fun audio(id: String, language: String, default: Boolean = false) = Format.Builder()
-        .setId(id)
-        .setLanguage(language)
-        .setSampleMimeType(MimeTypes.AUDIO_AC3)
-        .setChannelCount(6)
-        .setSelectionFlags(if (default) C.SELECTION_FLAG_DEFAULT else 0)
-        .build()
+    // A Media3 Format with a language needs the Android framework; the policy reads plain facts.
+    private fun audio(id: String, language: String, default: Boolean = false) = Track(
+        id,
+        TrackFacts(
+            language = language,
+            mimeType = MimeTypes.AUDIO_AC3,
+            channelCount = 6,
+            selectionFlags = if (default) C.SELECTION_FLAG_DEFAULT else 0,
+        ),
+        audio = true,
+    )
 
-    private fun subtitle(id: String, language: String, forced: Boolean = false, label: String? = null) = Format.Builder()
-        .setId(id)
-        .setLanguage(language)
-        .setLabel(label)
-        .setSampleMimeType(MimeTypes.APPLICATION_SUBRIP)
-        .setSelectionFlags(if (forced) C.SELECTION_FLAG_FORCED else 0)
-        .build()
+    private fun subtitle(id: String, language: String, forced: Boolean = false, label: String? = null) = Track(
+        id,
+        TrackFacts(
+            language = language,
+            label = label,
+            mimeType = MimeTypes.APPLICATION_SUBRIP,
+            selectionFlags = if (forced) C.SELECTION_FLAG_FORCED else 0,
+        ),
+        audio = false,
+    )
 
-    /** Candidates by type, as the engine lists them; each handle is the format's id. */
+    private class Track(val id: String, val facts: TrackFacts, val audio: Boolean)
+
+    /** Candidates by type, as the engine lists them; each handle is the track's id. */
     private class Tracks(val audio: List<TrackCandidate<String>>, val subtitles: List<TrackCandidate<String>>)
 
-    private fun tracks(vararg formats: Pair<Format, Boolean>): Tracks {
-        val candidates = formats.map { (format, supported) -> TrackCandidate(format, supported, format.id.orEmpty()) }
+    private fun tracks(vararg tracks: Pair<Track, Boolean>): Tracks {
+        val candidates = tracks.map { (track, supported) -> track to TrackCandidate(track.facts, supported, track.id) }
         return Tracks(
-            audio = candidates.filter { it.format.sampleMimeType.orEmpty().startsWith("audio/") },
-            subtitles = candidates.filterNot { it.format.sampleMimeType.orEmpty().startsWith("audio/") },
+            audio = candidates.filter { it.first.audio }.map { it.second },
+            subtitles = candidates.filterNot { it.first.audio }.map { it.second },
         )
     }
 
@@ -130,11 +138,11 @@ class PlayerTrackDefaultsTest {
 
     @Test
     fun `a viewer's pick is remembered by language and kind`() {
-        val picked = subtitle("addon-en", "en", forced = true).rememberedSelection(C.TRACK_TYPE_TEXT, null, 10L)
+        val picked = subtitle("addon-en", "en", forced = true).facts.rememberedSelection(C.TRACK_TYPE_TEXT, null, 10L)
         assertEquals("en", picked.subtitleLanguageTag)
         assertTrue(picked.subtitlesForcedOnly == true)
 
-        val audio = audio("ja", "ja").rememberedSelection(C.TRACK_TYPE_AUDIO, picked, 20L)
+        val audio = audio("ja", "ja").facts.rememberedSelection(C.TRACK_TYPE_AUDIO, picked, 20L)
         assertEquals("ja", audio.audioLanguageTag)
         assertEquals("en", audio.subtitleLanguageTag)
 

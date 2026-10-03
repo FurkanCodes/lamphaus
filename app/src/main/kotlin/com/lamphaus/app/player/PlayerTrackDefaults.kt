@@ -20,11 +20,24 @@ import com.lamphaus.core.model.subtitleRoles
 internal data class TrackRef(val group: TrackGroup, val trackIndex: Int, val format: Format)
 
 /**
- * A track the policy may choose: its [format], whether the device can play
- * it, and the engine [handle] to select it with. The policy only reads
- * formats, so it is testable without an engine.
+ * What the policy reads from a track. Plain values rather than a Media3
+ * [Format], so the policy runs (and is tested) without the Android framework.
  */
-internal data class TrackCandidate<T>(val format: Format, val supported: Boolean, val handle: T)
+internal data class TrackFacts(
+    val language: String? = null,
+    val label: String? = null,
+    /** The original format's mime type (SRT, PGS, …), not Media3's parsed-cue type. */
+    val mimeType: String? = null,
+    val channelCount: Int = 0,
+    val selectionFlags: Int = 0,
+    val roleFlags: Int = 0,
+)
+
+internal fun Format.facts(): TrackFacts =
+    TrackFacts(language, label, sourceMimeType(), channelCount, selectionFlags, roleFlags)
+
+/** A track the policy may choose: its facts, whether the device can play it, and the engine [handle] to select it. */
+internal data class TrackCandidate<T>(val facts: TrackFacts, val supported: Boolean, val handle: T)
 
 /** What the defaults policy decided; a null subtitle means subtitles off. */
 internal data class TrackDefaultsDecision<T>(
@@ -38,7 +51,7 @@ internal fun Tracks.trackCandidates(trackType: Int): List<TrackCandidate<TrackRe
     .flatMap { group ->
         (0 until group.length).map { index ->
             val format = group.getTrackFormat(index)
-            TrackCandidate(format, group.isTrackSupported(index), TrackRef(group.mediaTrackGroup, index, format))
+            TrackCandidate(format.facts(), group.isTrackSupported(index), TrackRef(group.mediaTrackGroup, index, format))
         }
     }
 
@@ -49,7 +62,7 @@ internal fun Tracks.trackCandidates(trackType: Int): List<TrackCandidate<TrackRe
 private fun <T> List<TrackCandidate<T>>.playable(): List<TrackCandidate<T>> =
     filter { it.supported }.ifEmpty { this }
 
-private fun Format.roles(): Set<TrackRole> {
+private fun TrackFacts.roles(): Set<TrackRole> {
     val roles = subtitleRoles(label, isForcedFlag = selectionFlags and C.SELECTION_FLAG_FORCED != 0).toMutableSet()
     if (roleFlags and (C.ROLE_FLAG_CAPTION or C.ROLE_FLAG_DESCRIBES_MUSIC_AND_SOUND) != 0) roles += TrackRole.SDH
     if (roleFlags and C.ROLE_FLAG_COMMENTARY != 0) roles += TrackRole.COMMENTARY
@@ -57,7 +70,7 @@ private fun Format.roles(): Set<TrackRole> {
     return roles
 }
 
-private fun Format.audioInfo(id: String) = AudioTrackInfo(
+private fun TrackFacts.audioInfo(id: String) = AudioTrackInfo(
     id = id,
     languageTag = language,
     label = label,
@@ -66,12 +79,12 @@ private fun Format.audioInfo(id: String) = AudioTrackInfo(
     roles = roles(),
 )
 
-private fun Format.subtitleInfo(id: String) = SubtitleTrackInfo(
+private fun TrackFacts.subtitleInfo(id: String) = SubtitleTrackInfo(
     id = id,
     languageTag = language,
     label = label,
     isDefault = selectionFlags and C.SELECTION_FLAG_DEFAULT != 0,
-    isTextual = sourceMimeType() !in BITMAP_SUBTITLE_MIME_TYPES,
+    isTextual = mimeType !in BITMAP_SUBTITLE_MIME_TYPES,
     roles = roles(),
 )
 
@@ -92,7 +105,7 @@ internal fun <T> decideTrackDefaults(
     val audio = audioTracks.playable()
     val subtitles = subtitleTracks.playable()
     val audioPick = selectAudioTrack(
-        tracks = audio.mapIndexed { index, track -> track.format.audioInfo("a$index") },
+        tracks = audio.mapIndexed { index, track -> track.facts.audioInfo("a$index") },
         sessionSelectionTrackId = null,
         sourceSelectionTrackId = null,
         semantic = remembered,
@@ -100,7 +113,7 @@ internal fun <T> decideTrackDefaults(
         deviceLanguageTag = deviceLanguageTag,
     )
     val subtitlePick = selectSubtitleTrack(
-        tracks = subtitles.mapIndexed { index, track -> track.format.subtitleInfo("s$index") },
+        tracks = subtitles.mapIndexed { index, track -> track.facts.subtitleInfo("s$index") },
         sessionSelectionTrackId = null,
         sourceSelectionTrackId = null,
         semantic = remembered,
@@ -223,7 +236,7 @@ internal fun MediaPlaybackSelection?.withSubtitlesOff(nowMillis: Long): MediaPla
     )
 
 /** The language and kind of a track the viewer picked, remembered for the title (plan §3). */
-internal fun Format.rememberedSelection(
+internal fun TrackFacts.rememberedSelection(
     trackType: Int,
     current: MediaPlaybackSelection?,
     nowMillis: Long,

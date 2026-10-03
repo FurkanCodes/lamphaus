@@ -522,7 +522,7 @@ class PlayerActivity : ComponentActivity() {
         if (trackType == C.TRACK_TYPE_AUDIO) audioFollowsDefaultsState.value = false
         val playback = request ?: return
         val now = System.currentTimeMillis()
-        val selection = format?.rememberedSelection(trackType, rememberedSelection, now)
+        val selection = format?.facts()?.rememberedSelection(trackType, rememberedSelection, now)
             ?: rememberedSelection.withSubtitlesOff(now)
         rememberedSelection = selection
         container.applicationScope.launch {
