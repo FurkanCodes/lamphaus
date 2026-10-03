@@ -28,6 +28,10 @@ internal object PlayerChromeTokens {
     /** Sustained TV rebuffering during clean viewing yields to the artwork surface (TV-CNT-02). */
     const val RebufferSurfaceDelayMillis = 1_500L
 
+    /** Seek-preview frame width; the frame is 16:9 (PLY-SEEK-01). */
+    val SeekPreviewWidth = 160.dp
+    val TvSeekPreviewWidth = 240.dp
+
     /** Subtitles lift above the chrome by this fraction of the video frame (PLY-IMM-03). */
     const val SubtitleLiftFraction = 0.10f
 }

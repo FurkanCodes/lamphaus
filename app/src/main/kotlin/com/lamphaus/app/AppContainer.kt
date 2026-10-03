@@ -29,6 +29,8 @@ import io.github.jan.supabase.realtime.Realtime
 import com.lamphaus.core.data.local.LamphausDatabase
 import com.lamphaus.core.data.preferences.UserPreferences
 import com.lamphaus.core.data.playback.IntroDbSkipRepository
+import com.lamphaus.core.data.playback.SeekPreviewRepository
+import com.lamphaus.core.data.cloud.SupabaseSeekPreviewRemoteSource
 import com.lamphaus.core.data.repository.LibraryRepository
 import com.lamphaus.core.data.repository.RoomLibraryRepository
 import com.lamphaus.core.data.repository.DefaultDetailEnrichmentRepository
@@ -205,6 +207,13 @@ class AppContainer(context: Context) {
     }
     val playbackPreferencesRepository: PlaybackPreferencesRepository =
         DefaultPlaybackPreferencesRepository(database.dao())
+    /**
+     * Seek previews from the account's Seekr integration (PLY-SEEK-01). The key
+     * stays server-side; without a cloud there is never a lookup.
+     */
+    val seekPreviewRepository = SeekPreviewRepository(
+        remote = supabase?.let { SupabaseSeekPreviewRemoteSource(it) },
+    )
     val integrationsGateway: IntegrationsGateway = if (supabase != null) {
         SupabaseIntegrationsGateway(supabase, checkNotNull(sessionRecovery))
     } else {

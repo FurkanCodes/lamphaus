@@ -123,6 +123,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -1025,6 +1026,20 @@ internal fun PlaybackScreen(
         if (!loadingSurfaceVisible) hudText?.let { text ->
             PlayerHudBubble(hudIcon, text, Modifier.align(Alignment.Center))
         }
+        // Remote seeks (TV) and drag-to-scrub (mobile) gather into one target
+        // before committing: its frame shows above the bubble meanwhile
+        // (PLY-SEEK-01). Drawn only when a preview exists.
+        val bubbleSeekTarget = keySeekTarget ?: seekTarget
+        if (!loadingSurfaceVisible && bubbleSeekTarget != null) {
+            val previewWidth = if (isTelevision) PlayerChromeTokens.TvSeekPreviewWidth else PlayerChromeTokens.SeekPreviewWidth
+            SeekPreviewThumbnail(
+                positionMillis = bubbleSeekTarget,
+                durationMillis = snapshot.durationMillis,
+                width = previewWidth,
+                modifier = Modifier.align(Alignment.Center)
+                    .offset(y = -(previewWidth * 9f / 32f + 36.dp)),
+            )
+        }
 
         shownError?.takeUnless { inPictureInPicture }?.let { message ->
             PlayerErrorPanel(
@@ -1356,7 +1371,8 @@ internal fun PlayerProgress(
     val seekDescription = stringResource(R.string.player_seek)
     if (!LocalPlayerTelevision.current) {
         var scrubPosition by remember { mutableStateOf<Float?>(null) }
-        Box(modifier) {
+        BoxWithConstraints(modifier) {
+            val trackWidth = maxWidth
             Slider(
                 value = scrubPosition ?: positionMillis.toFloat().coerceIn(0f, durationMillis.coerceAtLeast(1L).toFloat()),
                 onValueChange = { scrubPosition = it; onInteraction() },
@@ -1376,21 +1392,47 @@ internal fun PlayerProgress(
                     }
                 },
             )
-            // Target time while scrubbing, so the thumb never needs to be guessed.
+            // Target time while scrubbing, so the thumb never needs to be guessed;
+            // with seek previews the frame there sits above it, following the
+            // thumb but never past the bar's ends (PLY-SEEK-01).
             scrubPosition?.let { target ->
-                Box(
-                    Modifier.align(Alignment.TopCenter).offset(y = (-20).dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(PlayerSurface.copy(alpha = 0.94f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                val previewWidth = PlayerChromeTokens.SeekPreviewWidth
+                val fraction = (target / durationMillis.coerceAtLeast(1L)).coerceIn(0f, 1f)
+                val centre = trackWidth * fraction
+                val start = (centre - previewWidth / 2).coerceIn(0.dp, (trackWidth - previewWidth).coerceAtLeast(0.dp))
+                Column(
+                    Modifier.align(Alignment.TopStart)
+                        .offset(x = start)
+                        .width(previewWidth)
+                        // Bottom edge sits just above the bar, whatever the preview's height.
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(
+                                constraints.copy(minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity),
+                            )
+                            layout(placeable.width, 0) { placeable.place(0, -placeable.height + 2.dp.roundToPx()) }
+                        },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text(
-                        text = target.toLong().asPlaybackTime(),
-                        color = PlayerOnSurface,
-                        fontFamily = PlayerFont,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 12.sp,
+                    SeekPreviewThumbnail(
+                        positionMillis = target.toLong(),
+                        durationMillis = durationMillis,
+                        width = previewWidth,
                     )
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(PlayerSurface.copy(alpha = 0.94f))
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = target.toLong().asPlaybackTime(),
+                            color = PlayerOnSurface,
+                            fontFamily = PlayerFont,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                        )
+                    }
                 }
             }
         }

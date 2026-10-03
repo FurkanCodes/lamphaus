@@ -1,5 +1,6 @@
 import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
 import { validateMdbListKey } from "../_shared/mdblist.ts";
+import { validateSeekrKey } from "../_shared/seekr.ts";
 
 // save-integration-credential — upserts one integration credential, encrypted.
 //
@@ -8,8 +9,8 @@ import { validateMdbListKey } from "../_shared/mdblist.ts";
 //
 // The shared codec writes AES-256-GCM blobs bound to
 // "<user_id>:integration.<integration>", reusing the provider_config keyring.
-// Validation runs BEFORE storage: an invalid MDBList key never lands in the
-// table (answer: 400 invalid_credential).
+// Validation runs BEFORE storage: an invalid MDBList or Seekr key never lands
+// in the table (answer: 400 invalid_credential; 502 when the check can't run).
 //
 // This function accepts two partial updates:
 //   { integration, credential }        → validate + store key
@@ -74,8 +75,12 @@ function validSources(value: unknown): string[] | null {
 }
 
 // ─────────────────────────────── handler ───────────────────────────────
-// Which integrations accept credentials today. Trakt joins in its own phase.
-const SUPPORTED_INTEGRATIONS: Record<string, true> = { mdblist: true };
+// Which integrations accept credentials today, each with its own key check
+// (null: the check could not run). Trakt joins in its own phase.
+const SUPPORTED_INTEGRATIONS: Record<string, (apiKey: string) => Promise<boolean | null>> = {
+  mdblist: validateMdbListKey,
+  seekr: validateSeekrKey,
+};
 
 
 Deno.serve(async (req) => {
@@ -93,7 +98,7 @@ Deno.serve(async (req) => {
   }
 
   const integration = typeof body.integration === "string" ? body.integration : "";
-  if (!INTEGRATION_PATTERN.test(integration) || !(integration in SUPPORTED_INTEGRATIONS)) {
+  if (!INTEGRATION_PATTERN.test(integration) || !Object.hasOwn(SUPPORTED_INTEGRATIONS, integration)) {
     return json({ error: "unsupported_integration" }, 400);
   }
 
@@ -109,7 +114,8 @@ Deno.serve(async (req) => {
 
   if (hasCredential) {
     const credential = (body.credential as string).trim();
-    const valid = await validateMdbListKey(credential);
+    const valid = await SUPPORTED_INTEGRATIONS[integration](credential);
+    if (valid === null) return json({ error: "validation_unavailable" }, 502);
     if (!valid) return json({ error: "invalid_credential" }, 400);
     const encrypted = await providerConfigCrypto.encrypt(
       user.id,
