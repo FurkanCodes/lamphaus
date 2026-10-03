@@ -137,7 +137,7 @@ android {
         lintConfig = file("lint.xml")
         // Print every finding, not only the first, so CI logs show the whole report.
         textReport = true
-        textOutput = file("stdout")
+        textOutput = File("stdout")
         disable += setOf("GradleDependency", "AndroidGradlePluginVersion", "OldTargetApi")
     }
 

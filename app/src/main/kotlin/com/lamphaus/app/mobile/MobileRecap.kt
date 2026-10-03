@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -41,12 +42,11 @@ import com.lamphaus.app.R
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MonthlyRecap
 import java.time.format.TextStyle
-import java.util.Locale
 
 /** The recap month's name in the viewer's language ("September"). */
 @Composable
 private fun monthName(recap: MonthlyRecap): String =
-    recap.month.month.getDisplayName(TextStyle.FULL_STANDALONE, Locale.getDefault())
+    recap.month.month.getDisplayName(TextStyle.FULL_STANDALONE, LocalLocale.current.platformLocale)
 
 /** "14 hours · 9 episodes · 2 movies": plain numbers, nothing to beat (SHR-PROD-03). */
 @Composable
