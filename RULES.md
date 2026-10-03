@@ -128,6 +128,7 @@ Existing implementation is not evidence that a conflicting pattern is approved. 
 - **MOB-NAV-09 — Custom predictive motion.** Prefer system and Material transitions. If a custom full-screen preview is justified, derive it from predictive-back progress, respect the initiating edge, use standard deceleration, scale no smaller than 90%, preserve an `8dp` edge margin, and restore state cleanly on cancellation. In a custom full-screen preview, swap the pre-commit and destination content through a fade-through at the ~35% progress threshold. Reduced motion still applies.
 - **MOB-NAV-10 — Context preservation.** Returning from details, playback, sheets, or external activities restores the originating destination, selected item, scroll position, and relevant input state.
 - **MOB-NAV-11 — Intents and WebViews.** Prefer a browser Intent/Custom Tab for web content. Use WebView only when in-app web rendering is essential; make it follow light/dark theme and normal navigation/privacy rules.
+- **MOB-SRCH-01 — Search memory and voice.** Search remembers the active profile's last ten searches the viewer acted on (opened a result or pressed Search), newest first, shown under the empty field with remove and Clear actions. Abandoned typing is never kept. The history is device-local, never synced or logged, and cleared on leaving the account (`SHR-PROD-06`). A voice button appears only when the device has a speech recognizer, which owns the microphone; Lamphaus asks for no audio permission (`MOB-PERM-03`).
 
 ## 8. Mobile theme, color, shape, and elevation
 

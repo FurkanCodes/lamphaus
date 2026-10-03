@@ -1,6 +1,26 @@
 package com.lamphaus.app.mobile
 
 import androidx.activity.compose.BackHandler
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -660,6 +680,10 @@ private fun MobileSignedInApp(
                             MobileDestination.SEARCH -> SearchScreen(
                                 state = state,
                                 onSearch = viewModel::searchContent,
+                                history = state.searchHistory,
+                                onRecordSearch = viewModel::recordSearch,
+                                onForgetSearch = viewModel::forgetSearch,
+                                onClearHistory = viewModel::clearSearchHistory,
                                 onBrowseType = viewModel::selectBrowseType,
                                 onBrowseCatalog = viewModel::selectBrowseCatalog,
                                 onBrowseGenre = viewModel::selectBrowseGenre,
@@ -894,6 +918,10 @@ private fun LibraryScreen(
 private fun SearchScreen(
     state: AppUiState,
     onSearch: (String) -> Unit,
+    history: List<String>,
+    onRecordSearch: (String) -> Unit,
+    onForgetSearch: (String) -> Unit,
+    onClearHistory: () -> Unit,
     onBrowseType: (String) -> Unit,
     onBrowseCatalog: (String) -> Unit,
     onBrowseGenre: (String?) -> Unit,
@@ -909,6 +937,14 @@ private fun SearchScreen(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(query) { onSearch(query) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // A search counts once the viewer acts on it: opening a result or
+    // pressing Search. Abandoned typing is never remembered (MOB-SRCH-01).
+    val openResult: (MediaPreview, String) -> Unit = { media, key ->
+        if (query.isNotBlank()) onRecordSearch(query)
+        onMedia(media, key)
+    }
+    val voiceLauncher = rememberVoiceSearch { spoken -> query = spoken }
     Column(Modifier.fillMaxSize().imePadding()) {
         MobileScreenHeader(stringResource(R.string.search))
         TextField(
@@ -916,6 +952,28 @@ private fun SearchScreen(
             onValueChange = { query = it },
             placeholder = { Text(stringResource(R.string.search_movies_series), color = MobileTokens.textMuted) },
             leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MobileTokens.textMuted) },
+            trailingIcon = when {
+                query.isNotEmpty() -> {
+                    {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Outlined.Close, stringResource(R.string.search_clear_query), tint = MobileTokens.textMuted)
+                        }
+                    }
+                }
+                voiceLauncher != null -> {
+                    {
+                        IconButton(onClick = voiceLauncher) {
+                            Icon(Icons.Outlined.Mic, stringResource(R.string.search_by_voice), tint = MobileTokens.textMuted)
+                        }
+                    }
+                }
+                else -> null
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = {
+                if (query.isNotBlank()) onRecordSearch(query)
+                keyboard?.hide()
+            }),
             singleLine = true,
             shape = RoundedCornerShape(MobileTokens.radiusField),
             colors = TextFieldDefaults.colors(
@@ -931,6 +989,14 @@ private fun SearchScreen(
         )
         if (state.searching || state.browse.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (query.isBlank()) {
+            if (history.isNotEmpty()) {
+                RecentSearches(
+                    history = history,
+                    onSelect = { query = it },
+                    onForget = onForgetSearch,
+                    onClear = onClearHistory,
+                )
+            }
             val browse = state.browse
             val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
             LazyRow(contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1008,7 +1074,7 @@ private fun SearchScreen(
                     }
                     CatalogRow(
                         section.copy(title = typeTitle),
-                        onMedia,
+                        openResult,
                         "search:${section.id}",
                         onCatalogLoadMore,
                         onCatalogRetry,
@@ -1024,6 +1090,91 @@ private fun SearchScreen(
             }
         }
     }
+}
+
+/**
+ * The active profile's recent searches (MOB-SRCH-01): tap to search again,
+ * remove one, or clear them all. Rows keep 48dp targets (MOB-A11Y-04).
+ */
+@Composable
+private fun RecentSearches(
+    history: List<String>,
+    onSelect: (String) -> Unit,
+    onForget: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = MobileTokens.spacingScreen, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.search_recent),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f).semantics { heading() },
+            )
+            TextButton(onClick = onClear) { Text(stringResource(R.string.search_recent_clear)) }
+        }
+        history.take(5).forEach { entry ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(onClickLabel = stringResource(R.string.search_recent_search_again)) { onSelect(entry) }
+                    .padding(start = MobileTokens.spacingScreen, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Outlined.History, null, tint = MobileTokens.textMuted, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    entry,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onForget(entry) }) {
+                    Icon(
+                        Icons.Outlined.Close,
+                        stringResource(R.string.search_recent_remove, entry),
+                        tint = MobileTokens.textMuted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Launches the system speech recognizer and hands back what it heard, or
+ * null when this device has none (the button is then hidden). The
+ * recognizer owns the microphone, so the app requests no audio permission
+ * (MOB-PERM-03).
+ */
+@Composable
+private fun rememberVoiceSearch(onResult: (String) -> Unit): (() -> Unit)? {
+    val context = LocalContext.current
+    val prompt = stringResource(R.string.search_movies_series)
+    val intent = remember(prompt) {
+        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
+            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+    }
+    val available = remember(context) { intent.resolveActivity(context.packageManager) != null }
+    val currentOnResult by rememberUpdatedState(onResult)
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.takeIf(String::isNotBlank)
+                ?.let(currentOnResult)
+        }
+    }
+    if (!available) return null
+    return { runCatching { launcher.launch(intent) } }
 }
 
 @Composable

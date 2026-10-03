@@ -377,6 +377,10 @@ data class AppUiState(
     /** Series whose next episode follows one the viewer finished (Continue Watching "up next"). */
     val upNext: List<UpNextItem> = emptyList(),
     val upNextDismissed: Set<String> = emptySet(),
+    /** Device-local engagement choices: alerts, recap, idle ambient. */
+    val engagement: EngagementSettings = EngagementSettings(),
+    /** The active profile's recent searches, newest first (MOB-SRCH-01). */
+    val searchHistory: List<String> = emptyList(),
     /** Imported Nuvio-compatible stream badges; null when none are imported. */
     val streamBadges: com.lamphaus.core.data.repository.StreamBadgeImport? = null,
     val streamBadgesImporting: Boolean = false,
@@ -427,6 +431,7 @@ data class AppUiState(
         fitsTonight = fitsTonight,
         bedtimeMinutes = bedtimeMinutes,
         googleTvHome = googleTvHome,
+        engagement = engagement,
         diagnostics = diagnostics,
         spoilerProtection = spoilerProtection,
         playbackSettings = playbackSettings,
@@ -434,4 +439,27 @@ data class AppUiState(
         playbackCapabilities = playbackCapabilities,
         initialContentLoading = false,
     )
+}
+
+/**
+ * Device-local choices behind the engagement features: new-episode alerts
+ * (SHR-PROD-16), the monthly recap (SHR-PROD-17), and the TV idle ambient
+ * (TV-AMB-01). None of them sync: each device decides for itself.
+ */
+data class EngagementSettings(
+    val newEpisodeAlerts: Boolean = false,
+    val newEpisodePromptAnswered: Boolean = false,
+    val monthlyRecap: Boolean = true,
+    val recapDismissedMonth: String? = null,
+    val tvIdleAmbient: Boolean = false,
+) {
+    companion object {
+        fun from(settings: com.lamphaus.core.data.preferences.UserSettings) = EngagementSettings(
+            newEpisodeAlerts = settings.newEpisodeAlerts,
+            newEpisodePromptAnswered = settings.newEpisodePromptAnswered,
+            monthlyRecap = settings.monthlyRecap,
+            recapDismissedMonth = settings.recapDismissedMonth,
+            tvIdleAmbient = settings.tvIdleAmbient,
+        )
+    }
 }

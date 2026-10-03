@@ -602,4 +602,11 @@
         <item quantity="one">%1$d badge from %2$s</item>
         <item quantity="other">%1$d badges from %2$s</item>
     </plurals>
+    <!-- Mobile search: recent searches and voice (MOB-SRCH-01) -->
+    <string name="search_recent">Recent searches</string>
+    <string name="search_recent_clear">Clear</string>
+    <string name="search_recent_search_again">search again</string>
+    <string name="search_recent_remove">Remove %1$s from recent searches</string>
+    <string name="search_clear_query">Clear search</string>
+    <string name="search_by_voice">Search by voice</string>
 </resources>

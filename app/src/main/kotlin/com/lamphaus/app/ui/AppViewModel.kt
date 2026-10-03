@@ -219,6 +219,7 @@ class AppViewModel(
                     bedtimeMinutes = settings.bedtimeMinutes ?: DEFAULT_BEDTIME_MINUTES,
                     googleTvHome = settings.googleTvHome,
                     upNextDismissed = settings.upNextDismissed,
+                    engagement = EngagementSettings.from(settings),
                     diagnostics = settings.diagnostics,
                     spoilerProtection = settings.spoilerProtection,
                     playbackSettings = settings.playback,
@@ -287,6 +288,7 @@ class AppViewModel(
                         bedtimeMinutes = snapshot.bedtimeMinutes,
                         googleTvHome = snapshot.googleTvHome,
                         upNextDismissed = snapshot.upNextDismissed,
+                        engagement = snapshot.engagement,
                         diagnostics = snapshot.diagnostics,
                         spoilerProtection = snapshot.spoilerProtection,
                         playbackSettings = snapshot.playbackSettings,
@@ -337,6 +339,7 @@ class AppViewModel(
                         // Everything re-arrives from the cloud on next sign-in.
                         container.libraryRepository.clearLocalAccountData()
                         container.preferences.clearSyncedSettings()
+                        container.preferences.clearPersonalHistory()
                         // Provider metadata is scoped to the previous account's
                         // configuration/auth; drop it with the rows (PERF-04).
                         snapshot.providers.forEach { container.providerClient.invalidateProvider(it.manifestUrl) }
@@ -357,6 +360,11 @@ class AppViewModel(
         viewModelScope.launch {
             state.mapActiveProfileId().filterNotNull().flatMapLatest(container.libraryRepository::progress).collectLatest { progress ->
                 mutableState.update { it.copy(progress = progress) }
+            }
+        }
+        viewModelScope.launch {
+            state.mapActiveProfileId().filterNotNull().flatMapLatest(container.preferences::searchHistory).collectLatest { history ->
+                mutableState.update { it.copy(searchHistory = history) }
             }
         }
         viewModelScope.launch {
@@ -542,6 +550,22 @@ class AppViewModel(
     fun refreshContent() {
         ensureBuiltInAddons(state.value.providers)
         refreshCatalogs(force = true)
+    }
+
+    /** Remembers a search the viewer acted on (MOB-SRCH-01); device-local, never synced or logged. */
+    fun recordSearch(query: String) = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        container.preferences.updateSearchHistory(profileId) { com.lamphaus.core.model.recordSearch(it, query) }
+    }
+
+    fun forgetSearch(query: String) = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        container.preferences.updateSearchHistory(profileId) { com.lamphaus.core.model.forgetSearch(it, query) }
+    }
+
+    fun clearSearchHistory() = viewModelScope.launch {
+        val profileId = state.value.activeProfileId ?: return@launch
+        container.preferences.updateSearchHistory(profileId) { emptyList() }
     }
 
     fun searchContent(input: String) {
@@ -1942,6 +1966,7 @@ class AppViewModel(
             // would suppress createInitialProfile for the next registration
             // and leak the old account's content into it via seeding.
             container.libraryRepository.clearLocalAccountData()
+            container.preferences.clearPersonalHistory()
             container.preferences.setActiveProfile(null)
             container.preferences.setPairingDeviceId(null)
             devicesLoadedOnce = false
@@ -2961,6 +2986,7 @@ class AppViewModel(
         val bedtimeMinutes: Int,
         val googleTvHome: Boolean,
         val upNextDismissed: Set<String>,
+        val engagement: EngagementSettings,
         val diagnostics: DiagnosticsConsent,
         val spoilerProtection: SpoilerProtectionSettings,
         val playbackSettings: PlaybackSettings,
