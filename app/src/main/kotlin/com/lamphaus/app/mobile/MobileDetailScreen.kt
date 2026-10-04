@@ -164,8 +164,6 @@ internal fun MobileDetailScreen(
     newEpisodePrompt: Boolean = false,
     onEnableNewEpisodes: () -> Unit = {},
     onDismissNewEpisodes: () -> Unit = {},
-    /** The tapped card's key; the hero is the other end of its container transform (MOB-MOT-01). */
-    sharedKey: String? = null,
 ) {
     if (detail == null) return
     var trailerOpen by rememberSaveable(detail.preview.stableKey) { mutableStateOf(false) }
@@ -239,7 +237,6 @@ internal fun MobileDetailScreen(
                         if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset.toFloat() else heroHeightPx
                     },
                     enter = { enter.value },
-                    sharedKey = sharedKey,
                 )
             }
             constrained("headline", section(0)) {
@@ -375,13 +372,11 @@ private fun DetailHero(
     height: Dp,
     scrollOffset: () -> Float,
     enter: () -> Float,
-    sharedKey: String? = null,
 ) {
     Box(
         Modifier
             .fillMaxWidth()
             .height(height)
-            .mediaSharedBounds(sharedKey)
             .graphicsLayer { clip = true },
     ) {
         MediaArtwork(
