@@ -6,6 +6,7 @@ import com.lamphaus.core.data.cloud.SeekPreviewRequest
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
+import android.util.Log
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -105,20 +106,30 @@ class SeekPreviewRepository(
 
     suspend fun track(media: MediaPreview, episode: Episode?, durationMillis: Long): SeekPreviewTrack? {
         val source = remote ?: return null
-        val request = requestFor(media, episode, durationMillis) ?: return null
+        val request = requestFor(media, episode, durationMillis) ?: run {
+            Log.d(TAG, "no lookup: ${media.type} needs a public id and an episode number (episode=${episode != null})")
+            return null
+        }
+        // Only public ids, numbers, and outcomes are logged; never URLs or keys (SHR-PROD-06).
+        val label = "${request.type} ${request.id} s=${request.season} e=${request.episode} duration=${request.durationMs}"
         val cacheKey = "${request.type}:${request.id}:${request.season}:${request.episode}:${request.durationMs}"
         tracks[cacheKey]?.let { return it }
-        if (clock() < pausedUntilMillis || cacheKey in missing || limited(request)) return null
+        if (clock() < pausedUntilMillis || cacheKey in missing || limited(request)) {
+            Log.d(TAG, "skipped $label: waiting after an earlier answer")
+            return null
+        }
         val manifest = try {
             source.manifest(request)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             // Momentary: a later seek in this or another playback retries.
+            Log.d(TAG, "lookup failed $label: ${error::class.simpleName}")
             return null
         }
         return when (manifest) {
             is SeekPreviewManifest.Unavailable -> {
+                Log.d(TAG, "unavailable $label: ${manifest.reason} ${manifest.limit ?: ""}")
                 when (manifest.reason) {
                     // A key saved on another device is picked up after the pause.
                     SeekPreviewManifest.Reason.NOT_CONNECTED,
@@ -135,8 +146,12 @@ class SeekPreviewRepository(
             is SeekPreviewManifest.Available -> {
                 // The signed URL is fetched untouched: any added parameter
                 // breaks its signature and the host refuses it.
-                val vtt = downloader.text(manifest.vttUrl) ?: return null
+                val vtt = downloader.text(manifest.vttUrl) ?: run {
+                    Log.d(TAG, "manifest download failed $label")
+                    return null
+                }
                 val cues = SeekPreviewVtt.parse(vtt, manifest.vttUrl)
+                Log.d(TAG, "found $label: ${cues.size} cues, scale=${manifest.scale}")
                 if (cues.isEmpty()) {
                     missing += cacheKey
                     null
@@ -152,6 +167,7 @@ class SeekPreviewRepository(
         target.isFile || downloader.file(url, target)
 
     private companion object {
+        const val TAG = "Lamphaus.Seek"
         const val RATE_LIMIT_PAUSE_MILLIS = 60 * 60 * 1000L
         const val NO_KEY_PAUSE_MILLIS = 15 * 60 * 1000L
     }
