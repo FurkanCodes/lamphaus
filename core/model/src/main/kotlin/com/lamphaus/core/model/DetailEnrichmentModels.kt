@@ -73,6 +73,15 @@ data class IntegrationStatus(
     /** Null when the server could not verify the key this pass. */
     val valid: Boolean? = null,
     val enabledSources: List<String> = emptyList(),
+    /** Seekr allowances used up today (PLY-SEEK-01); empty for other integrations. */
+    val limits: List<IntegrationLimit> = emptyList(),
+)
+
+/** One used-up daily allowance: [scope] is "movie", "episode", or "all". */
+@Serializable
+data class IntegrationLimit(
+    val scope: String,
+    val untilEpochMillis: Long,
 )
 
 /**

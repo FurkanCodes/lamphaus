@@ -48,6 +48,9 @@ import kotlinx.coroutines.withContext
 /** Thumbnails for the position being sought to (PLY-SEEK-01); null while none is known. */
 internal fun interface SeekPreviewSource {
     suspend fun thumbnail(positionMillis: Long, durationMillis: Long): ImageBitmap?
+
+    /** Loads the preview track ahead of the first seek, once the duration is known. */
+    suspend fun prepare(durationMillis: Long) {}
 }
 
 /** Provided by the player screen; absent (null) means scrubbing shows only the time. */
@@ -57,8 +60,8 @@ internal val LocalSeekPreviews = staticCompositionLocalOf<SeekPreviewSource?> { 
  * Seek previews for one playback: one per player activity, since every
  * episode or source switch starts a fresh one.
  *
- * Nothing is requested until the viewer first seeks (Seekr meters titles per
- * key and day). Sprite sheets are kept as files in this playback's own
+ * The track is requested once the playing duration is known, so the first
+ * seek already has frames; sheets then download in the background. Sprite sheets are kept as files in this playback's own
  * [directory] and only the 320×180 tile in view is decoded, so memory stays
  * small however long the title is (QA-08). [release] deletes the files.
  */
@@ -93,21 +96,30 @@ internal class PlaybackSeekPreviews(
         }
     }
 
+    override suspend fun prepare(durationMillis: Long) {
+        lock.withLock { ensureTrack(durationMillis) }
+    }
+
     override suspend fun thumbnail(positionMillis: Long, durationMillis: Long): ImageBitmap? {
         val cue = lock.withLock {
-            if (durationMillis <= 0L) return null
-            val now = SystemClock.elapsedRealtime()
-            // Without a track, ask again only after a pause: a scrub sends many
-            // positions, and an offline lookup must not repeat for each one.
-            if ((track == null && now - lastAttemptMillis >= RETRY_GAP_MILLIS) || (track != null && trackDuration != durationMillis)) {
-                lastAttemptMillis = now
-                track = repository.track(media, episode, durationMillis)
-                trackDuration = durationMillis
-                track?.let(::prefetch)
-            }
+            ensureTrack(durationMillis)
             track?.cueAt(positionMillis)
         } ?: return null
         return tile(cue)?.asImageBitmap()
+    }
+
+    /** Called under [lock]. */
+    private suspend fun ensureTrack(durationMillis: Long) {
+        if (durationMillis <= 0L) return
+        val now = SystemClock.elapsedRealtime()
+        // Without a track, ask again only after a pause: a scrub sends many
+        // positions, and an offline lookup must not repeat for each one.
+        if ((track == null && now - lastAttemptMillis >= RETRY_GAP_MILLIS) || (track != null && trackDuration != durationMillis)) {
+            lastAttemptMillis = now
+            track = repository.track(media, episode, durationMillis)
+            trackDuration = durationMillis
+            track?.let(::prefetch)
+        }
     }
 
     private suspend fun tile(cue: SeekPreviewCue): Bitmap? {
@@ -134,7 +146,7 @@ internal class PlaybackSeekPreviews(
         }
     }
 
-    /** Sheets download one at a time in the background once the viewer seeks. */
+    /** Sheets download one at a time in the background once the track is known. */
     private fun prefetch(track: SeekPreviewTrack) {
         prefetchJob?.cancel()
         prefetchJob = scope.launch(Dispatchers.IO) {

@@ -1,5 +1,6 @@
 package com.lamphaus.core.data.cloud
 
+import com.lamphaus.core.model.IntegrationLimit
 import com.lamphaus.core.model.IntegrationStatus
 
 import io.github.jan.supabase.SupabaseClient
@@ -96,12 +97,14 @@ class SupabaseIntegrationsGateway(
         val connected: Boolean = false,
         val valid: Boolean? = null,
         @SerialName("enabledSources") val enabledSources: List<String> = emptyList(),
+        val limits: List<IntegrationLimit> = emptyList(),
     ) {
         fun toModel() = IntegrationStatus(
             integration = integration,
             connected = connected,
             valid = valid,
             enabledSources = enabledSources,
+            limits = limits,
         )
     }
 

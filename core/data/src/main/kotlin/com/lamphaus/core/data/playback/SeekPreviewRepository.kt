@@ -6,6 +6,7 @@ import com.lamphaus.core.data.cloud.SeekPreviewRequest
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
+import android.util.Log
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -67,9 +68,10 @@ class OkHttpSeekPreviewDownloader(
  * Lookups go through [remote] (the key never reaches the device); the
  * manifest and sheets are fetched directly. Every failure is a normal "no
  * previews" result: scrubbing works exactly as before without them. Seekr
- * meters titles per key and day, so callers load a track only once the viewer
- * starts seeking, and an account without a key is asked again only after a
- * pause, or at once when [invalidate] says the integration changed here.
+ * meters distinct movies and distinct episodes per key and day, so a used-up
+ * allowance stops lookups of that kind until Seekr says it lifts (midnight
+ * UTC), and an account without a key is asked again only after a pause, or
+ * at once when [invalidate] says the integration changed here.
  */
 class SeekPreviewRepository(
     private val remote: SeekPreviewRemoteSource?,
@@ -82,49 +84,80 @@ class SeekPreviewRepository(
     @Volatile
     private var pausedUntilMillis = 0L
 
+    /** Wall-clock end of each used-up allowance: Seekr resets at midnight UTC. */
+    private val limitedUntil = ConcurrentHashMap<SeekPreviewManifest.Limit, Long>()
+
     /** The integration changed on this device (key saved or removed): ask again now. */
     fun invalidate() {
         pausedUntilMillis = 0L
+        limitedUntil.clear()
         missing.clear()
         tracks.clear()
     }
 
+    private fun limitFor(request: SeekPreviewRequest) =
+        if (request.type == "series") SeekPreviewManifest.Limit.EPISODES else SeekPreviewManifest.Limit.MOVIES
+
+    private fun limited(request: SeekPreviewRequest): Boolean {
+        val now = clock()
+        return (limitedUntil[limitFor(request)] ?: 0L) > now ||
+            (limitedUntil[SeekPreviewManifest.Limit.ALL] ?: 0L) > now
+    }
+
     suspend fun track(media: MediaPreview, episode: Episode?, durationMillis: Long): SeekPreviewTrack? {
         val source = remote ?: return null
-        val request = requestFor(media, episode, durationMillis) ?: return null
+        val request = requestFor(media, episode, durationMillis) ?: run {
+            Log.d(TAG, "no lookup: ${media.type} needs a public id and an episode number (episode=${episode != null})")
+            return null
+        }
+        // Only public ids, numbers, and outcomes are logged; never URLs or keys (SHR-PROD-06).
+        val label = "${request.type} ${request.id} s=${request.season} e=${request.episode} duration=${request.durationMs}"
         val cacheKey = "${request.type}:${request.id}:${request.season}:${request.episode}:${request.durationMs}"
         tracks[cacheKey]?.let { return it }
-        if (clock() < pausedUntilMillis || cacheKey in missing) return null
+        if (clock() < pausedUntilMillis || cacheKey in missing || limited(request)) {
+            Log.d(TAG, "skipped $label: waiting after an earlier answer")
+            return null
+        }
+        Log.d(TAG, "lookup $label")
         val manifest = try {
             source.manifest(request)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             // Momentary: a later seek in this or another playback retries.
+            Log.d(TAG, "lookup failed $label: ${error::class.simpleName}")
             return null
         }
         return when (manifest) {
             is SeekPreviewManifest.Unavailable -> {
+                Log.d(TAG, "unavailable $label: ${manifest.reason} ${manifest.limit ?: ""}")
                 when (manifest.reason) {
                     // A key saved on another device is picked up after the pause.
                     SeekPreviewManifest.Reason.NOT_CONNECTED,
                     SeekPreviewManifest.Reason.KEY_REJECTED,
                     -> pausedUntilMillis = clock() + NO_KEY_PAUSE_MILLIS
-                    SeekPreviewManifest.Reason.RATE_LIMITED -> pausedUntilMillis = clock() + RATE_LIMIT_PAUSE_MILLIS
+                    // Only that allowance waits, and only as long as Seekr says:
+                    // asking again before then risks the key (PLY-SEEK-01).
+                    SeekPreviewManifest.Reason.RATE_LIMITED -> limitedUntil[manifest.limit ?: SeekPreviewManifest.Limit.ALL] =
+                        clock() + (manifest.retryAfterMillis ?: RATE_LIMIT_PAUSE_MILLIS)
                     SeekPreviewManifest.Reason.NOT_FOUND -> missing += cacheKey
                 }
                 null
             }
             is SeekPreviewManifest.Available -> {
-                // `st=1`: cue times arrive already on the playing timeline.
-                val separator = if ('?' in manifest.vttUrl) '&' else '?'
-                val vtt = downloader.text("${manifest.vttUrl}${separator}st=1") ?: return null
+                // The signed URL is fetched untouched: any added parameter
+                // breaks its signature and the host refuses it.
+                val vtt = downloader.text(manifest.vttUrl) ?: run {
+                    Log.d(TAG, "manifest download failed $label")
+                    return null
+                }
                 val cues = SeekPreviewVtt.parse(vtt, manifest.vttUrl)
+                Log.d(TAG, "found $label: ${cues.size} cues, scale=${manifest.scale}")
                 if (cues.isEmpty()) {
                     missing += cacheKey
                     null
                 } else {
-                    SeekPreviewTrack(cues).also { tracks[cacheKey] = it }
+                    SeekPreviewTrack(cues, manifest.scale).also { tracks[cacheKey] = it }
                 }
             }
         }
@@ -135,6 +168,7 @@ class SeekPreviewRepository(
         target.isFile || downloader.file(url, target)
 
     private companion object {
+        const val TAG = "Lamphaus.Seek"
         const val RATE_LIMIT_PAUSE_MILLIS = 60 * 60 * 1000L
         const val NO_KEY_PAUSE_MILLIS = 15 * 60 * 1000L
     }

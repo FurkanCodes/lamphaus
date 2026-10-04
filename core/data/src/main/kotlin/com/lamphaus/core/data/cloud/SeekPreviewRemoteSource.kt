@@ -21,10 +21,25 @@ data class SeekPreviewRequest(
 
 /** What the server answered for a [SeekPreviewRequest]. */
 sealed interface SeekPreviewManifest {
-    /** A signed sprite manifest; fetching it needs no credential. */
-    data class Available(val vttUrl: String) : SeekPreviewManifest
+    /**
+     * A signed sprite manifest; fetching it needs no credential. Its URL is
+     * used exactly as given: the signature covers the query. [scale] is the
+     * playing duration over the sprites' source duration (Seekr's `scale`).
+     */
+    data class Available(val vttUrl: String, val scale: Double = 1.0) : SeekPreviewManifest
 
-    data class Unavailable(val reason: Reason) : SeekPreviewManifest
+    /**
+     * [limit] and [retryAfterMillis] come with [Reason.RATE_LIMITED]: which of
+     * Seekr's daily allowances is used up, and how long until it lifts.
+     */
+    data class Unavailable(
+        val reason: Reason,
+        val limit: Limit? = null,
+        val retryAfterMillis: Long? = null,
+    ) : SeekPreviewManifest
+
+    /** Seekr counts distinct movies and distinct episodes per key and day separately. */
+    enum class Limit { MOVIES, EPISODES, ALL }
 
     enum class Reason {
         /** No Seekr key on the account. */
@@ -33,7 +48,7 @@ sealed interface SeekPreviewManifest {
         /** Seekr refused the stored key. */
         KEY_REJECTED,
 
-        /** The key's daily title allowance is used up. */
+        /** A daily allowance (or the burst limit) is used up; see [Unavailable.limit]. */
         RATE_LIMITED,
 
         /** Seekr has no previews for this title or episode. */
@@ -75,13 +90,24 @@ class SupabaseSeekPreviewRemoteSource(
         val wire = json.decodeFromString<WireManifest>(body)
         val vttUrl = wire.vttUrl
         if (wire.available && vttUrl != null && vttUrl.startsWith("https://")) {
-            return SeekPreviewManifest.Available(vttUrl)
+            val scale = wire.scale?.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
+            return SeekPreviewManifest.Available(vttUrl, scale)
+        }
+        if (wire.reason == "rate_limited") {
+            return SeekPreviewManifest.Unavailable(
+                reason = SeekPreviewManifest.Reason.RATE_LIMITED,
+                limit = when (wire.scope) {
+                    "movie" -> SeekPreviewManifest.Limit.MOVIES
+                    "episode" -> SeekPreviewManifest.Limit.EPISODES
+                    else -> SeekPreviewManifest.Limit.ALL
+                },
+                retryAfterMillis = wire.retryAfterSeconds?.takeIf { it > 0 }?.times(1000),
+            )
         }
         return SeekPreviewManifest.Unavailable(
             when (wire.reason) {
                 "not_connected" -> SeekPreviewManifest.Reason.NOT_CONNECTED
                 "key_rejected" -> SeekPreviewManifest.Reason.KEY_REJECTED
-                "rate_limited" -> SeekPreviewManifest.Reason.RATE_LIMITED
                 else -> SeekPreviewManifest.Reason.NOT_FOUND
             },
         )
@@ -91,7 +117,10 @@ class SupabaseSeekPreviewRemoteSource(
     private data class WireManifest(
         val available: Boolean = false,
         val vttUrl: String? = null,
+        val scale: Double? = null,
         val reason: String? = null,
+        val scope: String? = null,
+        val retryAfterSeconds: Long? = null,
     )
 
     private companion object {

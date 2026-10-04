@@ -20,10 +20,11 @@ data class SeekPreviewCue(
 
 /**
  * Seek-preview thumbnails for one playback, ordered by time (PLY-SEEK-01).
- * Cues are on the player's own timeline: the manifest is requested for the
- * playing duration, so no offset is applied here.
+ * Cues are on the sprites' source timeline; a playing position maps onto it
+ * as `position / scale` (Seekr's `scale`, 1.0 when the durations match). No
+ * other offset is guessed.
  */
-class SeekPreviewTrack(cues: List<SeekPreviewCue>) {
+class SeekPreviewTrack(cues: List<SeekPreviewCue>, private val scale: Double = 1.0) {
     val cues: List<SeekPreviewCue> = cues.sortedBy(SeekPreviewCue::startMillis)
 
     /** Every sheet in first-use order, for prefetching. */
@@ -35,12 +36,13 @@ class SeekPreviewTrack(cues: List<SeekPreviewCue>) {
      */
     fun cueAt(positionMillis: Long): SeekPreviewCue? {
         if (cues.isEmpty()) return null
+        val sourceMillis = if (scale > 0.0 && scale != 1.0) Math.round(positionMillis / scale) else positionMillis
         var low = 0
         var high = cues.lastIndex
         var found = -1
         while (low <= high) {
             val mid = (low + high) ushr 1
-            if (cues[mid].startMillis <= positionMillis) {
+            if (cues[mid].startMillis <= sourceMillis) {
                 found = mid
                 low = mid + 1
             } else {

@@ -367,6 +367,15 @@ internal fun PlaybackScreen(
         player?.seekTo(target)
         keySeekTarget = null
     }
+    // Previews load as soon as the title's duration is known, so the first
+    // seek already has frames instead of waiting on the lookup and sheets
+    // (PLY-SEEK-01). Seekr's daily caps are guarded by the account-wide
+    // limits, not by delaying this.
+    val seekPreviews = LocalSeekPreviews.current
+    val knownDuration = snapshot.durationMillis.takeIf { it > 0 }
+    LaunchedEffect(seekPreviews, knownDuration) {
+        if (seekPreviews != null && knownDuration != null) seekPreviews.prepare(knownDuration)
+    }
 
     LaunchedEffect(hudText) {
         if (hudText != null) {
