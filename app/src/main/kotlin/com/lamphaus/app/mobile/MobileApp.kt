@@ -699,7 +699,11 @@ private fun MobileSignedInApp(
                                         onAddSource = { settingsOpen = true },
                                         onLoadMore = viewModel::loadMoreCatalog,
                                         onRetry = viewModel::retryCatalogPage,
-                                        onPlay = { media -> viewModel.openSources(media, null) },
+                                        onPlay = { media ->
+                                            // A series plays an episode: its page picks the
+                                            // one to resume or the next up (SHR-PROD-02).
+                                            if (media.type == MediaType.SERIES) viewModel.loadDetail(media) else viewModel.openSources(media, null)
+                                        },
                                         onLoadMoreHome = viewModel::loadMoreHomeCatalogSections,
                                         onRetryHome = viewModel::retryHomeCatalogSections,
                                         restoreMediaKey = pendingMediaFocusKey,

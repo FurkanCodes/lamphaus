@@ -116,6 +116,8 @@ import com.lamphaus.app.ui.recapEpisodeTitle
 import com.lamphaus.app.ui.seasonTimeLeft
 import com.lamphaus.app.ui.seasonTimeLeftText
 import com.lamphaus.app.ui.seriesRecap
+import com.lamphaus.app.ui.nextUpEpisode
+import com.lamphaus.app.ui.numberParts
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
@@ -188,6 +190,13 @@ internal fun MobileDetailScreen(
     )
     val seasons = remember(detail) { detail.episodes.mapNotNull { it.season }.distinct().sorted() }
     val resumeEpisode = detail.episodes.firstOrNull { it.id == resumeProgress?.videoId }
+    // A series always plays an episode (SHR-PROD-02): the one being resumed,
+    // else the next up, as on TV. Without one, sources were asked for the
+    // whole show and progress, Up next, and seek previews had no episode.
+    val nextUp = remember(detail.episodes, progress, watchedEpisodeIds) {
+        nextUpEpisode(detail.episodes, progress, watchedEpisodeIds)
+    }
+    val playEpisode = resumeEpisode ?: nextUp?.episode
     val recap = remember(detail.episodes, progress, watchedEpisodeIds, recapEnabled) {
         if (recapEnabled) seriesRecap(detail.episodes, progress, watchedEpisodeIds) else null
     }
@@ -246,7 +255,7 @@ internal fun MobileDetailScreen(
                 DetailActions(
                     inLibrary = inLibrary,
                     resumeProgress = resumeProgress,
-                    resumeEpisode = resumeEpisode,
+                    playEpisode = playEpisode,
                     onPlay = onPlay,
                     onLibrary = onLibrary,
                     onEditArtwork = onEditArtwork,
@@ -577,7 +586,7 @@ private fun MetaDot() {
 private fun DetailActions(
     inLibrary: Boolean,
     resumeProgress: WatchProgress?,
-    resumeEpisode: Episode?,
+    playEpisode: Episode?,
     onPlay: (Episode?) -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
@@ -586,7 +595,7 @@ private fun DetailActions(
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
-            onClick = { onPlay(resumeEpisode) },
+            onClick = { onPlay(playEpisode) },
             modifier = Modifier.fillMaxWidth().height(54.dp),
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = MobileTokens.textPrimary, contentColor = Color.Black),
@@ -595,7 +604,17 @@ private fun DetailActions(
             Spacer(Modifier.width(6.dp))
             Text(
                 text = when {
-                    resumeProgress == null -> stringResource(R.string.play)
+                    resumeProgress == null -> {
+                        val number = playEpisode?.numberParts()
+                        if (number?.season != null && number.episode != null) {
+                            stringResource(
+                                R.string.play_episode_format,
+                                stringResource(R.string.episode_format, number.season, number.episode),
+                            )
+                        } else {
+                            stringResource(R.string.play)
+                        }
+                    }
                     resumeProgress.episodeLabel != null ->
                         stringResource(R.string.resume_episode_format, resumeProgress.episodeLabel ?: "")
                     else -> stringResource(R.string.resume)
