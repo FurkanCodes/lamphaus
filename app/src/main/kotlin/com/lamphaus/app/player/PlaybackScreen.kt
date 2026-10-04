@@ -367,6 +367,13 @@ internal fun PlaybackScreen(
         player?.seekTo(target)
         keySeekTarget = null
     }
+    // Previews load while the title starts, so the very first seek already
+    // has frames instead of waiting on the lookup and sheets (PLY-SEEK-01).
+    val seekPreviews = LocalSeekPreviews.current
+    val knownDuration = snapshot.durationMillis.takeIf { it > 0 }
+    LaunchedEffect(seekPreviews, knownDuration) {
+        if (knownDuration != null) seekPreviews?.prepare(knownDuration)
+    }
 
     LaunchedEffect(hudText) {
         if (hudText != null) {
