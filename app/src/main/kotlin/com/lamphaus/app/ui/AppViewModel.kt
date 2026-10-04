@@ -99,9 +99,9 @@ private const val SEARCH_MANIFEST_TIMEOUT_MILLIS = 4_000L
 private const val CLOUD_SYNC_LOG_TAG = "Lamphaus.Sync"
 private val DEVICE_BINDING_BACKOFF_MILLIS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
 private const val ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE =
-    "Artwork keys aren't configured. Add a provider key in Settings > Artwork."
+    "Artwork keys aren't configured. Add a provider key in Settings > Integrations."
 private const val ARTWORK_KEYS_NOT_CONFIGURED_EDITOR_ERROR =
-    "Artwork keys aren't configured. Add a provider key in Settings > Artwork to load artwork."
+    "Artwork keys aren't configured. Add a provider key in Settings > Integrations to load artwork."
 private const val HOME_CATALOG_LOG_TAG = "Lamphaus.Home"
 private fun homeLog(message: String) = Log.d(HOME_CATALOG_LOG_TAG, message)
 
