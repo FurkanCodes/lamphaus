@@ -77,6 +77,21 @@ data class PlaybackRequest(
     val autoPlayStreak: Int = 0,
     /** Catalog item snapshot, persisted with watch progress for Continue Watching. */
     val preview: MediaPreview? = null,
+    /**
+     * Set when add-on subtitles are still to be fetched: the player opens at
+     * once and fetches them itself while it connects, then starts the stream
+     * with them attached. Null once they are in [source].
+     */
+    val addonSubtitles: AddonSubtitleLookup? = null,
+)
+
+/** What subtitle add-ons need to match a source: its video id and file facts. */
+@Serializable
+data class AddonSubtitleLookup(
+    val videoId: String,
+    val videoHash: String? = null,
+    val videoSize: Long? = null,
+    val filename: String? = null,
 )
 
 /**

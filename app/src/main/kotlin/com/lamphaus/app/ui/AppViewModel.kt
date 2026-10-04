@@ -17,6 +17,7 @@ import com.lamphaus.core.data.cloud.CloudNotConfiguredException
 import com.lamphaus.core.data.cloud.ArtworkKeyInvalidException
 import com.lamphaus.core.data.cloud.ArtworkKeysNotConfiguredException
 import com.lamphaus.core.data.cloud.IntegrationInvalidCredentialException
+import com.lamphaus.core.model.AddonSubtitleLookup
 import com.lamphaus.core.model.IntegrationStatus
 import com.lamphaus.core.data.preferences.SyncedSettings
 import com.lamphaus.core.data.preferences.ThemePreference
@@ -1833,7 +1834,8 @@ class AppViewModel(
                 is SourceResolution.Internal -> {
                     mutableState.update { it.copy(sourcePicker = it.sourcePicker?.copy(loading = true)) }
                     val videoId = picker.episode?.id ?: picker.media.id
-                    val tracks = loadSubtitles(picker.media, picker.episode, videoId, source)
+                    // Add-on subtitles are fetched by the player while it opens,
+                    // so picking a source responds at once.
                     val existingProgress = state.value.progress.firstOrNull { it.videoId == videoId }
                     val start = when {
                         picker.startFromBeginning -> 0
@@ -1880,7 +1882,7 @@ class AppViewModel(
                                     uri = resolution.url,
                                     mimeType = source.mimeType ?: resolution.url.inferMimeType(),
                                     headers = source.headers,
-                                    subtitles = (source.subtitles + tracks).distinctBy { "${it.language}|${it.url}|${it.id}" },
+                                    subtitles = source.subtitles,
                                 ),
                                 startPositionMillis = start,
                                 episode = episode,
@@ -1889,6 +1891,12 @@ class AppViewModel(
                                 sourceProviderId = source.providerId,
                                 sourceBingeGroup = source.bingeGroup,
                                 sourceLabel = source.closenessLabel(),
+                                addonSubtitles = AddonSubtitleLookup(
+                                    videoId = videoId,
+                                    videoHash = source.videoHash,
+                                    videoSize = source.videoSize,
+                                    filename = source.filename,
+                                ),
                             ),
                             sourcePicker = null,
                         )
@@ -2329,54 +2337,6 @@ class AppViewModel(
     /** Device-local: Settings → Browsing → Monthly recap (SHR-PROD-17). */
     fun setMonthlyRecap(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setMonthlyRecap(enabled)
-    }
-
-    private suspend fun loadSubtitles(
-        media: MediaPreview,
-        episode: Episode?,
-        videoId: String,
-        source: StreamCandidate,
-    ): List<SubtitleTrack> {
-        val extras = buildMap {
-            source.videoHash?.let { put("videoHash", it) }
-            source.videoSize?.let { put("videoSize", it.toString()) }
-            source.filename?.let { put("filename", it) }
-        }
-        return supervisorScope {
-            state.value.providers
-                .filter(ProviderSubscription::enabled)
-                .sortedBy(ProviderSubscription::sortOrder)
-                .map { subscription ->
-                    async {
-                        val subtitleVideoId = subscription.subtitleVideoId(
-                            imdbId = media.id,
-                            season = episode?.season,
-                            episode = episode?.episode,
-                            fallbackVideoId = videoId,
-                        )
-                        val manifest = container.providerClient.manifest(subscription.manifestUrl)
-                        if (manifest !is ProviderResult.Success ||
-                            !container.providerAggregator.supports(
-                                manifest.value,
-                                "subtitles",
-                                media.rawType,
-                                subtitleVideoId,
-                            )
-                        ) {
-                            emptyList()
-                        } else {
-                            (container.providerClient.subtitles(
-                                subscription.manifestUrl,
-                                media.rawType,
-                                subtitleVideoId,
-                                extras,
-                            ) as? ProviderResult.Success)?.value.orEmpty().map { track ->
-                                track.copy(providerName = subscription.displayName)
-                            }
-                        }
-                    }
-                }.awaitAll().flatten()
-        }.distinctBy { "${it.language}|${it.url}|${it.id}" }
     }
 
     private fun requestProviderConfiguration(address: String, providerName: String) {
