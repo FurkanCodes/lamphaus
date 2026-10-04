@@ -80,8 +80,6 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
@@ -128,6 +126,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import com.lamphaus.core.data.preferences.TV_IDLE_AMBIENT_MINUTE_CHOICES
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -790,14 +789,6 @@ internal fun TvPairingContent(
     }
 }
 
-private val AMBIENT_DESTINATIONS = setOf(
-    TvDestination.HOME,
-    TvDestination.MOVIES,
-    TvDestination.SERIES,
-    TvDestination.DISCOVER,
-    TvDestination.LIBRARY,
-)
-
 internal object TvTestTags {
     const val PairingRefresh = "pairing_refresh"
     const val PairingDevelopment = "pairing_development"
@@ -829,16 +820,6 @@ private fun TvSignedIn(
     // card or chip, inside a lazy list) is composed and can take focus; a
     // restored scroll position left it disposed and focus stuck on the rail
     // (TV-NAV-01). Settings keeps its selected section.
-    // TV-AMB-01: the idle ambient may cover browsing pages only, never
-    // details, settings, menus, or a source list.
-    val ambientHost = LocalTvAmbientHost.current
-    SideEffect {
-        ambientHost.eligible = destination in AMBIENT_DESTINATIONS &&
-            state.selectedDetail == null &&
-            state.sourcePicker == null &&
-            state.contentMenu.target == null
-    }
-    DisposableEffect(ambientHost) { onDispose { ambientHost.eligible = false } }
     val switchTo: (TvDestination) -> Unit = { next ->
         if (next != destination) {
             if (next != TvDestination.SETTINGS) contentStates.removeState(next.name)
@@ -3949,6 +3930,21 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 checked = state.engagement.tvIdleAmbient,
                 onCheckedChange = viewModel::setTvIdleAmbient,
             )
+        }
+        if (state.engagement.tvIdleAmbient) {
+            item {
+                // Dependent on the toggle above, and only shown while it is on (TV-AMB-01).
+                val minutes = state.engagement.tvIdleAmbientMinutes
+                TvSettingsChoiceRow(
+                    title = stringResource(R.string.idle_ambient_delay),
+                    description = stringResource(R.string.idle_ambient_delay_description),
+                    value = pluralStringResource(R.plurals.idle_ambient_minutes, minutes, minutes),
+                    onClick = {
+                        val choices = TV_IDLE_AMBIENT_MINUTE_CHOICES
+                        viewModel.setTvIdleAmbientMinutes(choices[(choices.indexOf(minutes) + 1) % choices.size])
+                    },
+                )
+            }
         }
         item {
             TvSettingsToggleRow(

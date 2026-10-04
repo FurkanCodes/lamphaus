@@ -78,8 +78,10 @@ data class UserSettings(
     val monthlyRecap: Boolean = true,
     /** Device-local: the recap month (`yyyy-MM`) the viewer dismissed. */
     val recapDismissedMonth: String? = null,
-    /** Device-local TV opt-in: the ambient screensaver covers browsing after idle (TV-AMB-01). */
+    /** Device-local TV opt-in: the ambient screensaver covers the app after idle (TV-AMB-01). */
     val tvIdleAmbient: Boolean = false,
+    /** Device-local: minutes without the remote before the idle ambient starts (TV-AMB-01). */
+    val tvIdleAmbientMinutes: Int = DEFAULT_TV_IDLE_AMBIENT_MINUTES,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
     val playback: PlaybackSettings = PlaybackSettings(),
@@ -136,6 +138,9 @@ class UserPreferences(private val context: Context) {
             monthlyRecap = values[MONTHLY_RECAP] ?: true,
             recapDismissedMonth = values[RECAP_DISMISSED_MONTH],
             tvIdleAmbient = values[TV_IDLE_AMBIENT] ?: false,
+            tvIdleAmbientMinutes = values[TV_IDLE_AMBIENT_MINUTES]
+                ?.takeIf { it in TV_IDLE_AMBIENT_MINUTE_CHOICES }
+                ?: DEFAULT_TV_IDLE_AMBIENT_MINUTES,
             diagnostics = DiagnosticsConsent(
                 crashReports = values[CRASH_REPORTS] ?: false,
                 performanceMetrics = values[PERFORMANCE] ?: false,
@@ -322,6 +327,12 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit { it[TV_IDLE_AMBIENT] = enabled }
     }
 
+    /** Device-local; one of [TV_IDLE_AMBIENT_MINUTE_CHOICES]. */
+    suspend fun setTvIdleAmbientMinutes(minutes: Int) {
+        require(minutes in TV_IDLE_AMBIENT_MINUTE_CHOICES)
+        context.dataStore.edit { it[TV_IDLE_AMBIENT_MINUTES] = minutes }
+    }
+
     /**
      * A profile's recent searches, newest first (MOB-SRCH-01). Device-local and
      * never synced or logged: queries are private (SHR-PROD-06).
@@ -479,6 +490,7 @@ class UserPreferences(private val context: Context) {
         val MONTHLY_RECAP = booleanPreferencesKey("monthly_recap")
         val RECAP_DISMISSED_MONTH = stringPreferencesKey("recap_dismissed_month")
         val TV_IDLE_AMBIENT = booleanPreferencesKey("tv_idle_ambient")
+        val TV_IDLE_AMBIENT_MINUTES = intPreferencesKey("tv_idle_ambient_minutes")
         val ACTIVE_PROFILE = stringPreferencesKey("active_profile")
         val PAIRING_DEVICE_ID = stringPreferencesKey("pairing_device_id")
         val THEME = stringPreferencesKey("theme")
@@ -584,3 +596,7 @@ internal fun devicePlaybackConfigFromKeys(
         nightListening = nightListening ?: false,
     )
 }
+
+/** Idle delays the TV ambient offers (TV-AMB-01). */
+val TV_IDLE_AMBIENT_MINUTE_CHOICES = listOf(1, 2, 5, 10, 15, 30)
+const val DEFAULT_TV_IDLE_AMBIENT_MINUTES = 5

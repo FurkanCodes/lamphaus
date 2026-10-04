@@ -2075,6 +2075,10 @@ class AppViewModel(
         container.preferences.setTvIdleAmbient(enabled)
     }
 
+    fun setTvIdleAmbientMinutes(minutes: Int) = viewModelScope.launch {
+        container.preferences.setTvIdleAmbientMinutes(minutes)
+    }
+
     fun setTrailersEnabled(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setTrailers(enabled)
     }

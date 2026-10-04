@@ -464,6 +464,7 @@ data class EngagementSettings(
     val monthlyRecap: Boolean = true,
     val recapDismissedMonth: String? = null,
     val tvIdleAmbient: Boolean = false,
+    val tvIdleAmbientMinutes: Int = com.lamphaus.core.data.preferences.DEFAULT_TV_IDLE_AMBIENT_MINUTES,
 ) {
     companion object {
         fun from(settings: com.lamphaus.core.data.preferences.UserSettings) = EngagementSettings(
@@ -472,6 +473,7 @@ data class EngagementSettings(
             monthlyRecap = settings.monthlyRecap,
             recapDismissedMonth = settings.recapDismissedMonth,
             tvIdleAmbient = settings.tvIdleAmbient,
+            tvIdleAmbientMinutes = settings.tvIdleAmbientMinutes,
         )
     }
 }
