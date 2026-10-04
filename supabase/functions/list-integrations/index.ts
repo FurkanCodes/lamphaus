@@ -1,6 +1,7 @@
 import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
 import { validateMdbListKey } from "../_shared/mdblist.ts";
 import { validateSeekrKey } from "../_shared/seekr.ts";
+import { activeSeekrBlocks } from "../_shared/seekr_quota.ts";
 
 // list-integrations — connection state for the caller's integrations.
 //
@@ -90,6 +91,12 @@ Deno.serve(async (req) => {
     .catch(() => null);
   if (!Array.isArray(rows)) return json({ error: "list_failed" }, 500);
 
+  // Seekr caps used up today, shown on the Seekr card (PLY-SEEK-01).
+  const seekrLimits = (rows as IntegrationRow[]).some((row) => row.integration === "seekr")
+    ? (await activeSeekrBlocks(SB_URL, SERVICE_ROLE, user.id))
+      .map((block) => ({ scope: block.scope, untilEpochMillis: block.untilMs }))
+    : [];
+
   const integrations: Array<Record<string, unknown>> = [];
   // REST rows are shaped by our own migration; the named type documents that
   // contract, and every field is still re-validated before use below.
@@ -130,6 +137,7 @@ Deno.serve(async (req) => {
       connected,
       valid,
       enabledSources: readEnabledSources(row.enabled_sources),
+      ...(row.integration === "seekr" ? { limits: seekrLimits } : {}),
     });
   }
 

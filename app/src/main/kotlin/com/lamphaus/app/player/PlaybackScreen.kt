@@ -120,6 +120,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -367,12 +368,23 @@ internal fun PlaybackScreen(
         player?.seekTo(target)
         keySeekTarget = null
     }
-    // Previews load while the title starts, so the very first seek already
-    // has frames instead of waiting on the lookup and sheets (PLY-SEEK-01).
+    // Previews load early in the title, so the first seek already has frames
+    // instead of waiting on the lookup and sheets (PLY-SEEK-01). Only after
+    // about 15 s of actual playback, though: Seekr allows 20 distinct movies
+    // and 70 distinct episodes a day, and a title opened for a moment (to
+    // check a source, or backed out of) must not spend one. An earlier seek
+    // still loads them at once.
     val seekPreviews = LocalSeekPreviews.current
     val knownDuration = snapshot.durationMillis.takeIf { it > 0 }
+    val playingNow by rememberUpdatedState(snapshot.playing && !snapshot.buffering)
     LaunchedEffect(seekPreviews, knownDuration) {
-        if (knownDuration != null) seekPreviews?.prepare(knownDuration)
+        if (seekPreviews == null || knownDuration == null) return@LaunchedEffect
+        var played = 0L
+        while (played < SEEK_PREVIEW_PREPARE_AFTER_MILLIS) {
+            delay(SEEK_PREVIEW_PREPARE_TICK_MILLIS)
+            if (playingNow) played += SEEK_PREVIEW_PREPARE_TICK_MILLIS
+        }
+        seekPreviews.prepare(knownDuration)
     }
 
     LaunchedEffect(hudText) {

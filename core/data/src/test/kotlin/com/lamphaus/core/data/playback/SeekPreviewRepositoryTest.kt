@@ -161,7 +161,46 @@ class SeekPreviewRepositoryTest {
     }
 
     @Test
-    fun `rate limit pauses lookups for an hour`() = runTest {
+    fun `a used-up movie allowance waits until Seekr's reset and never stops episodes`() = runTest {
+        var now = 0L
+        val threeHours = 3 * 60 * 60 * 1000L
+        val remote = FakeRemote(
+            SeekPreviewManifest.Unavailable(
+                SeekPreviewManifest.Reason.RATE_LIMITED,
+                limit = SeekPreviewManifest.Limit.MOVIES,
+                retryAfterMillis = threeHours,
+            ),
+        )
+        val repository = SeekPreviewRepository(remote, FakeDownloader(vtt), clock = { now })
+        assertNull(repository.track(movie(), null, 1_000))
+        remote.answer = SeekPreviewManifest.Available(manifestUrl)
+        // Another movie before the reset is not asked for at all.
+        now = threeHours - 1
+        assertNull(repository.track(movie("tt0111161"), null, 1_000))
+        assertEquals(1, remote.requests.size)
+        // Episodes have their own allowance.
+        assertNotNull(repository.track(series(), Episode(id = "e", title = "E", season = 1, episode = 1), 1_000))
+        now = threeHours
+        assertNotNull(repository.track(movie("tt0111161"), null, 1_000))
+    }
+
+    @Test
+    fun `an all-allowance limit stops movies and episodes alike`() = runTest {
+        val remote = FakeRemote(
+            SeekPreviewManifest.Unavailable(
+                SeekPreviewManifest.Reason.RATE_LIMITED,
+                limit = SeekPreviewManifest.Limit.ALL,
+                retryAfterMillis = 60_000L,
+            ),
+        )
+        val repository = SeekPreviewRepository(remote, FakeDownloader(vtt), clock = { 0L })
+        assertNull(repository.track(movie(), null, 1_000))
+        assertNull(repository.track(series(), Episode(id = "e", title = "E", season = 1, episode = 1), 1_000))
+        assertEquals(1, remote.requests.size)
+    }
+
+    @Test
+    fun `rate limit without a reset time pauses lookups for an hour`() = runTest {
         var now = 0L
         val remote = FakeRemote(SeekPreviewManifest.Unavailable(SeekPreviewManifest.Reason.RATE_LIMITED))
         val repository = SeekPreviewRepository(remote, FakeDownloader(vtt), clock = { now })

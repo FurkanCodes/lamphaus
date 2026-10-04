@@ -1,5 +1,6 @@
 import { createProviderConfigCrypto } from "../_shared/provider_config_crypto.ts";
-import { lookupSeekrSprites, type SeekrTitle } from "../_shared/seekr.ts";
+import { limitScopeFor, lookupSeekrSprites, type SeekrTitle } from "../_shared/seekr.ts";
+import { activeSeekrBlocks, blockFor, recordSeekrBlock } from "../_shared/seekr_quota.ts";
 
 // resolve-seek-previews — the seek-preview manifest for one title (PLY-SEEK-01).
 //
@@ -12,8 +13,13 @@ import { lookupSeekrSprites, type SeekrTitle } from "../_shared/seekr.ts";
 // Request:  { type: "movie"|"series", id: "tt…"|"tmdb:…", season?, episode?, durationMs }
 // Answers (all 200 unless noted; "no previews" is a normal outcome):
 //   { available: true, vttUrl, sourceDurationMs, scale }
-//   { available: false, reason: "not_connected"|"not_found"|"unsupported_title"|
-//                               "key_rejected"|"rate_limited" }
+//   { available: false, reason: "not_connected"|"not_found"|"unsupported_title"|"key_rejected" }
+//   { available: false, reason: "rate_limited", scope: "movie"|"episode"|"all", retryAfterSeconds }
+//
+// Seekr caps each key at 20 distinct movies and 70 distinct episodes a day
+// (reset at midnight UTC) and may revoke a key that keeps hitting them. A cap
+// it reports is stored in seekr_quota_blocks, and later lookups of that kind
+// are answered from there without calling Seekr, for every device on the account.
 //   502 { error: "upstream_unavailable" } — momentary; the client may retry later.
 
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
@@ -125,6 +131,17 @@ Deno.serve(async (req) => {
   const apiKey = await loadSeekrKey(user.id);
   if (apiKey === null) return json({ available: false, reason: "not_connected" });
 
+  const now = Date.now();
+  const block = blockFor(await activeSeekrBlocks(SB_URL, SERVICE_ROLE, user.id, now), limitScopeFor(title));
+  if (block !== null) {
+    return json({
+      available: false,
+      reason: "rate_limited",
+      scope: block.scope,
+      retryAfterSeconds: Math.max(1, Math.ceil((block.untilMs - now) / 1000)),
+    });
+  }
+
   const lookup = await lookupSeekrSprites(apiKey, title, durationMs);
   switch (lookup.status) {
     case "found":
@@ -139,7 +156,13 @@ Deno.serve(async (req) => {
     case "rejected":
       return json({ available: false, reason: "key_rejected" });
     case "rate_limited":
-      return json({ available: false, reason: "rate_limited" });
+      await recordSeekrBlock(SB_URL, SERVICE_ROLE, user.id, lookup.scope, lookup.retryAfterSeconds, now);
+      return json({
+        available: false,
+        reason: "rate_limited",
+        scope: lookup.scope,
+        retryAfterSeconds: lookup.retryAfterSeconds,
+      });
     case "unavailable":
       return json({ error: "upstream_unavailable" }, 502);
   }

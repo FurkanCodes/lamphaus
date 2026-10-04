@@ -67,9 +67,10 @@ class OkHttpSeekPreviewDownloader(
  * Lookups go through [remote] (the key never reaches the device); the
  * manifest and sheets are fetched directly. Every failure is a normal "no
  * previews" result: scrubbing works exactly as before without them. Seekr
- * meters titles per key and day, so callers load a track only once the viewer
- * starts seeking, and an account without a key is asked again only after a
- * pause, or at once when [invalidate] says the integration changed here.
+ * meters distinct movies and distinct episodes per key and day, so a used-up
+ * allowance stops lookups of that kind until Seekr says it lifts (midnight
+ * UTC), and an account without a key is asked again only after a pause, or
+ * at once when [invalidate] says the integration changed here.
  */
 class SeekPreviewRepository(
     private val remote: SeekPreviewRemoteSource?,
@@ -82,11 +83,24 @@ class SeekPreviewRepository(
     @Volatile
     private var pausedUntilMillis = 0L
 
+    /** Wall-clock end of each used-up allowance: Seekr resets at midnight UTC. */
+    private val limitedUntil = ConcurrentHashMap<SeekPreviewManifest.Limit, Long>()
+
     /** The integration changed on this device (key saved or removed): ask again now. */
     fun invalidate() {
         pausedUntilMillis = 0L
+        limitedUntil.clear()
         missing.clear()
         tracks.clear()
+    }
+
+    private fun limitFor(request: SeekPreviewRequest) =
+        if (request.type == "series") SeekPreviewManifest.Limit.EPISODES else SeekPreviewManifest.Limit.MOVIES
+
+    private fun limited(request: SeekPreviewRequest): Boolean {
+        val now = clock()
+        return (limitedUntil[limitFor(request)] ?: 0L) > now ||
+            (limitedUntil[SeekPreviewManifest.Limit.ALL] ?: 0L) > now
     }
 
     suspend fun track(media: MediaPreview, episode: Episode?, durationMillis: Long): SeekPreviewTrack? {
@@ -94,7 +108,7 @@ class SeekPreviewRepository(
         val request = requestFor(media, episode, durationMillis) ?: return null
         val cacheKey = "${request.type}:${request.id}:${request.season}:${request.episode}:${request.durationMs}"
         tracks[cacheKey]?.let { return it }
-        if (clock() < pausedUntilMillis || cacheKey in missing) return null
+        if (clock() < pausedUntilMillis || cacheKey in missing || limited(request)) return null
         val manifest = try {
             source.manifest(request)
         } catch (cancelled: CancellationException) {
@@ -110,7 +124,10 @@ class SeekPreviewRepository(
                     SeekPreviewManifest.Reason.NOT_CONNECTED,
                     SeekPreviewManifest.Reason.KEY_REJECTED,
                     -> pausedUntilMillis = clock() + NO_KEY_PAUSE_MILLIS
-                    SeekPreviewManifest.Reason.RATE_LIMITED -> pausedUntilMillis = clock() + RATE_LIMIT_PAUSE_MILLIS
+                    // Only that allowance waits, and only as long as Seekr says:
+                    // asking again before then risks the key (PLY-SEEK-01).
+                    SeekPreviewManifest.Reason.RATE_LIMITED -> limitedUntil[manifest.limit ?: SeekPreviewManifest.Limit.ALL] =
+                        clock() + (manifest.retryAfterMillis ?: RATE_LIMIT_PAUSE_MILLIS)
                     SeekPreviewManifest.Reason.NOT_FOUND -> missing += cacheKey
                 }
                 null

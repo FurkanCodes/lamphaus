@@ -110,6 +110,7 @@ import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.playbackLanguageLabel
 import com.lamphaus.app.ui.playbackLanguageOptions
+import com.lamphaus.app.ui.seekrLimitLines
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
 import java.util.Locale
@@ -1325,6 +1326,9 @@ private fun SettingsIntegrationsPage(state: AppUiState, viewModel: AppViewModel)
                         },
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    seekrLimitLines(seekr).forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     OutlinedTextField(
                         value = seekrKey,
                         onValueChange = { seekrKey = it },

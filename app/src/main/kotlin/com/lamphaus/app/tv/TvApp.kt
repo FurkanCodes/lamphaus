@@ -228,6 +228,7 @@ import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
+import com.lamphaus.app.ui.seekrLimitLines
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
 import com.lamphaus.core.model.SpoilerProtectionSettings
@@ -4162,6 +4163,9 @@ private fun TvSeekrIntegrationCard(state: AppUiState, viewModel: AppViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
         )
+        seekrLimitLines(seekr).forEach { line ->
+            Text(line, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
         TvEditableTextField(
             value = seekrKey,
             onValueChange = { seekrKey = it },
