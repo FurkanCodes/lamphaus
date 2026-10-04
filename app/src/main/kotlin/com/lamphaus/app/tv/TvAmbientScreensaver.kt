@@ -7,6 +7,10 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -204,16 +208,16 @@ private fun AmbientClock(modifier: Modifier = Modifier) {
 /** TV primary ink (TV-CLR-01) at full opacity over the scrim. */
 private val AmbientInk = Color(0xFFE3E2E6)
 
-/** Idle time on a browsing page before the ambient covers it (TV-AMB-01). */
-private const val IDLE_AMBIENT_MILLIS = 5L * 60 * 1000
-
 /**
- * The in-app idle ambient (TV-AMB-01): with the device-local setting on,
- * five minutes without a key on Home, Movies, Series, Discover, or Library
- * (never details, settings, or a menu) cover the page with the screensaver.
- * Any key ends it and is swallowed, so focus stays exactly where it was;
- * it never enters the back stack (TV-NAV-06).
+ * The in-app idle ambient (TV-AMB-01): with the device-local setting on, the
+ * chosen number of minutes without the remote on any Lamphaus screen covers
+ * it with the screensaver. It waits while something it cannot see keys for
+ * is open: a dialog or menu in its own window, or the on-screen keyboard.
+ * Playback runs in its own activity, so it never covers a playing title.
+ * Any key ends it and is swallowed, so focus stays exactly where it was; it
+ * never enters the back stack (TV-NAV-06).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TvIdleAmbient(
     state: com.lamphaus.app.ui.AppUiState,
@@ -222,22 +226,24 @@ internal fun TvIdleAmbient(
 ) {
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val resumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val enabled = state.engagement.tvIdleAmbient
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    val keyboardOpen = WindowInsets.isImeVisible
+    val signedIn = state.account is com.lamphaus.core.data.cloud.AccountState.SignedIn
+    val enabled = state.engagement.tvIdleAmbient && signedIn
+    val idleMillis = state.engagement.tvIdleAmbientMinutes * 60_000L
     LaunchedEffect(resumed) { if (resumed) host.markActive() }
+    // Coming back from a dialog or the keyboard counts as activity.
+    LaunchedEffect(windowFocused, keyboardOpen) { host.markActive() }
     // Keys are read in a snapshot flow, not in composition, so D-pad presses
     // never recompose anything here (QA-08); off by default, it costs nothing.
-    LaunchedEffect(enabled, resumed) {
-        if (!enabled || !resumed) {
+    LaunchedEffect(enabled, resumed, windowFocused, keyboardOpen, idleMillis) {
+        if (!enabled || !resumed || !windowFocused || keyboardOpen) {
             host.showing = false
             return@LaunchedEffect
         }
-        snapshotFlow { host.eligible to host.lastInputAtMillis }.collectLatest { (eligible, lastInput) ->
-            if (!eligible) {
-                host.showing = false
-                return@collectLatest
-            }
+        snapshotFlow { host.lastInputAtMillis }.collectLatest { lastInput ->
             val idleFor = android.os.SystemClock.elapsedRealtime() - lastInput
-            delay((IDLE_AMBIENT_MILLIS - idleFor).coerceAtLeast(0))
+            delay((idleMillis - idleFor).coerceAtLeast(0))
             host.showing = true
         }
     }
@@ -250,13 +256,12 @@ internal fun TvIdleAmbient(
 }
 
 /**
- * In-app idle ambient state (TV-AMB-01). The activity records every key;
- * browsing pages say whether the ambient may cover them. A key that ends
- * the ambient is swallowed so it never also acts on the page beneath.
+ * In-app idle ambient state (TV-AMB-01). The activity records every key; a
+ * key that ends the ambient is swallowed so it never also acts on the page
+ * beneath.
  */
 @Stable
 internal class TvAmbientHost {
-    var eligible by mutableStateOf(false)
     var showing by mutableStateOf(false)
     var lastInputAtMillis by mutableLongStateOf(android.os.SystemClock.elapsedRealtime())
         private set

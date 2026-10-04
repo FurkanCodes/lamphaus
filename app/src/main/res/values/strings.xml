@@ -648,7 +648,13 @@
     </plurals>
     <!-- TV ambient screensaver (TV-AMB-01) -->
     <string name="idle_ambient">Ambient after idle</string>
-    <string name="idle_ambient_description">After five minutes without the remote on a browsing page, show your titles\' artwork with a clock. Any button returns. Where your TV offers a screensaver choice, Lamphaus is listed there too.</string>
+    <string name="idle_ambient_description">When the remote has been idle on any Lamphaus screen, show your titles\' artwork with a clock. Any button returns to where you were. Where your TV offers a screensaver choice, Lamphaus is listed there too.</string>
+    <string name="idle_ambient_delay">Start after</string>
+    <string name="idle_ambient_delay_description">How long the remote stays idle before the ambient view appears. Select to change.</string>
+    <plurals name="idle_ambient_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
     <string name="undo">Undo</string>
     <!-- Monthly recap (SHR-PROD-17) -->
     <string name="recap_title">Your %1$s</string>
