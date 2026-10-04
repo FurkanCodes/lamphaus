@@ -58,10 +58,6 @@ internal fun subtitleLanguageDisplayName(
 /** Quiet time after the last remote seek key before the accumulated seek runs. */
 internal const val REMOTE_SEEK_COMMIT_DELAY_MILLIS = 450L
 
-/** Playback time before seek previews load on their own (PLY-SEEK-01). */
-internal const val SEEK_PREVIEW_PREPARE_AFTER_MILLIS = 15_000L
-internal const val SEEK_PREVIEW_PREPARE_TICK_MILLIS = 500L
-
 /**
  * Seek step for a remote key, growing while it is held (Nuvio's scrub
  * rates): 10 s for a tap, then 20 s, 30 s, and a minute on a long hold.

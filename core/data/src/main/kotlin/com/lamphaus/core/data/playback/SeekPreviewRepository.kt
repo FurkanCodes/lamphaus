@@ -118,6 +118,7 @@ class SeekPreviewRepository(
             Log.d(TAG, "skipped $label: waiting after an earlier answer")
             return null
         }
+        Log.d(TAG, "lookup $label")
         val manifest = try {
             source.manifest(request)
         } catch (cancelled: CancellationException) {
