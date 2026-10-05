@@ -33,8 +33,9 @@ internal object PlaybackEngineOptions {
 
     const val DOWNMIX_DESCRIPTION = "Fold surround sound to two speakers when audio is decoded on this device"
 
-    // Profile 7 → 8.1 conversion needs libdovi, which is not bundled; the
-    // stored value still plays as Auto, so it is not offered here.
+    // Auto already rewrites profile 7 as 8.1 where that is what makes Dolby
+    // Vision play; the stored conversion value plays the same, so it is not
+    // offered separately.
     val dolbyVisionModes = listOf(
         DolbyVisionHandling.AUTO,
         DolbyVisionHandling.NATIVE_ONLY,
@@ -48,7 +49,7 @@ internal object PlaybackEngineOptions {
     }
 
     const val DOLBY_VISION_DESCRIPTION =
-        "Auto plays HDR10 when this device can't decode a Dolby Vision stream, such as profile 7 remuxes"
+        "Auto plays profile 7 remuxes as Dolby Vision when this device decodes profile 8, and HDR10 when it can't"
 
     val decoderPriorities = listOf(DecoderPriority.AUTO, DecoderPriority.SOFTWARE_FIRST)
 

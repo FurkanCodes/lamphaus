@@ -7,7 +7,9 @@ import com.lamphaus.core.model.DolbyVisionHandling
  * When to play a Dolby Vision stream as its backward-compatible base layer
  * (Nuvio's HDR10 fallback). Media3 already does this for profiles 4, 8, and 9
  * on non-DV displays; profile 7 (UHD Blu-ray remuxes) it leaves to a decoder
- * that often cannot take it, and playback fails. The base layer of 7 is plain
+ * that often cannot take it, and playback fails. Where the decoder takes
+ * profile 8, [DolbyVisionProfile7ExtractorsFactory] has already rewritten 7 as
+ * 8.1 and it plays as Dolby Vision; otherwise the base layer of 7 is plain
  * HDR10, so it plays on the ordinary HEVC decoder.
  */
 object DolbyVisionPolicy {
@@ -16,8 +18,7 @@ object DolbyVisionPolicy {
         when (handling) {
             DolbyVisionHandling.NATIVE_ONLY -> false
             DolbyVisionHandling.HDR10_BASE_LAYER, DolbyVisionHandling.DISABLED -> true
-            // Profile 7 → 8.1 conversion needs libdovi, which is not bundled;
-            // until then conversion behaves like AUTO.
+            // Conversion happens in the extractor; the renderer sees profile 8.
             DolbyVisionHandling.AUTO, DolbyVisionHandling.CONVERT_PROFILE7_TO_81 -> !nativeDecodeSupported
         }
 

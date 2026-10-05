@@ -124,8 +124,10 @@ object SourceFitPolicy {
         val displayHdr = capabilities.supportsHdr10 || capabilities.supportsHdr10Plus || capabilities.supportsHlg
         if (traits.dolbyVision) {
             val handling = config.dolbyVisionHandling
-            val decoderTakesIt = capabilities.dolbyVisionDecoderProfiles.isNotEmpty() &&
-                (!traits.remux || PROFILE_7 in capabilities.dolbyVisionDecoderProfiles)
+            val profiles = capabilities.dolbyVisionDecoderProfiles
+            // Remuxes are profile 7: played as is, or rewritten as 8.1.
+            val decoderTakesIt = profiles.isNotEmpty() &&
+                (!traits.remux || PROFILE_7 in profiles || DolbyVisionPolicy.convertsProfile7(handling, profiles))
             val native = capabilities.supportsDolbyVision && decoderTakesIt &&
                 handling != DolbyVisionHandling.HDR10_BASE_LAYER && handling != DolbyVisionHandling.DISABLED
             if (!native) notes += if (displayHdr) SourceFitNote.DOLBY_VISION_AS_HDR10 else SourceFitNote.HDR_AS_SDR

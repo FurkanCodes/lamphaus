@@ -162,13 +162,16 @@ object Media3EngineFactory {
         // travel the normal subtitle path — delay, HDR, and the session included.
         val assHandler = AssHandler(AssRenderType.CUES)
         val assParsers = AssSubtitleParserFactory(assHandler)
+        // Profile 7 remuxes play as Dolby Vision 8.1 where the decoder takes
+        // 8 but not 7, instead of falling back to their HDR10 base layer.
+        val extractorsFactory = DolbyVisionProfile7ExtractorsFactory.forDevice(
+            DefaultExtractorsFactory().withAssMkvSupport(assParsers, assHandler),
+            config.dolbyVisionHandling,
+        )
         return ExoPlayer.Builder(context, renderersFactory.withAssSupport(assHandler))
             .setTrackSelector(trackSelector)
             .setMediaSourceFactory(
-                DefaultMediaSourceFactory(
-                    resolvingDataSource,
-                    DefaultExtractorsFactory().withAssMkvSupport(assParsers, assHandler),
-                )
+                DefaultMediaSourceFactory(resolvingDataSource, extractorsFactory)
                     .setSubtitleParserFactory(assParsers)
                     .setLoadErrorHandlingPolicy(StreamingLoadErrorPolicy()),
             )

@@ -83,9 +83,23 @@ class SourceFitPolicyTest {
     }
 
     @Test
-    fun `profile 7 remux without a profile 7 decoder plays as hdr10`() {
+    fun `profile 7 remux plays as dolby vision through a profile 8 decoder`() {
         val fit = SourceFitPolicy.evaluate(remux, dolbyVisionTv.copy(dolbyVisionDecoderProfiles = setOf(5, 8)), config)
-        assertEquals(listOf(SourceFitNote.DOLBY_VISION_AS_HDR10), fit?.notes)
+        assertEquals(true, fit?.native)
+    }
+
+    @Test
+    fun `profile 7 remux plays as hdr10 when conversion is not allowed or possible`() {
+        val profile8Tv = dolbyVisionTv.copy(dolbyVisionDecoderProfiles = setOf(5, 8))
+        val nativeOnly = config.copy(dolbyVisionHandling = DolbyVisionHandling.NATIVE_ONLY)
+        assertEquals(
+            listOf(SourceFitNote.DOLBY_VISION_AS_HDR10),
+            SourceFitPolicy.evaluate(remux, profile8Tv, nativeOnly)?.notes,
+        )
+        assertEquals(
+            listOf(SourceFitNote.DOLBY_VISION_AS_HDR10),
+            SourceFitPolicy.evaluate(remux, dolbyVisionTv.copy(dolbyVisionDecoderProfiles = setOf(5)), config)?.notes,
+        )
     }
 
     @Test

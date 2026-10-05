@@ -107,6 +107,18 @@ class DolbyVisionPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `profile 7 is rewritten only for a decoder that takes 8 but not 7`() {
+        assertEquals(true, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, setOf(5, 8)))
+        assertEquals(true, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.CONVERT_PROFILE7_TO_81, setOf(8)))
+        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, setOf(5, 7, 8)))
+        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, setOf(5)))
+        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, emptySet()))
+        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.NATIVE_ONLY, setOf(8)))
+        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.HDR10_BASE_LAYER, setOf(8)))
+        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.DISABLED, setOf(8)))
+    }
 }
 
 class AudioRoutePolicyTest {

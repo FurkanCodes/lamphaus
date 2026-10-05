@@ -23,6 +23,38 @@ developers; libass is Copyright (c) the libass developers. Their license texts
 ship with the respective source trees and must accompany any distribution of
 the built libraries.
 
+## libdovi (ported, Dolby Vision profile 7 → 8.1)
+
+- Source: https://github.com/quietvoid/dovi_tool, `dolby_vision` crate 3.4.0
+  (commit `614c816b6446dcd1dbaf433403d499a6026fbb5a`)
+- License: MIT. The RPU header, mapping, and display-management syntax and the
+  mode 2 (to 8.1) conversion in `core/player/.../dolbyvision/` are a Kotlin
+  port of that crate; no native library is shipped.
+
+```
+MIT License
+
+Copyright (c) 2026 quietvoid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## AndroidX Media3
 
 - Artifacts: androidx.media3 (ExoPlayer, media3-session, media3-ui), Apache
