@@ -108,6 +108,11 @@ object Media3EngineFactory {
         // receiver can carry the bitstream. FORCE_DECODE restricts output to
         // PCM, and night listening shapes decoded PCM, so it decodes too.
         val forcePcm = config.nightListening || config.audioOutputMode == AudioOutputMode.FORCE_DECODE
+        // Force AC-3 for optical (PLY-AUD-01): FFmpeg decodes surround the
+        // receiver cannot take and re-encodes it as AC-3, so it goes first.
+        // Decoded PCM output (above) leaves nothing to carry AC-3.
+        val ac3Transcode = config.forceAc3Transcode && !forcePcm
+        androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer.setAc3Transcoding(ac3Transcode)
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
@@ -180,8 +185,9 @@ object Media3EngineFactory {
                 }
             })
             .setExtensionRendererMode(
-                when (config.decoderPriority) {
-                    DecoderPriority.SOFTWARE_FIRST -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                when {
+                    config.decoderPriority == DecoderPriority.SOFTWARE_FIRST || ac3Transcode ->
+                        DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
                     else -> DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
                 },
             )
@@ -197,7 +203,9 @@ object Media3EngineFactory {
                     )
                     // Tunneling cannot share the FFmpeg audio path: with FFmpeg
                     // preferred, playback can stall at startup (Nuvio's rule).
-                    .setTunnelingEnabled(config.tunneledPlayback && config.decoderPriority != DecoderPriority.SOFTWARE_FIRST),
+                    .setTunnelingEnabled(
+                        config.tunneledPlayback && config.decoderPriority != DecoderPriority.SOFTWARE_FIRST && !ac3Transcode,
+                    ),
             )
         }
         // Styled ASS/SSA through libass (Nuvio's approach): embedded Matroska

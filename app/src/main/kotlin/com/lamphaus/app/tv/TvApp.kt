@@ -3732,7 +3732,8 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
         item {
-            val deviceDecoderFirst = device.decoderPriority != com.lamphaus.core.model.DecoderPriority.SOFTWARE_FIRST
+            val deviceDecoderFirst = device.decoderPriority != com.lamphaus.core.model.DecoderPriority.SOFTWARE_FIRST &&
+                !device.forceAc3Transcode
             TvSettingsToggleRow(
                 title = stringResource(R.string.tunneled_playback_setting),
                 description = stringResource(
@@ -3750,6 +3751,20 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
                 description = stringResource(R.string.skip_silence_setting_description),
                 checked = device.skipSilence,
                 onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(skipSilence = it)) },
+            )
+        }
+        item {
+            // Decoded PCM output leaves nothing to carry AC-3 (PLY-AUD-01).
+            val bitstreamAudio = !device.nightListening &&
+                device.audioOutputMode != com.lamphaus.core.model.AudioOutputMode.FORCE_DECODE
+            TvSettingsToggleRow(
+                title = stringResource(R.string.force_ac3_setting),
+                description = stringResource(
+                    if (bitstreamAudio) R.string.force_ac3_setting_description else R.string.force_ac3_requires_bitstream,
+                ),
+                checked = device.forceAc3Transcode && bitstreamAudio,
+                enabled = bitstreamAudio,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(forceAc3Transcode = it)) },
             )
         }
         // Streaming engine (PLY-NET-01): device-local, off by default.

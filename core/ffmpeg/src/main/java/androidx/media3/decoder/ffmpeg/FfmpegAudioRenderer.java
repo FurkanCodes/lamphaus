@@ -49,6 +49,18 @@ public final class FfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioD
   /** The default input buffer size. */
   private static final int DEFAULT_INPUT_BUFFER_SIZE = 960 * 6;
 
+  // Lamphaus: Force AC-3 for optical (PLY-AUD-01). Optical (S/PDIF) links carry AC-3 but not
+  // multichannel PCM, so surround the receiver cannot take as it is gets re-encoded to AC-3.
+  /** AC-3 carries at most 5.1. */
+  private static final int AC3_MAX_CHANNELS = 6;
+
+  private static volatile boolean ac3Transcoding;
+
+  /** Lamphaus: sets Force AC-3 for renderers created from now on. */
+  public static void setAc3Transcoding(boolean enabled) {
+    ac3Transcoding = enabled;
+  }
+
   /**
    * @deprecated Use {@link #FfmpegAudioRenderer(Context)} instead.
    */
@@ -134,6 +146,10 @@ public final class FfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioD
     String mimeType = checkNotNull(format.sampleMimeType);
     if (!FfmpegLibrary.isAvailable() || !MimeTypes.isAudio(mimeType)) {
       return C.FORMAT_UNSUPPORTED_TYPE;
+    } else if (ac3Transcoding && sinkSupportsFormat(format)) {
+      // Force AC-3 puts this renderer first; a format the receiver takes as it is goes through
+      // untouched instead.
+      return C.FORMAT_UNSUPPORTED_SUBTYPE;
     } else if (!FfmpegLibrary.supportsFormat(mimeType)
         || (!sinkSupportsFormat(format, C.ENCODING_PCM_16BIT)
             && !sinkSupportsFormat(format, C.ENCODING_PCM_FLOAT))) {
@@ -156,9 +172,15 @@ public final class FfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioD
     TraceUtil.beginSection("createFfmpegAudioDecoder");
     int initialInputBufferSize =
         format.maxInputSize != Format.NO_VALUE ? format.maxInputSize : DEFAULT_INPUT_BUFFER_SIZE;
+    boolean transcodeToAc3 = transcodesToAc3(format);
     FfmpegAudioDecoder decoder =
         new FfmpegAudioDecoder(
-            format, NUM_BUFFERS, NUM_BUFFERS, initialInputBufferSize, shouldOutputFloat(format));
+            format,
+            NUM_BUFFERS,
+            NUM_BUFFERS,
+            initialInputBufferSize,
+            !transcodeToAc3 && shouldOutputFloat(format),
+            transcodeToAc3);
     TraceUtil.endSection();
     return decoder;
   }
@@ -166,11 +188,37 @@ public final class FfmpegAudioRenderer extends DecoderAudioRenderer<FfmpegAudioD
   @Override
   protected Format getOutputFormat(FfmpegAudioDecoder decoder) {
     checkNotNull(decoder);
+    if (decoder.isTranscodingToAc3()) {
+      return ac3Format(decoder.getChannelCount(), decoder.getSampleRate());
+    }
     return new Format.Builder()
         .setSampleMimeType(MimeTypes.AUDIO_RAW)
         .setChannelCount(decoder.getChannelCount())
         .setSampleRate(decoder.getSampleRate())
         .setPcmEncoding(decoder.getEncoding())
+        .build();
+  }
+
+  /**
+   * Lamphaus: whether {@code format} is surround the sink takes as AC-3, so the decoder re-encodes
+   * it rather than outputting PCM an optical link would fold to stereo.
+   */
+  private boolean transcodesToAc3(Format format) {
+    if (!ac3Transcoding || format.channelCount <= 2) {
+      return false;
+    }
+    int channels = Math.min(format.channelCount, AC3_MAX_CHANNELS);
+    // The encoder keeps 32 and 44.1 kHz and resamples everything else to 48 kHz.
+    int sampleRate =
+        format.sampleRate == 32_000 || format.sampleRate == 44_100 ? format.sampleRate : 48_000;
+    return sinkSupportsFormat(ac3Format(channels, sampleRate));
+  }
+
+  private static Format ac3Format(int channelCount, int sampleRate) {
+    return new Format.Builder()
+        .setSampleMimeType(MimeTypes.AUDIO_AC3)
+        .setChannelCount(channelCount)
+        .setSampleRate(sampleRate)
         .build();
   }
 

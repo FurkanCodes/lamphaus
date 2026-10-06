@@ -84,6 +84,9 @@
     <string name="tunneled_playback_requires_device_decoder">Unavailable while FFmpeg is the first audio decoder</string>
     <string name="skip_silence_setting">Skip silence</string>
     <string name="skip_silence_setting_description">Skips silent stretches of audio during playback</string>
+    <string name="force_ac3_setting">Force AC-3 for optical</string>
+    <string name="force_ac3_setting_description">Re-encodes surround the receiver can\'t take as Dolby Digital 5.1, for optical (S/PDIF) connections</string>
+    <string name="force_ac3_requires_bitstream">Unavailable while audio is decoded on this device</string>
     <string name="downmix_layout_setting">Speaker layout</string>
     <string name="downmix_layout_setting_description">The layout surround sound is folded into</string>
     <string name="downmix_requires_on">Set Downmix to On first</string>
@@ -470,6 +473,7 @@
     <string name="source_fit_dolby_vision_as_hdr10">Dolby Vision plays as HDR10</string>
     <string name="source_fit_hdr_as_sdr">HDR shown as SDR</string>
     <string name="source_fit_audio_decoded">%1$s decoded on this device</string>
+    <string name="source_fit_audio_as_ac3">%1$s plays as Dolby Digital 5.1</string>
     <string name="audio_format_truehd" translatable="false">Dolby TrueHD</string>
     <string name="audio_format_dts_hd" translatable="false">DTS-HD</string>
     <string name="audio_format_dts" translatable="false">DTS</string>

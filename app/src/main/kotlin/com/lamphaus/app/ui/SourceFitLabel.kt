@@ -40,6 +40,7 @@ internal fun sourceFitLabel(fit: SourceFit): String {
             SourceFitNote.DOLBY_VISION_AS_HDR10 -> stringResource(R.string.source_fit_dolby_vision_as_hdr10)
             SourceFitNote.HDR_AS_SDR -> stringResource(R.string.source_fit_hdr_as_sdr)
             SourceFitNote.AUDIO_DECODED -> stringResource(R.string.source_fit_audio_decoded, audio)
+            SourceFitNote.AUDIO_AS_AC3 -> stringResource(R.string.source_fit_audio_as_ac3, audio)
         }
     }.joinToString("  ·  ")
 }

@@ -87,6 +87,9 @@ enum class SourceFitNote {
 
     /** The receiver cannot take this bitstream; it is decoded on the device. */
     AUDIO_DECODED,
+
+    /** Force AC-3 (PLY-AUD-01): the receiver cannot take this bitstream, so it arrives as Dolby Digital 5.1. */
+    AUDIO_AS_AC3,
 }
 
 /**
@@ -95,7 +98,7 @@ enum class SourceFitNote {
  */
 data class SourceFit(
     val notes: List<SourceFitNote>,
-    /** The bitstream behind [SourceFitNote.AUDIO_DECODED]. */
+    /** The bitstream behind [SourceFitNote.AUDIO_DECODED] or [SourceFitNote.AUDIO_AS_AC3]. */
     val decodedAudio: EncodedAudioFormat = EncodedAudioFormat.NONE,
 ) {
     val native: Boolean get() = notes.isEmpty()
@@ -144,13 +147,18 @@ object SourceFitPolicy {
             PASSTHROUGH_FORMATS.any { AudioRoutePolicy.routeSupports(capabilities, it) }
         val audioPasses = traits.audio != EncodedAudioFormat.NONE && receiver && passes(capabilities, traits.audio)
         if (traits.audio != EncodedAudioFormat.NONE && receiver && !audioPasses) {
-            notes += SourceFitNote.AUDIO_DECODED
+            notes += if (config.forceAc3Transcode && capabilities.supportsAc3Passthrough) {
+                SourceFitNote.AUDIO_AS_AC3
+            } else {
+                SourceFitNote.AUDIO_DECODED
+            }
         }
 
         if (notes.isNotEmpty()) {
+            val audioChanged = SourceFitNote.AUDIO_DECODED in notes || SourceFitNote.AUDIO_AS_AC3 in notes
             return SourceFit(
                 notes = notes,
-                decodedAudio = traits.audio.takeIf { SourceFitNote.AUDIO_DECODED in notes } ?: EncodedAudioFormat.NONE,
+                decodedAudio = traits.audio.takeIf { audioChanged } ?: EncodedAudioFormat.NONE,
             )
         }
         val demanding = height >= 2160 || traits.dolbyVision || traits.hdr ||

@@ -56,6 +56,9 @@ public final class FfmpegAudioDecoder
   private boolean hasOutputFormat;
   private volatile int channelCount;
   private volatile int sampleRate;
+  // Lamphaus: surround re-encoded to AC-3 for optical receivers (PLY-AUD-01).
+  private final boolean transcodeToAc3;
+  private volatile boolean transcodingToAc3;
 
   public FfmpegAudioDecoder(
       Format format,
@@ -63,6 +66,27 @@ public final class FfmpegAudioDecoder
       int numOutputBuffers,
       int initialInputBufferSize,
       boolean outputFloat)
+      throws FfmpegDecoderException {
+    this(
+        format,
+        numInputBuffers,
+        numOutputBuffers,
+        initialInputBufferSize,
+        outputFloat,
+        /* transcodeToAc3= */ false);
+  }
+
+  /**
+   * Lamphaus: with {@code transcodeToAc3}, audio wider than stereo leaves the decoder as AC-3
+   * frames (5.1 at most) instead of PCM; stereo and mono stay PCM.
+   */
+  public FfmpegAudioDecoder(
+      Format format,
+      int numInputBuffers,
+      int numOutputBuffers,
+      int initialInputBufferSize,
+      boolean outputFloat,
+      boolean transcodeToAc3)
       throws FfmpegDecoderException {
     super(new DecoderInputBuffer[numInputBuffers], new SimpleDecoderOutputBuffer[numOutputBuffers]);
     if (!FfmpegLibrary.isAvailable()) {
@@ -74,8 +98,15 @@ public final class FfmpegAudioDecoder
     encoding = outputFloat ? C.ENCODING_PCM_FLOAT : C.ENCODING_PCM_16BIT;
     outputBufferSize =
         outputFloat ? INITIAL_OUTPUT_BUFFER_SIZE_32BIT : INITIAL_OUTPUT_BUFFER_SIZE_16BIT;
+    this.transcodeToAc3 = transcodeToAc3;
     nativeContext =
-        ffmpegInitialize(codecName, extraData, outputFloat, format.sampleRate, format.channelCount);
+        ffmpegInitialize(
+            codecName,
+            extraData,
+            outputFloat,
+            format.sampleRate,
+            format.channelCount,
+            transcodeToAc3);
     if (nativeContext == 0) {
       throw new FfmpegDecoderException("Initialization failed.");
     }
@@ -129,6 +160,14 @@ public final class FfmpegAudioDecoder
       outputBuffer.shouldBeSkipped = true;
       return null;
     } else if (result == 0) {
+      if (transcodingToAc3) {
+        // AC-3 frames hold 1536 samples, so most packets complete none. A skipped buffer would
+        // make the sink re-sync its clock each time; an empty one passes through unnoticed.
+        ByteBuffer emptyData = checkNotNull(outputBuffer.data);
+        emptyData.position(0);
+        emptyData.limit(0);
+        return null;
+      }
       // There's no need to output empty buffers.
       outputBuffer.shouldBeSkipped = true;
       return null;
@@ -144,7 +183,13 @@ public final class FfmpegAudioDecoder
         parsableExtraData.setPosition(extraData.length - 4);
         sampleRate = parsableExtraData.readUnsignedIntToInt();
       }
+      transcodingToAc3 = transcodeToAc3 && ffmpegIsTranscodingToAc3(nativeContext);
       hasOutputFormat = true;
+    }
+    if (transcodingToAc3 && sampleRate > 0) {
+      // The frame's audio began with samples queued from earlier packets.
+      outputBuffer.timeUs -=
+          ffmpegGetTranscodeLeadSamples(nativeContext) * C.MICROS_PER_SECOND / sampleRate;
     }
     // Get a new reference to the output ByteBuffer in case the native decode method reallocated the
     // buffer to grow its size.
@@ -182,6 +227,11 @@ public final class FfmpegAudioDecoder
   /** Returns the encoding of output audio. */
   public @C.PcmEncoding int getEncoding() {
     return encoding;
+  }
+
+  /** Lamphaus: whether output is AC-3 rather than PCM; known once output has started. */
+  public boolean isTranscodingToAc3() {
+    return transcodingToAc3;
   }
 
   /**
@@ -298,11 +348,16 @@ public final class FfmpegAudioDecoder
   }
 
   private native long ffmpegInitialize(
-      String codecName,
+      String codec,
       @Nullable byte[] extraData,
       boolean outputFloat,
       int rawSampleRate,
-      int rawChannelCount);
+      int rawChannelCount,
+      boolean transcodeToAc3);
+
+  private native boolean ffmpegIsTranscodingToAc3(long context);
+
+  private native int ffmpegGetTranscodeLeadSamples(long context);
 
   private native int ffmpegDecode(
       long context,

@@ -6,7 +6,9 @@
 #
 # Scope: surround formats Android TV devices commonly cannot decode in
 # hardware — AC-3, E-AC-3 (Atmos core), TrueHD/MLP, and DTS/DTS-HD core.
-# Everything else stays on the platform MediaCodec decoders.
+# Everything else stays on the platform MediaCodec decoders. The AC-3
+# encoder re-encodes that surround for optical (S/PDIF) receivers when
+# Force AC-3 is on (PLY-AUD-01).
 #
 # Licensing: FFmpeg is configured --disable-gpl, so the audio decoders are
 # LGPL-2.1+. The JNI glue is Media3's Apache-2.0 extension (see NOTICE in
@@ -18,6 +20,7 @@ set -euo pipefail
 
 FFMPEG_REF="n7.1"
 DECODERS=(ac3 eac3 truehd mlp dca)
+ENCODERS=(ac3)
 ABIS=(armeabi-v7a arm64-v8a x86 x86_64)
 API=26
 
@@ -44,6 +47,7 @@ target() {
 
 decoder_flags=()
 for decoder in "${DECODERS[@]}"; do decoder_flags+=("--enable-decoder=$decoder"); done
+for encoder in "${ENCODERS[@]}"; do decoder_flags+=("--enable-encoder=$encoder"); done
 
 for abi in "${ABIS[@]}"; do
   read -r arch triple <<<"$(target "$abi")"

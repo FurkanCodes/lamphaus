@@ -387,7 +387,8 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     onClick = { choiceDialog = PlaybackChoiceDialog.DECODER },
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
-                val deviceDecoderFirst = device.decoderPriority != com.lamphaus.core.model.DecoderPriority.SOFTWARE_FIRST
+                val deviceDecoderFirst = device.decoderPriority != com.lamphaus.core.model.DecoderPriority.SOFTWARE_FIRST &&
+                !device.forceAc3Transcode
                 PlaybackSettingRow(
                     title = stringResource(R.string.tunneled_playback_setting),
                     description = stringResource(
@@ -404,6 +405,19 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     description = stringResource(R.string.skip_silence_setting_description),
                     checked = device.skipSilence,
                     onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(skipSilence = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                // Decoded PCM output leaves nothing to carry AC-3 (PLY-AUD-01).
+                val bitstreamAudio = !device.nightListening &&
+                    device.audioOutputMode != com.lamphaus.core.model.AudioOutputMode.FORCE_DECODE
+                PlaybackSettingRow(
+                    title = stringResource(R.string.force_ac3_setting),
+                    description = stringResource(
+                        if (bitstreamAudio) R.string.force_ac3_setting_description else R.string.force_ac3_requires_bitstream,
+                    ),
+                    checked = device.forceAc3Transcode && bitstreamAudio,
+                    enabled = bitstreamAudio,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(forceAc3Transcode = it)) },
                 )
                 Text(
                     PlaybackEngineOptions.APPLIES_NEXT_PLAYBACK,

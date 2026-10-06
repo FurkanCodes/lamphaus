@@ -150,6 +150,14 @@ class SourceFitPolicyTest {
     }
 
     @Test
+    fun `PLY-AUD-01 force AC-3 says the audio arrives as Dolby Digital`() {
+        val opticalReceiver = dolbyVisionTv.copy(supportsTrueHdPassthrough = false)
+        val fit = SourceFitPolicy.evaluate(remux, opticalReceiver, config.copy(forceAc3Transcode = true))
+        assertEquals(listOf(SourceFitNote.AUDIO_AS_AC3), fit?.notes)
+        assertEquals(EncodedAudioFormat.TRUEHD, fit?.decodedAudio)
+    }
+
+    @Test
     fun `decoding without any receiver is not news`() {
         val speakers = dolbyVisionTv.copy(
             supportsAc3Passthrough = false,
