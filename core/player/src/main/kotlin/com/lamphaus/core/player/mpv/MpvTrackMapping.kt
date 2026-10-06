@@ -44,6 +44,37 @@ internal data class MpvTrackPlan(
  */
 @UnstableApi
 internal object MpvTrackMapping {
+
+    /** Add-on subtitles in the order mpv downloads them: preferred languages first, otherwise as given. */
+    fun subtitleLoadOrder(
+        subtitles: List<androidx.media3.common.MediaItem.SubtitleConfiguration>,
+        preferredLanguages: List<String>,
+    ): List<androidx.media3.common.MediaItem.SubtitleConfiguration> {
+        val preferred = preferredLanguages.mapNotNull(::iso3Language).toSet()
+        if (preferred.isEmpty()) return subtitles
+        return subtitles.sortedBy { config ->
+            val language = config.language?.let(::iso3Language)
+            if (language != null && language in preferred) 0 else 1
+        }
+    }
+
+    /** "en", "en-US", "eng", and "ENG" all become "eng"; bibliographic codes ("fre") become terminology ones ("fra"). */
+    internal fun iso3Language(code: String): String? {
+        val base = code.trim().lowercase(java.util.Locale.ROOT).substringBefore('-').substringBefore('_')
+        val iso3 = when (base.length) {
+            2 -> runCatching { java.util.Locale(base).isO3Language }.getOrNull()
+            3 -> base
+            else -> null
+        } ?: return null
+        return BIBLIOGRAPHIC_TO_TERMINOLOGY[iso3] ?: iso3.ifEmpty { null }
+    }
+
+    private val BIBLIOGRAPHIC_TO_TERMINOLOGY = mapOf(
+        "alb" to "sqi", "arm" to "hye", "baq" to "eus", "bur" to "mya", "chi" to "zho", "cze" to "ces",
+        "dut" to "nld", "fre" to "fra", "geo" to "kat", "ger" to "deu", "gre" to "ell", "ice" to "isl",
+        "mac" to "mkd", "mao" to "mri", "may" to "msa", "per" to "fas", "rum" to "ron", "slo" to "slk",
+        "tib" to "bod", "wel" to "cym",
+    )
     const val AUDIO = "audio"
     const val SUBTITLE = "sub"
 

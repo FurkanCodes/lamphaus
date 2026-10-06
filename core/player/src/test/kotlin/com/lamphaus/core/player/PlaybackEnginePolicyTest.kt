@@ -19,6 +19,18 @@ class PlaybackEnginePolicyTest {
     }
 
     @Test
+    fun `PLY-ENG-01 auto keeps 4K, HDR, and Dolby Vision anime on ExoPlayer`() {
+        assertEquals(
+            PlaybackEngineKind.MEDIA3,
+            PlaybackEnginePolicy.engineFor(PlaybackEngineKind.AUTO, anime = true, mpvAvailable = true, demandingVideo = true),
+        )
+        assertEquals(
+            PlaybackEngineKind.MPV,
+            PlaybackEnginePolicy.engineFor(PlaybackEngineKind.MPV, anime = false, mpvAvailable = true, demandingVideo = true),
+        )
+    }
+
+    @Test
     fun `PLY-ENG-01 without libmpv every stream starts on ExoPlayer`() {
         assertEquals(PlaybackEngineKind.MEDIA3, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.MPV, anime = true, mpvAvailable = false))
         assertEquals(PlaybackEngineKind.MEDIA3, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.AUTO, anime = true, mpvAvailable = false))

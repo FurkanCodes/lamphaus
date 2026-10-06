@@ -86,6 +86,7 @@ static struct {
     int (*set_property_string)(mpv_handle *, const char *, const char *);
     char *(*get_property_string)(mpv_handle *, const char *);
     int (*command)(mpv_handle *, const char **);
+    int (*command_async)(mpv_handle *, uint64_t, const char **);
     int (*observe_property)(mpv_handle *, uint64_t, const char *, mpv_format);
     mpv_event *(*wait_event)(mpv_handle *, double);
     void (*wakeup)(mpv_handle *);
@@ -166,6 +167,7 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeCreate(JNIEnv *env, jclass cl
         SYM(set_property_string, "mpv_set_property_string");
         SYM(get_property_string, "mpv_get_property_string");
         SYM(command, "mpv_command");
+        SYM(command_async, "mpv_command_async");
         SYM(observe_property, "mpv_observe_property");
         SYM(wait_event, "mpv_wait_event");
         SYM(wakeup, "mpv_wakeup");
@@ -252,6 +254,31 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeCommand(
     return result == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
+/*
+ * Queues a command and returns at once; mpv copies the arguments and answers
+ * with MPV_EVENT_COMMAND_REPLY carrying [tag]. For commands that take long,
+ * such as sub-add downloading a subtitle.
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeCommandAsync(
+        JNIEnv *env, jclass clazz, jlong raw, jint tag, jobjectArray args) {
+    mpv_handle *handle = handle_of(raw);
+    if (handle == NULL) return JNI_FALSE;
+    jsize count = (*env)->GetArrayLength(env, args);
+    const char **argv = calloc((size_t) count + 1, sizeof(char *));
+    for (int i = 0; i < count; i++) {
+        jstring arg = (jstring) (*env)->GetObjectArrayElement(env, args, i);
+        const char *chars = (*env)->GetStringUTFChars(env, arg, NULL);
+        argv[i] = strdup(chars);
+        (*env)->ReleaseStringUTFChars(env, arg, chars);
+        (*env)->DeleteLocalRef(env, arg);
+    }
+    int result = mpv.command_async(handle, (uint64_t) (uint32_t) tag, argv);
+    for (int i = 0; argv[i] != NULL; i++) free((void *) argv[i]);
+    free(argv);
+    return result == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeObserveProperty(
         JNIEnv *env, jclass clazz, jlong raw, jstring name) {
@@ -268,7 +295,8 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeObserveProperty(
 /**
  * Returns the event id of the next event, or MPV_EVENT_NONE (0) on timeout.
  * An end-file event also carries its reason in bits 8-15 and its negated
- * mpv_error in bits 16-23. Values of property changes are intentionally not
+ * mpv_error in bits 16-23; a command reply carries the low 16 bits of its
+ * tag in bits 8-23. Values of property changes are intentionally not
  * marshalled: the Kotlin side re-reads the properties it tracks.
  */
 JNIEXPORT jint JNICALL
@@ -278,6 +306,9 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeWaitEvent(
     if (handle == NULL) return 0;
     mpv_event *event = mpv.wait_event(handle, timeoutSeconds);
     if (event == NULL) return 0;
+    if (event->event_id == MPV_EVENT_COMMAND_REPLY) {
+        return (jint) (event->event_id | ((event->reply_userdata & 0xFFFF) << 8));
+    }
     if (event->event_id == MPV_EVENT_END_FILE && event->data != NULL) {
         mpv_event_end_file *end = (mpv_event_end_file *) event->data;
         return (jint) (event->event_id | ((end->reason & 0xFF) << 8) | (((-end->error) & 0xFF) << 16));

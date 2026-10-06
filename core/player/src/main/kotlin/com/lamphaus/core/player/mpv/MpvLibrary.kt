@@ -59,6 +59,9 @@ object MpvLibrary {
     private external fun nativeCommand(handle: Long, args: Array<String>): Boolean
 
     @JvmStatic
+    private external fun nativeCommandAsync(handle: Long, tag: Int, args: Array<String>): Boolean
+
+    @JvmStatic
     private external fun nativeObserveProperty(handle: Long, name: String): Boolean
 
     /** Returns the next event id, or 0 on timeout. */
@@ -96,6 +99,14 @@ object MpvLibrary {
 
     fun command(handle: Long, args: List<String>): Boolean =
         synchronized(lock) { nativeCommand(handle, args.toTypedArray()) }
+
+    /**
+     * Queues [args] and returns at once; the reply arrives as a command-reply
+     * event tagged with [tag]. Long commands (a subtitle download) must use
+     * this, or every other call waits on [lock] until they finish.
+     */
+    fun commandAsync(handle: Long, tag: Int, args: List<String>): Boolean =
+        synchronized(lock) { nativeCommandAsync(handle, tag, args.toTypedArray()) }
 
     fun observeProperty(handle: Long, name: String): Boolean =
         synchronized(lock) { nativeObserveProperty(handle, name) }

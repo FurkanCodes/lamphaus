@@ -10,6 +10,20 @@ import org.junit.Test
 
 /** Plan §1/§3: Media3 overrides and preferences reach mpv, and a hand-off keeps the viewer's tracks. */
 class MpvTrackMappingTest {
+
+    @Test
+    fun `add-on subtitles in the preferred language download first`() {
+        fun sub(name: String, language: String?) =
+            androidx.media3.common.MediaItem.SubtitleConfiguration.Builder(android.net.Uri.EMPTY)
+                .setLabel(name).setLanguage(language).build()
+        val order = MpvTrackMapping.subtitleLoadOrder(
+            listOf(sub("fr", "fr"), sub("en 1", "eng"), sub("de", "de"), sub("en 2", "en"), sub("none", null)),
+            preferredLanguages = listOf("en"),
+        )
+        assertEquals(listOf("en 1", "en 2", "fr", "de", "none"), order.map { it.label })
+        assertEquals("fra", MpvTrackMapping.iso3Language("fre"))
+        assertEquals("deu", MpvTrackMapping.iso3Language("de-AT"))
+    }
     @Test
     fun `overrides select mpv ids and preferences become language lists`() {
         // TrackGroup needs the Android framework, so the override is given as (type, group id).

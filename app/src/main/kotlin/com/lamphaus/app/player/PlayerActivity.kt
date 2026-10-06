@@ -430,10 +430,12 @@ class PlayerActivity : ComponentActivity() {
                     controllerState.value = mediaController
                     // The engine is in place before the media item: libmpv when Settings
                     // (or Auto, for anime) asks for it, ExoPlayer otherwise (PLY-ENG-01).
+                    val traits = com.lamphaus.core.model.StreamTraitsParser.parse(listOfNotNull(playback.sourceLabel))
                     val engine = PlaybackEnginePolicy.engineFor(
                         requested = Media3EngineFactory.deviceConfig.engineKind,
                         anime = playback.preview?.looksLikeAnime() == true,
                         mpvAvailable = MpvLibrary.isAvailable(),
+                        demandingVideo = (traits.height ?: 0) >= 2160 || traits.hdr || traits.dolbyVision,
                     )
                     mediaController.sendCustomCommand(
                         androidx.media3.session.SessionCommand(ACTION_SELECT_ENGINE, Bundle.EMPTY),

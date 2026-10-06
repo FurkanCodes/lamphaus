@@ -67,6 +67,12 @@ class MpvPlayer(
     @Volatile private var firstFrameShown = false
     /** Playback has started since the last load; mpv reports eof-reached while a file is still opening. */
     @Volatile private var playbackStarted = false
+    /** Tags the loaded file's sub-add commands, so replies for a previous file are ignored. */
+    @Volatile private var loadGeneration = 0
+    /** Add-on subtitles of the loaded file that mpv is downloading now. */
+    @Volatile private var subtitlesPending = 0
+    /** Add-on subtitles still to start; touched only on the event thread. */
+    private val subtitleQueue = ArrayDeque<MediaItem.SubtitleConfiguration>()
     @Volatile private var videoWidth = 0
     @Volatile private var videoHeight = 0
     @Volatile private var containerFrameRate = 0f
@@ -107,13 +113,14 @@ class MpvPlayer(
         MpvLibrary.setOptionString(handle, "gpu-context", "android")
         MpvLibrary.setOptionString(handle, "opengl-es", "yes")
         MpvLibrary.setOptionString(handle, "hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
-        // Goldfish/Ranchu exposes HEVC but cannot decode Dolby Vision profiles.
-        // Software FFmpeg decoding avoids handing the same stream back to the
-        // emulator MediaCodec during the fallback handoff.
+        // MediaCodec frames go straight to the GPU (AImageReader); the copy
+        // path reads every frame back through the CPU and manages only a few
+        // frames a second on TV boxes. Goldfish/Ranchu exposes HEVC but cannot
+        // decode Dolby Vision profiles, so the emulator decodes in software.
         MpvLibrary.setOptionString(
             handle,
             "hwdec",
-            if (com.lamphaus.core.player.DeviceEnvironment.isAndroidEmulator()) "no" else "auto-safe",
+            if (com.lamphaus.core.player.DeviceEnvironment.isAndroidEmulator()) "no" else "mediacodec,mediacodec-copy",
         )
         MpvLibrary.setOptionString(handle, "ao", "audiotrack,opensles")
         // Network: Nuvio's 64 MiB forward and back demuxer caches, the same
@@ -164,6 +171,8 @@ class MpvPlayer(
         firstFramePending = false
         firstFrameShown = false
         playbackStarted = false
+        loadGeneration = (loadGeneration + 1) and 0xFFFF
+        subtitlesPending = 0
         videoWidth = 0
         videoHeight = 0
         containerFrameRate = 0f
@@ -359,26 +368,50 @@ class MpvPlayer(
             return
         }
         applyAfterLoad(final = false)
-        Thread(
-            {
-                subtitles.forEach { config ->
-                    if (released || handle == 0L) return@Thread
-                    // "auto": listed but not selected; the defaults policy or the viewer picks.
-                    runCatching {
-                        MpvLibrary.command(
-                            handle,
-                            listOf("sub-add", config.uri.toString(), "auto", config.label.orEmpty(), config.language.orEmpty()),
-                        )
-                    }
-                }
-                if (released || handle == 0L) return@Thread
-                pendingSubtitles = emptyList()
-                applyAfterLoad(final = true)
-                refreshTracks()
-                handler.post { if (!released) invalidateState() }
-            },
-            "lamphaus-mpv-subtitles",
-        ).apply { isDaemon = true; start() }
+        // Each sub-add downloads its file. mpv does that on its own threads and
+        // replies when done, so nothing here waits on the network; a few at a
+        // time, preferred languages first, so the video's own download comes
+        // first and the likely pick appears early.
+        subtitleQueue.clear()
+        subtitleQueue.addAll(MpvTrackMapping.subtitleLoadOrder(subtitles, trackParameters.preferredTextLanguages))
+        subtitlesPending = 0
+        repeat(SUBTITLE_DOWNLOADS) { startNextSubtitle() }
+        if (subtitlesPending == 0) onSubtitlesAdded()
+    }
+
+    private fun startNextSubtitle() {
+        while (true) {
+            val config = subtitleQueue.removeFirstOrNull() ?: return
+            // "auto": listed but not selected; the defaults policy or the viewer picks.
+            val started = MpvLibrary.commandAsync(
+                handle,
+                loadGeneration,
+                listOf("sub-add", config.uri.toString(), "auto", config.label.orEmpty(), config.language.orEmpty()),
+            )
+            if (started) {
+                subtitlesPending += 1
+                return
+            }
+        }
+    }
+
+    /** One add-on subtitle is in (or failed): list it, and start the next. */
+    private fun onSubtitleAdded() {
+        subtitlesPending -= 1
+        startNextSubtitle()
+        if (subtitlesPending == 0) {
+            onSubtitlesAdded()
+        } else {
+            applyAfterLoad(final = false)
+            refreshTracks()
+        }
+    }
+
+    /** Every add-on subtitle is in (or failed): restore or apply the session's tracks. */
+    private fun onSubtitlesAdded() {
+        pendingSubtitles = emptyList()
+        applyAfterLoad(final = true)
+        refreshTracks()
     }
 
     private fun applyAfterLoad(final: Boolean) {
@@ -593,6 +626,10 @@ class MpvPlayer(
                                 END_FILE_REASON_EOF -> ended = true
                                 END_FILE_REASON_ERROR -> playerError = mpvError(-((code shr 16) and 0xFF))
                             }
+                            EVENT_COMMAND_REPLY -> {
+                                val generation = (code shr 8) and 0xFFFF
+                                if (generation == loadGeneration && subtitlesPending > 0) onSubtitleAdded()
+                            }
                             EVENT_PLAYBACK_RESTART -> {
                                 restarted = true
                                 playbackStarted = true
@@ -721,6 +758,8 @@ class MpvPlayer(
         const val EVENT_FILE_LOADED = 8
         const val EVENT_END_FILE = 7
         const val EVENT_PLAYBACK_RESTART = 21
+        const val EVENT_COMMAND_REPLY = 5
+        const val SUBTITLE_DOWNLOADS = 4
         const val END_FILE_REASON_EOF = 0
         const val END_FILE_REASON_ERROR = 4
         const val MPV_ERROR_LOADING_FAILED = -13

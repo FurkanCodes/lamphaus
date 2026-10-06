@@ -109,7 +109,7 @@
     <string name="external_skip_segments_setting">Send intro and outro times</string>
     <string name="external_skip_segments_setting_description">For players that can skip them; others ignore them</string>
     <string name="playback_engine_setting">Playback engine</string>
-    <string name="playback_engine_setting_description">ExoPlayer plays most streams; libmpv handles unusual formats and heavily styled subtitles</string>
+    <string name="playback_engine_setting_description">ExoPlayer plays most streams, including 4K, HDR, and Dolby Vision; libmpv suits unusual formats and heavily styled subtitles</string>
     <string name="playback_engine_auto">Auto (libmpv for anime)</string>
     <string name="playback_engine_exoplayer">ExoPlayer</string>
     <string name="playback_engine_mpv">libmpv</string>

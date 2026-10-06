@@ -80,10 +80,16 @@ object PlaybackEnginePolicy {
      * the chosen one when the build ships it, and for Auto, libmpv for anime
      * and ExoPlayer for everything else.
      */
-    fun engineFor(requested: PlaybackEngineKind, anime: Boolean, mpvAvailable: Boolean): PlaybackEngineKind = when {
+    fun engineFor(
+        requested: PlaybackEngineKind,
+        anime: Boolean,
+        mpvAvailable: Boolean,
+        /** The source names 4K, HDR, or Dolby Vision, which libmpv renders slowly and as SDR. */
+        demandingVideo: Boolean = false,
+    ): PlaybackEngineKind = when {
         !mpvAvailable -> PlaybackEngineKind.MEDIA3
         requested == PlaybackEngineKind.MPV -> PlaybackEngineKind.MPV
-        requested == PlaybackEngineKind.AUTO && anime -> PlaybackEngineKind.MPV
+        requested == PlaybackEngineKind.AUTO && anime && !demandingVideo -> PlaybackEngineKind.MPV
         else -> PlaybackEngineKind.MEDIA3
     }
 
