@@ -201,7 +201,33 @@ data class DevicePlaybackConfig(
     val parallelConnections: Boolean = false,
     val parallelConnectionCount: Int = StreamingChoices.DEFAULT_CONNECTIONS,
     val parallelChunkSizeKb: Int = StreamingChoices.DEFAULT_CHUNK_SIZE_KB,
+    /** Convert to DV8.1 keeps profile 7 mappings as authored (PLY-DV-01). */
+    val dolbyVisionPreserveMapping: Boolean = false,
+    /** Profile 5 is announced as 8.1 for decoders without native profile 5 (PLY-DV-01). */
+    val dolbyVisionProfile5To81: Boolean = false,
+    /** HDR10+ dynamic metadata is removed from HEVC streams (PLY-DV-01). */
+    val stripHdr10Plus: Boolean = false,
+    /** Tunneled playback: hardware audio/video sync (PLY-AUD-01). */
+    val tunneledPlayback: Boolean = false,
+    /** Skip silent stretches of audio (PLY-AUD-01). */
+    val skipSilence: Boolean = false,
+    /** Speaker layout the FFmpeg downmix targets, in channels (PLY-AUD-01). */
+    val downmixChannels: Int = AudioChoices.DEFAULT_DOWNMIX_CHANNELS,
+    /** Keep the original loudness when downmixing instead of normalising (PLY-AUD-01). */
+    val downmixKeepVolume: Boolean = true,
+    /** Re-encode surround audio to Dolby Digital 5.1 for optical/SPDIF receivers (PLY-AUD-01). */
+    val forceAc3Transcode: Boolean = false,
+    /** Switch to the other engine when a stream fails to start (PLY-ENG-01). */
+    val autoSwitchEngineOnStartupError: Boolean = false,
 )
+
+/** Audio choices Settings offers (PLY-AUD-01). */
+object AudioChoices {
+    const val DEFAULT_DOWNMIX_CHANNELS = 2
+    val DOWNMIX_CHANNEL_COUNTS = listOf(2, 4, 6)
+
+    fun downmixChannels(value: Int?): Int = value?.takeIf { it in DOWNMIX_CHANNEL_COUNTS } ?: DEFAULT_DOWNMIX_CHANNELS
+}
 
 /** The streaming choices Settings offers (PLY-NET-01), with Nuvio's ranges and defaults. */
 object StreamingChoices {

@@ -228,6 +228,7 @@ import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.chunkSizeLabel
+import com.lamphaus.app.ui.downmixLayoutLabel
 import com.lamphaus.app.ui.seekrLimitLines
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
@@ -3550,6 +3551,35 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
         item {
+            // Depend on Downmix being On (MOB-SET-05 applied to TV settings).
+            val downmixOn = device.downmixMode == com.lamphaus.core.model.DownmixMode.STEREO
+            TvSettingsChoiceRow(
+                title = stringResource(R.string.downmix_layout_setting),
+                description = stringResource(
+                    if (downmixOn) R.string.downmix_layout_setting_description else R.string.downmix_requires_on,
+                ),
+                value = downmixLayoutLabel(device.downmixChannels),
+                enabled = downmixOn,
+                onClick = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(downmixChannels = PlaybackEngineOptions.next(PlaybackEngineOptions.downmixLayouts, device.downmixChannels)),
+                    )
+                },
+            )
+        }
+        item {
+            val downmixOn = device.downmixMode == com.lamphaus.core.model.DownmixMode.STEREO
+            TvSettingsToggleRow(
+                title = stringResource(R.string.downmix_keep_volume_setting),
+                description = stringResource(
+                    if (downmixOn) R.string.downmix_keep_volume_setting_description else R.string.downmix_requires_on,
+                ),
+                checked = device.downmixKeepVolume,
+                enabled = downmixOn,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(downmixKeepVolume = it)) },
+            )
+        }
+        item {
             TvSettingsToggleRow(
                 title = stringResource(R.string.night_listening_setting),
                 description = stringResource(R.string.night_listening_setting_description),
@@ -3574,6 +3604,34 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
         item {
+            val converting = device.dolbyVisionHandling == com.lamphaus.core.model.DolbyVisionHandling.CONVERT_PROFILE7_TO_81
+            TvSettingsToggleRow(
+                title = stringResource(R.string.dv_preserve_mapping_setting),
+                description = stringResource(
+                    if (converting) R.string.dv_preserve_mapping_setting_description else R.string.dv_preserve_mapping_requires_convert,
+                ),
+                checked = device.dolbyVisionPreserveMapping,
+                enabled = converting,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionPreserveMapping = it)) },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.dv_profile5_to_81_setting),
+                description = stringResource(R.string.dv_profile5_to_81_setting_description),
+                checked = device.dolbyVisionProfile5To81,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionProfile5To81 = it)) },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.strip_hdr10_plus_setting),
+                description = stringResource(R.string.strip_hdr10_plus_setting_description),
+                checked = device.stripHdr10Plus,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(stripHdr10Plus = it)) },
+            )
+        }
+        item {
             TvSettingsChoiceRow(
                 title = "Decoder priority",
                 description = PlaybackEngineOptions.DECODER_PRIORITY_DESCRIPTION,
@@ -3587,6 +3645,27 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
                         ),
                     )
                 },
+            )
+        }
+        item {
+            val deviceDecoderFirst = device.decoderPriority != com.lamphaus.core.model.DecoderPriority.SOFTWARE_FIRST
+            TvSettingsToggleRow(
+                title = stringResource(R.string.tunneled_playback_setting),
+                description = stringResource(
+                    if (deviceDecoderFirst) R.string.tunneled_playback_setting_description
+                    else R.string.tunneled_playback_requires_device_decoder,
+                ),
+                checked = device.tunneledPlayback && deviceDecoderFirst,
+                enabled = deviceDecoderFirst,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(tunneledPlayback = it)) },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.skip_silence_setting),
+                description = stringResource(R.string.skip_silence_setting_description),
+                checked = device.skipSilence,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(skipSilence = it)) },
             )
         }
         // Streaming engine (PLY-NET-01): device-local, off by default.

@@ -164,6 +164,7 @@ class DolbyVisionProfile7ExtractorsTest {
         format: Format,
         samples: List<ByteArray>,
         supplemental: ByteArray? = null,
+        stripHdr10Plus: Boolean = false,
         actionFor: ((Int?) -> DolbyVisionTrackAction)? = null,
     ): RecordingExtractorOutput {
         val output = RecordingExtractorOutput()
@@ -186,9 +187,9 @@ class DolbyVisionProfile7ExtractorsTest {
         }
         val delegate = ExtractorsFactory { arrayOf<Extractor>(extractor) }
         val factory = if (actionFor == null) {
-            DolbyVisionProfile7ExtractorsFactory(delegate)
+            DolbyVisionProfile7ExtractorsFactory(delegate, stripHdr10Plus)
         } else {
-            DolbyVisionProfile7ExtractorsFactory(delegate, actionFor)
+            DolbyVisionProfile7ExtractorsFactory(delegate, stripHdr10Plus, actionFor)
         }
         val wrapped = factory.createExtractors().single()
         wrapped.init(output)

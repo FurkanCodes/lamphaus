@@ -20,6 +20,8 @@ internal object TestRpus {
         profile81Coefficients: Boolean = layer == Layer.NONE,
         usePrevious: Boolean = false,
         cmV40: Boolean = true,
+        /** A profile 5 header (vdr_rpu_profile 0, full-range base layer); use with [Layer.NONE]. */
+        profile5: Boolean = false,
     ): ByteArray {
         val w = RpuBitWriter()
         val residual = layer != Layer.NONE
@@ -27,14 +29,14 @@ internal object TestRpus {
         // rpu_data_header
         w.bits(6, 2) // rpu_type
         w.bits(11, 18) // rpu_format
-        w.bits(4, 1) // vdr_rpu_profile
+        w.bits(4, if (profile5) 0 else 1) // vdr_rpu_profile
         w.bits(4, 0) // vdr_rpu_level
         w.bit(true) // vdr_seq_info_present_flag
         w.bit(false) // chroma_resampling_explicit_filter_flag
         w.bits(2, 0) // coefficient_data_type
         w.ue(23) // coefficient_log2_denom
         w.bits(2, 1) // vdr_rpu_normalized_idc
-        w.bit(false) // bl_video_full_range_flag
+        w.bit(profile5) // bl_video_full_range_flag
         w.ue(2) // bl_bit_depth_minus8
         w.ue(2) // el_bit_depth_minus8
         w.ue(4) // vdr_bit_depth_minus8

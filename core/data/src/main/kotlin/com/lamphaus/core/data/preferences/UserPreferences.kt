@@ -16,6 +16,7 @@ import com.lamphaus.core.model.AudioOutputMode
 import com.lamphaus.core.model.DecoderPriority
 import com.lamphaus.core.model.DevicePlaybackConfig
 import com.lamphaus.core.model.StreamingChoices
+import com.lamphaus.core.model.AudioChoices
 import com.lamphaus.core.model.DolbyVisionHandling
 import com.lamphaus.core.model.DownmixMode
 import com.lamphaus.core.model.FrameRateMatching
@@ -175,6 +176,15 @@ class UserPreferences(private val context: Context) {
                 parallelConnections = values[PLAYBACK_PARALLEL],
                 parallelConnectionCount = values[PLAYBACK_PARALLEL_CONNECTIONS],
                 parallelChunkSizeKb = values[PLAYBACK_PARALLEL_CHUNK_KB],
+                dolbyVisionPreserveMapping = values[PLAYBACK_DV_PRESERVE_MAPPING],
+                dolbyVisionProfile5To81 = values[PLAYBACK_DV_PROFILE5_TO_81],
+                stripHdr10Plus = values[PLAYBACK_STRIP_HDR10_PLUS],
+                tunneledPlayback = values[PLAYBACK_TUNNELED],
+                skipSilence = values[PLAYBACK_SKIP_SILENCE],
+                downmixChannels = values[PLAYBACK_DOWNMIX_CHANNELS],
+                downmixKeepVolume = values[PLAYBACK_DOWNMIX_KEEP_VOLUME],
+                forceAc3Transcode = values[PLAYBACK_FORCE_AC3],
+                autoSwitchEngineOnStartupError = values[PLAYBACK_AUTO_SWITCH_ENGINE],
             ),
             updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
@@ -442,6 +452,15 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_PARALLEL] = config.parallelConnections
             it[PLAYBACK_PARALLEL_CONNECTIONS] = StreamingChoices.connections(config.parallelConnectionCount)
             it[PLAYBACK_PARALLEL_CHUNK_KB] = StreamingChoices.chunkSizeKb(config.parallelChunkSizeKb)
+            it[PLAYBACK_DV_PRESERVE_MAPPING] = config.dolbyVisionPreserveMapping
+            it[PLAYBACK_DV_PROFILE5_TO_81] = config.dolbyVisionProfile5To81
+            it[PLAYBACK_STRIP_HDR10_PLUS] = config.stripHdr10Plus
+            it[PLAYBACK_TUNNELED] = config.tunneledPlayback
+            it[PLAYBACK_SKIP_SILENCE] = config.skipSilence
+            it[PLAYBACK_DOWNMIX_CHANNELS] = AudioChoices.downmixChannels(config.downmixChannels)
+            it[PLAYBACK_DOWNMIX_KEEP_VOLUME] = config.downmixKeepVolume
+            it[PLAYBACK_FORCE_AC3] = config.forceAc3Transcode
+            it[PLAYBACK_AUTO_SWITCH_ENGINE] = config.autoSwitchEngineOnStartupError
         }
     }
 
@@ -544,6 +563,15 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_PARALLEL = booleanPreferencesKey("playback_parallel_connections")
         val PLAYBACK_PARALLEL_CONNECTIONS = intPreferencesKey("playback_parallel_connection_count")
         val PLAYBACK_PARALLEL_CHUNK_KB = intPreferencesKey("playback_parallel_chunk_kb")
+        val PLAYBACK_DV_PRESERVE_MAPPING = booleanPreferencesKey("playback_dv_preserve_mapping")
+        val PLAYBACK_DV_PROFILE5_TO_81 = booleanPreferencesKey("playback_dv_profile5_to_81")
+        val PLAYBACK_STRIP_HDR10_PLUS = booleanPreferencesKey("playback_strip_hdr10_plus")
+        val PLAYBACK_TUNNELED = booleanPreferencesKey("playback_tunneled")
+        val PLAYBACK_SKIP_SILENCE = booleanPreferencesKey("playback_skip_silence")
+        val PLAYBACK_DOWNMIX_CHANNELS = intPreferencesKey("playback_downmix_channels")
+        val PLAYBACK_DOWNMIX_KEEP_VOLUME = booleanPreferencesKey("playback_downmix_keep_volume")
+        val PLAYBACK_FORCE_AC3 = booleanPreferencesKey("playback_force_ac3")
+        val PLAYBACK_AUTO_SWITCH_ENGINE = booleanPreferencesKey("playback_auto_switch_engine")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }
@@ -600,6 +628,15 @@ internal fun devicePlaybackConfigFromKeys(
     parallelConnections: Boolean? = null,
     parallelConnectionCount: Int? = null,
     parallelChunkSizeKb: Int? = null,
+    dolbyVisionPreserveMapping: Boolean? = null,
+    dolbyVisionProfile5To81: Boolean? = null,
+    stripHdr10Plus: Boolean? = null,
+    tunneledPlayback: Boolean? = null,
+    skipSilence: Boolean? = null,
+    downmixChannels: Int? = null,
+    downmixKeepVolume: Boolean? = null,
+    forceAc3Transcode: Boolean? = null,
+    autoSwitchEngineOnStartupError: Boolean? = null,
 ): DevicePlaybackConfig {
 
     return DevicePlaybackConfig(
@@ -615,6 +652,15 @@ internal fun devicePlaybackConfigFromKeys(
         parallelConnections = parallelConnections ?: false,
         parallelConnectionCount = StreamingChoices.connections(parallelConnectionCount),
         parallelChunkSizeKb = StreamingChoices.chunkSizeKb(parallelChunkSizeKb),
+        dolbyVisionPreserveMapping = dolbyVisionPreserveMapping ?: false,
+        dolbyVisionProfile5To81 = dolbyVisionProfile5To81 ?: false,
+        stripHdr10Plus = stripHdr10Plus ?: false,
+        tunneledPlayback = tunneledPlayback ?: false,
+        skipSilence = skipSilence ?: false,
+        downmixChannels = AudioChoices.downmixChannels(downmixChannels),
+        downmixKeepVolume = downmixKeepVolume ?: true,
+        forceAc3Transcode = forceAc3Transcode ?: false,
+        autoSwitchEngineOnStartupError = autoSwitchEngineOnStartupError ?: false,
     )
 }
 

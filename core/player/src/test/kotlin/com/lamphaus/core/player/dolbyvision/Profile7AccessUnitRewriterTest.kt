@@ -85,6 +85,47 @@ class Profile7AccessUnitRewriterTest {
     }
 
     @Test
+    fun `preserving the mapping keeps a full enhancement layer's curves`() {
+        val rewriter = Profile7AccessUnitRewriter()
+        val accessUnit = nal(slice, enhancementLayer, rpuNal(Layer.FEL))
+        val length = rewriter.rewrite(accessUnit, 0, accessUnit.size, Profile7AccessUnitRewriter.Mode.TO_81_PRESERVING_MAPPING)
+        assertArrayEquals(nal(slice, rpuNal(Layer.NONE)), rewriter.output.copyOf(length))
+    }
+
+    @Test
+    fun `profile 5 RPUs become 8_1 with an identity mapping`() {
+        val rewriter = Profile7AccessUnitRewriter()
+        val profile5 = Profile7AccessUnitRewriter.escapeRpu(TestRpus.rpu(Layer.NONE, profile81Coefficients = false, profile5 = true))
+        val accessUnit = nal(slice, profile5)
+        val length = rewriter.rewrite(accessUnit, 0, accessUnit.size, Profile7AccessUnitRewriter.Mode.PROFILE5_TO_81)
+        val expected = Profile7AccessUnitRewriter.escapeRpu(TestRpus.rpu(Layer.NONE, identityMapping = true))
+        assertArrayEquals(nal(slice, expected), rewriter.output.copyOf(length))
+    }
+
+    @Test
+    fun `HDR10+ SEI messages are removed, other SEI messages kept`() {
+        // Prefix SEI (type 39): an HDR10+ T.35 message, then a 2-byte user message (type 5).
+        val hdr10Plus = byteArrayOf(0x04, 0x08, 0xB5.toByte(), 0x00, 0x3C, 0x00, 0x01, 0x04, 0x01, 0x40)
+        val other = byteArrayOf(0x05, 0x02, 0x11, 0x22)
+        val sei = byteArrayOf(0x4E, 0x01) + hdr10Plus + other + byteArrayOf(0x80.toByte())
+        val onlyHdr10Plus = byteArrayOf(0x4E, 0x01) + hdr10Plus + byteArrayOf(0x80.toByte())
+        val rewriter = Profile7AccessUnitRewriter()
+        val accessUnit = nal(sei, slice, onlyHdr10Plus)
+        val length = rewriter.rewrite(accessUnit, 0, accessUnit.size, Profile7AccessUnitRewriter.Mode.KEEP, stripHdr10Plus = true)
+        val keptSei = byteArrayOf(0x4E, 0x01) + other + byteArrayOf(0x80.toByte())
+        assertArrayEquals(nal(keptSei, slice), rewriter.output.copyOf(length))
+        assertEquals(2L, rewriter.strippedHdr10PlusMessages)
+    }
+
+    @Test
+    fun `keep mode leaves Dolby Vision alone`() {
+        val accessUnit = nal(slice, enhancementLayer, rpuNal(Layer.MEL))
+        val rewriter = Profile7AccessUnitRewriter()
+        val length = rewriter.rewrite(accessUnit, 0, accessUnit.size, Profile7AccessUnitRewriter.Mode.KEEP)
+        assertArrayEquals(accessUnit, rewriter.output.copyOf(length))
+    }
+
+    @Test
     fun `strip drops RPUs and the enhancement layer, keeping the base layer`() {
         val rewriter = Profile7AccessUnitRewriter()
         val accessUnit = nal(vps, slice, enhancementLayer, layerOneSlice, rpuNal(Layer.MEL))

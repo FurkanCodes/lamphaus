@@ -108,6 +108,7 @@ import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.chunkSizeLabel
+import com.lamphaus.app.ui.downmixLayoutLabel
 import com.lamphaus.app.ui.playbackLanguageLabel
 import com.lamphaus.app.ui.playbackLanguageOptions
 import com.lamphaus.app.ui.seekrLimitLines
@@ -315,6 +316,28 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     onClick = { choiceDialog = PlaybackChoiceDialog.DOWNMIX },
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                val downmixOn = device.downmixMode == com.lamphaus.core.model.DownmixMode.STEREO
+                // Depend on Downmix being On (MOB-SET-05).
+                PlaybackEngineChoiceRow(
+                    title = stringResource(R.string.downmix_layout_setting),
+                    description = stringResource(
+                        if (downmixOn) R.string.downmix_layout_setting_description else R.string.downmix_requires_on,
+                    ),
+                    value = downmixLayoutLabel(device.downmixChannels),
+                    enabled = downmixOn,
+                    onClick = { choiceDialog = PlaybackChoiceDialog.DOWNMIX_LAYOUT },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.downmix_keep_volume_setting),
+                    description = stringResource(
+                        if (downmixOn) R.string.downmix_keep_volume_setting_description else R.string.downmix_requires_on,
+                    ),
+                    checked = device.downmixKeepVolume,
+                    enabled = downmixOn,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(downmixKeepVolume = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 PlaybackSettingRow(
                     title = stringResource(R.string.night_listening_setting),
                     description = stringResource(R.string.night_listening_setting_description),
@@ -329,11 +352,55 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     onClick = { choiceDialog = PlaybackChoiceDialog.DOLBY_VISION },
                 )
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                val converting = device.dolbyVisionHandling == com.lamphaus.core.model.DolbyVisionHandling.CONVERT_PROFILE7_TO_81
+                PlaybackSettingRow(
+                    title = stringResource(R.string.dv_preserve_mapping_setting),
+                    description = stringResource(
+                        if (converting) R.string.dv_preserve_mapping_setting_description else R.string.dv_preserve_mapping_requires_convert,
+                    ),
+                    checked = device.dolbyVisionPreserveMapping,
+                    enabled = converting,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionPreserveMapping = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.dv_profile5_to_81_setting),
+                    description = stringResource(R.string.dv_profile5_to_81_setting_description),
+                    checked = device.dolbyVisionProfile5To81,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionProfile5To81 = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.strip_hdr10_plus_setting),
+                    description = stringResource(R.string.strip_hdr10_plus_setting_description),
+                    checked = device.stripHdr10Plus,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(stripHdr10Plus = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 PlaybackEngineChoiceRow(
                     title = "Decoder priority",
                     description = PlaybackEngineOptions.DECODER_PRIORITY_DESCRIPTION,
                     value = PlaybackEngineOptions.decoderPriorityLabel(device.decoderPriority),
                     onClick = { choiceDialog = PlaybackChoiceDialog.DECODER },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                val deviceDecoderFirst = device.decoderPriority != com.lamphaus.core.model.DecoderPriority.SOFTWARE_FIRST
+                PlaybackSettingRow(
+                    title = stringResource(R.string.tunneled_playback_setting),
+                    description = stringResource(
+                        if (deviceDecoderFirst) R.string.tunneled_playback_setting_description
+                        else R.string.tunneled_playback_requires_device_decoder,
+                    ),
+                    checked = device.tunneledPlayback && deviceDecoderFirst,
+                    enabled = deviceDecoderFirst,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(tunneledPlayback = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.skip_silence_setting),
+                    description = stringResource(R.string.skip_silence_setting_description),
+                    checked = device.skipSilence,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(skipSilence = it)) },
                 )
                 Text(
                     PlaybackEngineOptions.APPLIES_NEXT_PLAYBACK,
@@ -504,6 +571,11 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionHandling = mode))
                 }
             }
+            PlaybackChoiceDialog.DOWNMIX_LAYOUT -> PlaybackEngineOptions.downmixLayouts.map { channels ->
+                PlaybackChoice(downmixLayoutLabel(channels), device.downmixChannels == channels) {
+                    viewModel.setDevicePlaybackConfig(device.copy(downmixChannels = channels))
+                }
+            }
             PlaybackChoiceDialog.CONNECTIONS -> PlaybackEngineOptions.connectionCounts.map { count ->
                 PlaybackChoice(count.toString(), device.parallelConnectionCount == count) {
                     viewModel.setDevicePlaybackConfig(device.copy(parallelConnectionCount = count))
@@ -538,6 +610,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                         PlaybackChoiceDialog.DOLBY_VISION -> "Dolby Vision"
                         PlaybackChoiceDialog.DECODER -> "Decoder priority"
                         PlaybackChoiceDialog.CONNECTIONS -> stringResource(R.string.parallel_connection_count)
+                        PlaybackChoiceDialog.DOWNMIX_LAYOUT -> stringResource(R.string.downmix_layout_setting)
                         PlaybackChoiceDialog.CHUNK_SIZE -> stringResource(R.string.parallel_chunk_size)
                     },
                 )
@@ -567,7 +640,8 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
 }
 
 private enum class PlaybackChoiceDialog {
-    AUDIO, SUBTITLES, SUBTITLE_LANGUAGE, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOLBY_VISION, DECODER, CONNECTIONS, CHUNK_SIZE,
+    AUDIO, SUBTITLES, SUBTITLE_LANGUAGE, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOWNMIX_LAYOUT, DOLBY_VISION, DECODER,
+    CONNECTIONS, CHUNK_SIZE,
 }
 
 @Composable

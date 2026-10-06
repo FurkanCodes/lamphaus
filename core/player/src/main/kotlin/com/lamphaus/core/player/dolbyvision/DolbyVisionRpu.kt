@@ -24,11 +24,35 @@ internal class DolbyVisionRpu private constructor(
      * libdovi conversion mode 2 ("to 8.1") for a profile 7 RPU: drops the
      * enhancement-layer residual, and for a full enhancement layer (FEL) also
      * resets the mapping to identity, because the base layer alone is already
-     * the HDR10 picture. Returns false, changing nothing, for other profiles.
+     * the HDR10 picture. With [preserveMapping] (libdovi's mapping-preserving
+     * mode, Nuvio's "Preserve DV mapping") every mapping stays as authored.
+     * Returns false, changing nothing, for other profiles.
      */
-    fun convertToProfile81(): Boolean {
+    fun convertToProfile81(preserveMapping: Boolean = false): Boolean {
         if (profile != 7) return false
         val fullEnhancementLayer = mapping?.isFullEnhancementLayer == true
+        dropResidual()
+        if (fullEnhancementLayer && !preserveMapping) mapping?.setIdentity()
+        displayManagement?.setProfile81Coefficients()
+        return true
+    }
+
+    /**
+     * libdovi's profile 5 → 8.1 conversion (Nuvio's "Convert DV5 to DV8.1"
+     * with Convert to DV8.1): profile 8 signalling with a limited-range base
+     * layer, an identity mapping, and 8.1 colour coefficients.
+     */
+    fun convertProfile5To81(): Boolean {
+        if (profile != 5) return false
+        dropResidual()
+        header.vdrRpuProfile = 1
+        header.blVideoFullRange = false
+        mapping?.setIdentity()
+        displayManagement?.setProfile81Coefficients()
+        return true
+    }
+
+    private fun dropResidual() {
         header.elSpatialResamplingFilter = false
         header.disableResidual = true
         mapping?.apply {
@@ -36,10 +60,7 @@ internal class DolbyVisionRpu private constructor(
             nlq = null
             numXPartitionsMinus1 = 0
             numYPartitionsMinus1 = 0
-            if (fullEnhancementLayer) setIdentity()
         }
-        displayManagement?.setProfile81Coefficients()
-        return true
     }
 
     /**
@@ -145,13 +166,13 @@ internal class BitRun(private val startBit: Int, private val bitCount: Int) {
 internal class RpuHeader(
     private val rpuType: Int,
     private val rpuFormat: Int,
-    private val vdrRpuProfile: Int,
+    var vdrRpuProfile: Int,
     private val vdrRpuLevel: Int,
     private val chromaResamplingExplicitFilter: Boolean,
     val coefficientDataType: Int,
     private val coefficientLog2Denom: Long,
     private val vdrRpuNormalizedIdc: Int,
-    private val blVideoFullRange: Boolean,
+    var blVideoFullRange: Boolean,
     val blBitDepthMinus8: Long,
     /** el_bit_depth_minus8 with ext_mapping_idc packed above its low byte, as coded. */
     private val elBitDepthField: Long,

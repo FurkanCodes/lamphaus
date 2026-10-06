@@ -28,11 +28,14 @@ internal object PlaybackEngineOptions {
 
     fun downmixLabel(mode: DownmixMode): String = when (mode) {
         DownmixMode.AUTO -> "Auto"
-        DownmixMode.STEREO -> "Stereo"
+        DownmixMode.STEREO -> "On"
         DownmixMode.NEVER -> "Never"
     }
 
-    const val DOWNMIX_DESCRIPTION = "Fold surround sound to two speakers when audio is decoded on this device"
+    const val DOWNMIX_DESCRIPTION = "Fold surround sound into fewer speakers when audio is decoded on this device"
+
+    /** Speaker layouts the downmix offers (PLY-AUD-01). */
+    val downmixLayouts = com.lamphaus.core.model.AudioChoices.DOWNMIX_CHANNEL_COUNTS
 
     // Nuvio's Dolby Vision handling choices (Phase 5), in its order.
     val dolbyVisionModes = listOf(

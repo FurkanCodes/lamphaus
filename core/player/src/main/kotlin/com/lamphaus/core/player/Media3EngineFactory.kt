@@ -157,7 +157,7 @@ object Media3EngineFactory {
                 // go through Sonic on decoded PCM instead (SpeedAwareAudioSink).
                 return SpeedAwareAudioSink(
                     builder
-                        .setAudioProcessors(audioProcessors(config.downmixMode, config.nightListening))
+                        .setAudioProcessors(audioProcessors(config))
                         .setEnableFloatOutput(enableFloatOutput)
                         .build(),
                 )
@@ -194,7 +194,10 @@ object Media3EngineFactory {
                     // when the device reports fewer output channels.
                     .setConstrainAudioChannelCountToDeviceCapabilities(
                         config.downmixMode != DownmixMode.NEVER,
-                    ),
+                    )
+                    // Tunneling cannot share the FFmpeg audio path: with FFmpeg
+                    // preferred, playback can stall at startup (Nuvio's rule).
+                    .setTunnelingEnabled(config.tunneledPlayback && config.decoderPriority != DecoderPriority.SOFTWARE_FIRST),
             )
         }
         // Styled ASS/SSA through libass (Nuvio's approach): embedded Matroska
@@ -205,9 +208,12 @@ object Media3EngineFactory {
         // Profile 7 remuxes play as Dolby Vision 8.1 where the decoder takes
         // 8 but not 7, instead of falling back to their HDR10 base layer.
         val extractorsFactory = DolbyVisionProfile7ExtractorsFactory.forDevice(
-            DefaultExtractorsFactory().withAssMkvSupport(assParsers, assHandler),
-            config.dolbyVisionHandling,
-            PlaybackCapabilityProbe.displayDolbyVision(context),
+            factory = DefaultExtractorsFactory().withAssMkvSupport(assParsers, assHandler),
+            handling = config.dolbyVisionHandling,
+            displayDolbyVision = PlaybackCapabilityProbe.displayDolbyVision(context),
+            profile5To81 = config.dolbyVisionProfile5To81,
+            preserveMapping = config.dolbyVisionPreserveMapping,
+            stripHdr10Plus = config.stripHdr10Plus,
         )
         return ExoPlayer.Builder(context, renderersFactory.withAssSupport(assHandler))
             .setTrackSelector(trackSelector)
@@ -273,6 +279,7 @@ object Media3EngineFactory {
                     true,
                 )
                 setHandleAudioBecomingNoisy(true)
+                skipSilenceEnabled = config.skipSilence
                 setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
             }
     }
@@ -280,13 +287,21 @@ object Media3EngineFactory {
      * Decoded audio passes through the optional stereo fold-down, then the
      * route delay. Bitstream passthrough bypasses both (it cannot be mixed).
      */
-    /** Night listening runs first, so its dialogue lift reaches the centre channel before any downmix. */
-    private fun audioProcessors(downmixMode: DownmixMode, nightListening: Boolean): Array<AudioProcessor> {
-        val night = listOfNotNull(NightListeningAudioProcessor().takeIf { nightListening })
-        if (downmixMode != DownmixMode.STEREO) return (night + audioDelayProcessor).toTypedArray()
+    /**
+     * Night listening runs first, so its dialogue lift reaches the centre
+     * channel before any downmix. Downmix "On" folds anything wider than the
+     * chosen speaker layout into it (PLY-AUD-01).
+     */
+    private fun audioProcessors(config: DevicePlaybackConfig): Array<AudioProcessor> {
+        val night = listOfNotNull(NightListeningAudioProcessor().takeIf { config.nightListening })
+        if (config.downmixMode != DownmixMode.STEREO) return (night + audioDelayProcessor).toTypedArray()
+        val target = config.downmixChannels.takeIf { it in Downmix.targetChannelCounts } ?: 2
         val downmix = ChannelMixingAudioProcessor().apply {
-            StereoDownmix.supportedChannelCounts.forEach { channels ->
-                putChannelMixingMatrix(ChannelMixingMatrix(channels, 2, StereoDownmix.coefficients(channels)))
+            // Stereo also maps mono to both speakers; wider targets only fold wider inputs.
+            Downmix.supportedInputChannelCounts.filter { it > target || target == 2 }.forEach { channels ->
+                putChannelMixingMatrix(
+                    ChannelMixingMatrix(channels, target, Downmix.coefficients(channels, target, config.downmixKeepVolume)),
+                )
             }
         }
         return (night + downmix + audioDelayProcessor).toTypedArray()
@@ -408,6 +423,13 @@ object Media3EngineFactory {
             builtWith.parallelConnections != wanted.parallelConnections ||
             builtWith.parallelConnectionCount != wanted.parallelConnectionCount ||
             builtWith.parallelChunkSizeKb != wanted.parallelChunkSizeKb ||
+            builtWith.dolbyVisionPreserveMapping != wanted.dolbyVisionPreserveMapping ||
+            builtWith.dolbyVisionProfile5To81 != wanted.dolbyVisionProfile5To81 ||
+            builtWith.stripHdr10Plus != wanted.stripHdr10Plus ||
+            builtWith.tunneledPlayback != wanted.tunneledPlayback ||
+            builtWith.downmixChannels != wanted.downmixChannels ||
+            builtWith.downmixKeepVolume != wanted.downmixKeepVolume ||
+            builtWith.forceAc3Transcode != wanted.forceAc3Transcode ||
             builtWith.dolbyVisionHandling != wanted.dolbyVisionHandling
 
     /**
@@ -417,6 +439,7 @@ object Media3EngineFactory {
      */
     fun applyDeviceConfig(player: ExoPlayer, config: DevicePlaybackConfig) {
         player.videoChangeFrameRateStrategy = videoChangeFrameRateStrategy(config)
+        player.skipSilenceEnabled = config.skipSilence
     }
 
     /** Applies the frame-rate hint to the live session player when present. */

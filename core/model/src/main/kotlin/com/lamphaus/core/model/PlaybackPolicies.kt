@@ -53,6 +53,15 @@ enum class DolbyVisionTrackAction {
     /** Profile 7 → 8.1 with libdovi mode 2, falling back to mode 1 per RPU. */
     CONVERT_TO_81,
 
+    /** Profile 7 → 8.1 keeping every mapping as authored (Nuvio's "Preserve DV mapping"). */
+    CONVERT_TO_81_PRESERVING_MAPPING,
+
+    /** Profile 5 announced as 8.1, samples untouched (Nuvio's "Convert DV5 to DV8.1"). */
+    SIGNAL_PROFILE5_AS_81,
+
+    /** Profile 5 announced as 8.1 with every RPU rewritten (that switch with Convert to DV8.1). */
+    CONVERT_PROFILE5_TO_81,
+
     /** Drop the RPU and enhancement layer: the HDR10 base layer plays on the HEVC decoder. */
     STRIP_TO_BASE_LAYER,
 }
@@ -64,22 +73,37 @@ object DolbyVisionPolicy {
      * as is where the decoder takes 7, converts it where the decoder takes 8,
      * and strips it to HDR10 otherwise; any profile 7 or 8 track on a display
      * known to lack Dolby Vision plays its HDR10 base layer. Profile 5 has no
-     * base layer and always keeps its Dolby Vision decoder. An unknown
-     * display ([displayDolbyVision] null) is treated as Dolby Vision capable.
+     * base layer and keeps its Dolby Vision decoder, unless [profile5To81]
+     * signals it as 8.1 (rewriting its RPUs too with Convert to DV8.1). An
+     * unknown display ([displayDolbyVision] null) is treated as Dolby Vision
+     * capable. [preserveMapping] keeps mappings when Convert to DV8.1 converts.
      */
     fun trackAction(
         handling: DolbyVisionHandling,
         profile: Int?,
         decoderProfiles: Set<Int>,
         displayDolbyVision: Boolean?,
+        profile5To81: Boolean = false,
+        preserveMapping: Boolean = false,
     ): DolbyVisionTrackAction {
+        if (profile == 5) {
+            return when {
+                !profile5To81 -> DolbyVisionTrackAction.PASS_THROUGH
+                handling == DolbyVisionHandling.CONVERT_PROFILE7_TO_81 -> DolbyVisionTrackAction.CONVERT_PROFILE5_TO_81
+                handling == DolbyVisionHandling.AUTO -> DolbyVisionTrackAction.SIGNAL_PROFILE5_AS_81
+                else -> DolbyVisionTrackAction.PASS_THROUGH
+            }
+        }
         if (profile != 7 && profile != 8) return DolbyVisionTrackAction.PASS_THROUGH
         return when (handling) {
             DolbyVisionHandling.NATIVE_ONLY -> DolbyVisionTrackAction.PASS_THROUGH
             DolbyVisionHandling.HDR10_BASE_LAYER, DolbyVisionHandling.DISABLED ->
                 DolbyVisionTrackAction.STRIP_TO_BASE_LAYER
-            DolbyVisionHandling.CONVERT_PROFILE7_TO_81 ->
-                if (profile == 7) DolbyVisionTrackAction.CONVERT_TO_81 else DolbyVisionTrackAction.PASS_THROUGH
+            DolbyVisionHandling.CONVERT_PROFILE7_TO_81 -> when {
+                profile != 7 -> DolbyVisionTrackAction.PASS_THROUGH
+                preserveMapping -> DolbyVisionTrackAction.CONVERT_TO_81_PRESERVING_MAPPING
+                else -> DolbyVisionTrackAction.CONVERT_TO_81
+            }
             DolbyVisionHandling.AUTO -> when {
                 displayDolbyVision == false -> DolbyVisionTrackAction.STRIP_TO_BASE_LAYER
                 profile == 8 -> DolbyVisionTrackAction.PASS_THROUGH
@@ -96,9 +120,15 @@ object DolbyVisionPolicy {
         decoderProfiles: Set<Int>,
         displayDolbyVision: Boolean?,
     ): Boolean = when (trackAction(handling, 7, decoderProfiles, displayDolbyVision)) {
-        DolbyVisionTrackAction.CONVERT_TO_MEL, DolbyVisionTrackAction.CONVERT_TO_81 -> 8 in decoderProfiles || 7 in decoderProfiles
+        DolbyVisionTrackAction.CONVERT_TO_MEL,
+        DolbyVisionTrackAction.CONVERT_TO_81,
+        DolbyVisionTrackAction.CONVERT_TO_81_PRESERVING_MAPPING,
+        -> 8 in decoderProfiles || 7 in decoderProfiles
         DolbyVisionTrackAction.PASS_THROUGH -> 7 in decoderProfiles
-        DolbyVisionTrackAction.STRIP_TO_BASE_LAYER -> false
+        DolbyVisionTrackAction.STRIP_TO_BASE_LAYER,
+        DolbyVisionTrackAction.SIGNAL_PROFILE5_AS_81,
+        DolbyVisionTrackAction.CONVERT_PROFILE5_TO_81,
+        -> false
     }
 
     /**

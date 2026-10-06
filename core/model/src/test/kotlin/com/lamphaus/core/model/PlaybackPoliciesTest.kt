@@ -139,6 +139,29 @@ class DolbyVisionPolicyTest {
     }
 
     @Test
+    fun `PLY-DV-01 profile 5 to 8_1 signals in auto and converts with Convert to DV8_1`() {
+        fun p5(handling: DolbyVisionHandling, enabled: Boolean) =
+            DolbyVisionPolicy.trackAction(handling, 5, setOf(8), displayDolbyVision = true, profile5To81 = enabled)
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, p5(DolbyVisionHandling.AUTO, enabled = false))
+        assertEquals(DolbyVisionTrackAction.SIGNAL_PROFILE5_AS_81, p5(DolbyVisionHandling.AUTO, enabled = true))
+        assertEquals(DolbyVisionTrackAction.CONVERT_PROFILE5_TO_81, p5(DolbyVisionHandling.CONVERT_PROFILE7_TO_81, enabled = true))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, p5(DolbyVisionHandling.NATIVE_ONLY, enabled = true))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, p5(DolbyVisionHandling.DISABLED, enabled = true))
+    }
+
+    @Test
+    fun `PLY-DV-01 preserving the mapping applies to Convert to DV8_1 only`() {
+        assertEquals(
+            DolbyVisionTrackAction.CONVERT_TO_81_PRESERVING_MAPPING,
+            DolbyVisionPolicy.trackAction(DolbyVisionHandling.CONVERT_PROFILE7_TO_81, 7, setOf(8), true, preserveMapping = true),
+        )
+        assertEquals(
+            DolbyVisionTrackAction.CONVERT_TO_MEL,
+            DolbyVisionPolicy.trackAction(DolbyVisionHandling.AUTO, 7, setOf(8), true, preserveMapping = true),
+        )
+    }
+
+    @Test
     fun `SHR-PROD-12 a remux plays as Dolby Vision natively or converted`() {
         assertEquals(true, DolbyVisionPolicy.playsProfile7AsDolbyVision(DolbyVisionHandling.AUTO, setOf(5, 8), true))
         assertEquals(true, DolbyVisionPolicy.playsProfile7AsDolbyVision(DolbyVisionHandling.AUTO, setOf(7), true))
