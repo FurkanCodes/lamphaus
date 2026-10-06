@@ -77,6 +77,14 @@ them into an executable workflow.
 
 ## Build locally
 
+libmpv and its libraries are built on the owner’s Mac, never committed
+(`core/player/src/main/jniLibs/` is ignored). Build them once per machine and
+again whenever `scripts/build-mpv-libs.sh` changes:
+
+```bash
+ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 WORK=$PWD/build/mpv-libs bash scripts/build-mpv-libs.sh
+```
+
 From a clean `main` checkout at the recorded commit, run:
 
 ```bash
@@ -84,7 +92,8 @@ rtk python3 scripts/release/lamphaus_release.py prepare --commit <full-sha>
 ```
 
 `prepare` runs unit tests, release lint, provider-neutrality checks, a
-two-worker production build, signing verification, all-ABI and MPV checks, and
+two-worker production build, signing verification, all-ABI and MPV checks
+(`libmpv.so` and `liblamphaus_mpv.so` for every ABI), and
 the packaged-profile check. It writes the immutable APK, checksum, build
 report, and pipeline state under ignored `dist/release/`.
 

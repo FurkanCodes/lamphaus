@@ -1,5 +1,6 @@
 package com.lamphaus.core.player
 
+import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -7,56 +8,89 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import com.lamphaus.core.model.PlaybackEngineKind
 import com.lamphaus.core.model.PlaybackSessionState
+import com.lamphaus.core.player.mpv.MpvCertificates
 import com.lamphaus.core.player.mpv.MpvLibrary
 import com.lamphaus.core.player.mpv.MpvPlayer
 
 /**
- * Engine handoff supervisor for the session player (plan §1): listens for
- * fatal Media3 failures and swaps the session to the MPV engine when the
- * failure is engine-shaped and libmpv is packaged. One handoff per media
- * item; the session object stays constant so controllers never reconnect.
+ * Engine switching for the session player (PLY-ENG-01). The session object
+ * stays constant, so controllers never reconnect.
+ *
+ * - [select] puts the engine a stream should start on in place while nothing
+ *   is loaded: ExoPlayer, or libmpv when the setting (or Auto for anime) asks.
+ * - [install] is Nuvio's "Auto-switch engine on startup error": with the
+ *   setting on, a stream that fails before its first frame moves to the other
+ *   engine once, at the same position. Network and authorisation failures are
+ *   the source's problem and never switch.
  */
 @UnstableApi
 object PlaybackEngineFallback {
 
-    /**
-     * Installs the fallback listener on the session's player. Returns the
-     * listener (kept for symmetry; the service never needs to remove it).
-     */
-    fun install(session: MediaSession, onFallback: (PlaybackSessionState) -> Unit) {
-        var fallbackUsedForItem: Any? = null
+    fun select(context: Context, session: MediaSession, engine: PlaybackEngineKind, onSwitch: (Player) -> Unit) {
+        val current = session.player
+        val idle = current.mediaItemCount == 0 || current.playbackState == Player.STATE_IDLE ||
+            current.playbackState == Player.STATE_ENDED
+        if (!idle) return
+        val replacement = when {
+            engine == PlaybackEngineKind.MPV && current !is MpvPlayer && MpvLibrary.isAvailable() ->
+                runCatching { MpvPlayer(current.applicationLooper, MpvCertificates.bundle(context)) }.getOrNull()
+            engine == PlaybackEngineKind.MEDIA3 && current is MpvPlayer -> Media3EngineFactory.createPlayer(context)
+            else -> null
+        } ?: return
+        session.player = replacement
+        current.release()
+        onSwitch(replacement)
+    }
 
-        session.player.addListener(
+    fun install(context: Context, session: MediaSession, onFallback: (Player, PlaybackSessionState) -> Unit) {
+        val player = session.player
+        var firstFrameRendered = false
+        var switchedForItem: Any? = null
+        player.addListener(
             object : Player.Listener {
-                override fun onPlayerError(error: PlaybackException) {
-                    val player = session.player
-                    val currentUid = player.currentMediaItem?.localConfiguration?.uri ?: return
-                    if (fallbackUsedForItem == currentUid) return // no bouncing (plan §1)
+                override fun onRenderedFirstFrame() {
+                    firstFrameRendered = true
+                }
 
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    firstFrameRendered = false
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    if (session.player !== player || firstFrameRendered) return
+                    if (!Media3EngineFactory.deviceConfig.autoSwitchEngineOnStartupError) return
+                    val uri = player.currentMediaItem?.localConfiguration?.uri ?: return
+                    if (switchedForItem == uri) return
                     val failureKind = EngineHandoff.failureKindFrom(error.errorCode)
-                    if (!PlaybackEnginePolicy.shouldFallbackToMpv(failureKind, PlaybackEngineKind.MEDIA3)) return
+                    if (failureKind == EngineFailureKind.NETWORK || failureKind == EngineFailureKind.AUTHORIZATION) return
                     // A converted Dolby Vision stream first retries as its HDR10 base layer in Media3.
                     if (DolbyVisionSession.converting && !DolbyVisionSession.forceBaseLayer) return
-                    if (!MpvLibrary.isAvailable()) return
-
+                    val toMpv = player !is MpvPlayer
+                    if (toMpv && !MpvLibrary.isAvailable()) return
+                    val item: MediaItem = player.currentMediaItem ?: return
                     val handoff = EngineHandoff.snapshot(player)
-                    val mediaItem: MediaItem = player.currentMediaItem ?: return
-                    val headers = PlaybackHeaderRegistry.get(currentUid.toString())
-
-                    val mpvPlayer = MpvPlayer(player.applicationLooper)
-                    mpvPlayer.load(mediaItem, handoff.positionMillis, headers)
-                    mpvPlayer.prepare()
-                    mpvPlayer.restore(handoff)
-                    mpvPlayer.playWhenReady = handoff.playWhenReady
-                    mpvPlayer.setPlaybackSpeed(handoff.speed)
-
-                    fallbackUsedForItem = currentUid
-                    session.player = mpvPlayer
+                    val replacement: Player = if (toMpv) {
+                        MpvPlayer(player.applicationLooper, MpvCertificates.bundle(context)).apply {
+                            load(item, handoff.positionMillis, PlaybackHeaderRegistry.get(uri.toString()))
+                            prepare()
+                            restore(handoff)
+                        }
+                    } else {
+                        Media3EngineFactory.createPlayer(context).apply {
+                            setMediaItem(item, handoff.positionMillis)
+                            prepare()
+                        }
+                    }
+                    replacement.playWhenReady = handoff.playWhenReady
+                    replacement.setPlaybackSpeed(handoff.speed)
+                    switchedForItem = uri
+                    session.player = replacement
                     onFallback(
+                        replacement,
                         PlaybackSessionState(
-                            requestedEngine = PlaybackEngineKind.AUTO,
-                            activeEngine = PlaybackEngineKind.MPV,
-                            fallbackReason = PlaybackEnginePolicy.fallbackReason(failureKind),
+                            requestedEngine = if (toMpv) PlaybackEngineKind.MEDIA3 else PlaybackEngineKind.MPV,
+                            activeEngine = if (toMpv) PlaybackEngineKind.MPV else PlaybackEngineKind.MEDIA3,
+                            fallbackReason = PlaybackEnginePolicy.fallbackReason(failureKind) ?: "startup failure",
                         ),
                     )
                 }

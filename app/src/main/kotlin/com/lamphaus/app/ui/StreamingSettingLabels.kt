@@ -32,3 +32,13 @@ internal fun defaultPlayerLabel(player: com.lamphaus.core.model.DefaultPlayer): 
         com.lamphaus.core.model.DefaultPlayer.ASK -> R.string.default_player_ask
     },
 )
+
+/** The playback engine choice's label (PLY-ENG-01). */
+@Composable
+internal fun playbackEngineLabel(engine: com.lamphaus.core.model.PlaybackEngineKind): String = stringResource(
+    when (engine) {
+        com.lamphaus.core.model.PlaybackEngineKind.AUTO -> R.string.playback_engine_auto
+        com.lamphaus.core.model.PlaybackEngineKind.MEDIA3 -> R.string.playback_engine_exoplayer
+        com.lamphaus.core.model.PlaybackEngineKind.MPV -> R.string.playback_engine_mpv
+    },
+)

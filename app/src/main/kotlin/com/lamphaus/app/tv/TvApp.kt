@@ -228,6 +228,7 @@ import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.chunkSizeLabel
+import com.lamphaus.app.ui.playbackEngineLabel
 import com.lamphaus.app.ui.defaultPlayerLabel
 import com.lamphaus.app.ui.AutoSkipRows
 import com.lamphaus.app.ui.downmixLayoutLabel
@@ -3432,6 +3433,28 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setPlaybackSettings(state.playbackSettings.copy(autoPlayNextEpisode = it))
                 },
             )
+        }
+        if (com.lamphaus.core.player.mpv.MpvLibrary.isAvailable()) {
+            item {
+                TvSettingsChoiceRow(
+                    title = stringResource(R.string.playback_engine_setting),
+                    description = stringResource(R.string.playback_engine_setting_description),
+                    value = playbackEngineLabel(device.engineKind),
+                    onClick = {
+                        viewModel.setDevicePlaybackConfig(
+                            device.copy(engineKind = PlaybackEngineOptions.next(PlaybackEngineOptions.engines, device.engineKind)),
+                        )
+                    },
+                )
+            }
+            item {
+                TvSettingsToggleRow(
+                    title = stringResource(R.string.auto_switch_engine_setting),
+                    description = stringResource(R.string.auto_switch_engine_setting_description),
+                    checked = device.autoSwitchEngineOnStartupError,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(autoSwitchEngineOnStartupError = it)) },
+                )
+            }
         }
         item {
             TvSettingsChoiceRow(

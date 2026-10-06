@@ -32,14 +32,15 @@ import java.util.concurrent.CopyOnWriteArrayList
  * calls are serialized through [MpvLibrary]'s lock, and the mpv event pump
  * runs on a daemon thread that posts state refreshes onto [looper].
  *
- * Video output: `vo=mediacodec_embed` with the attached Surface renders
- * hardware-decoded frames directly, preserving HDR metadata (plan §2
- * "original colors"). Subtitles render in-engine through libass with
- * embedded ASS/SSA styling preserved (plan §4).
+ * Video output: Nuvio's mpv configuration (PLY-ENG-01) — `vo=gpu` on the
+ * Android OpenGL ES context with MediaCodec decoding, so libass subtitles and
+ * the OSD draw over the picture, embedded ASS/SSA styling preserved (plan §4).
  */
 @UnstableApi
 class MpvPlayer(
     looper: Looper,
+    /** PEM bundle of trusted authorities for HTTPS ([MpvCertificates]); null disables verification. */
+    caFile: String? = null,
 ) : SimpleBasePlayer(looper) {
 
     private var handle: Long = 0L
@@ -58,7 +59,14 @@ class MpvPlayer(
     @Volatile private var seeking = false
     @Volatile private var pausedForCache = false
     @Volatile private var fileLoaded = false
-    @Volatile private var endFileErrorCode = 0
+    /** The file ended on its own (keep-open also reports this through eof-reached). */
+    @Volatile private var ended = false
+    @Volatile private var playerError: PlaybackException? = null
+    /** The first frame of the loaded file was shown and not yet reported. */
+    @Volatile private var firstFramePending = false
+    @Volatile private var firstFrameShown = false
+    /** Playback has started since the last load; mpv reports eof-reached while a file is still opening. */
+    @Volatile private var playbackStarted = false
     @Volatile private var videoWidth = 0
     @Volatile private var videoHeight = 0
     @Volatile private var containerFrameRate = 0f
@@ -92,11 +100,13 @@ class MpvPlayer(
     init {
         handle = MpvLibrary.create()
         check(handle != 0L) { "libmpv.so is not present; check MpvLibrary.availability first" }
-        // Render through the Android hardware path straight to the Surface and
-        // keep original colors: no tone mapping unless the display is SDR and
-        // the user's DV policy asks for it (plan §2).
-        MpvLibrary.setOptionString(handle, "vo", "mediacodec_embed,gpu")
+        // Nuvio's mpv setup: the fast profile on the GPU output, OpenGL ES on
+        // the Android context, MediaCodec for the codecs it accelerates.
+        MpvLibrary.setOptionString(handle, "profile", "fast")
+        MpvLibrary.setOptionString(handle, "vo", "gpu")
         MpvLibrary.setOptionString(handle, "gpu-context", "android")
+        MpvLibrary.setOptionString(handle, "opengl-es", "yes")
+        MpvLibrary.setOptionString(handle, "hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
         // Goldfish/Ranchu exposes HEVC but cannot decode Dolby Vision profiles.
         // Software FFmpeg decoding avoids handing the same stream back to the
         // emulator MediaCodec during the fallback handoff.
@@ -106,6 +116,15 @@ class MpvPlayer(
             if (com.lamphaus.core.player.DeviceEnvironment.isAndroidEmulator()) "no" else "auto-safe",
         )
         MpvLibrary.setOptionString(handle, "ao", "audiotrack,opensles")
+        // Network: Nuvio's 64 MiB forward and back demuxer caches, the same
+        // browser identity as Media3, and certificate checks for HTTPS.
+        MpvLibrary.setOptionString(handle, "demuxer-max-bytes", "64MiB")
+        MpvLibrary.setOptionString(handle, "demuxer-max-back-bytes", "64MiB")
+        MpvLibrary.setOptionString(handle, "user-agent", com.lamphaus.core.player.PlaybackNetworking.DEFAULT_USER_AGENT)
+        if (caFile != null) {
+            MpvLibrary.setOptionString(handle, "tls-verify", "yes")
+            MpvLibrary.setOptionString(handle, "tls-ca-file", caFile)
+        }
         // Night listening (SHR-PROD-15): FFmpeg's compressor with the same
         // shape as the Media3 path (-30 dB, 4:1, +8 dB makeup), then a limiter.
         if (com.lamphaus.core.player.Media3EngineFactory.deviceConfig.nightListening) {
@@ -140,6 +159,11 @@ class MpvPlayer(
         }
         fileLoaded = false
         eofReached = false
+        ended = false
+        playerError = null
+        firstFramePending = false
+        firstFrameShown = false
+        playbackStarted = false
         videoWidth = 0
         videoHeight = 0
         containerFrameRate = 0f
@@ -373,9 +397,10 @@ class MpvPlayer(
 
     override fun getState(): State {
         val item = mediaItem
+        val error = playerError
         val playbackState = when {
-            !prepared -> Player.STATE_IDLE
-            endFileErrorCode == END_FILE_EOF -> Player.STATE_ENDED
+            !prepared || error != null || item == null -> Player.STATE_IDLE
+            ended || (eofReached && playbackStarted && !seeking) -> Player.STATE_ENDED
             fileLoaded || seeking || pausedForCache -> {
                 if (pausedForCache || seeking) Player.STATE_BUFFERING else Player.STATE_READY
             }
@@ -388,6 +413,13 @@ class MpvPlayer(
                     .addAll(
                         Player.COMMAND_PLAY_PAUSE,
                         Player.COMMAND_PREPARE,
+                        // Without these Media3 drops the session's media item and surface.
+                        Player.COMMAND_SET_MEDIA_ITEM,
+                        Player.COMMAND_CHANGE_MEDIA_ITEMS,
+                        Player.COMMAND_SET_VIDEO_SURFACE,
+                        Player.COMMAND_GET_TIMELINE,
+                        Player.COMMAND_GET_METADATA,
+                        Player.COMMAND_GET_VOLUME,
                         Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
                         Player.COMMAND_SEEK_TO_DEFAULT_POSITION,
                         Player.COMMAND_SEEK_BACK,
@@ -404,6 +436,8 @@ class MpvPlayer(
             )
             .setPlayWhenReady(playWhenReady, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setPlaybackState(playbackState)
+            .setPlayerError(error)
+            .setNewlyRenderedFirstFrame(firstFramePending)
             .setPlaybackParameters(PlaybackParameters(speed))
             .setVolume(volume)
             .setVideoSize(androidx.media3.common.VideoSize(videoWidth, videoHeight))
@@ -443,7 +477,13 @@ class MpvPlayer(
 
     override fun handlePrepare(): ListenableFuture<*> {
         prepared = true
-        if (mediaItem != null) MpvLibrary.command(handle, listOf("revert-seek", "mark-current") as List<String>)
+        val item = mediaItem
+        if (playerError != null && item != null) {
+            // Retry after a failure: open the same file again where it stopped.
+            val uri = item.localConfiguration?.uri?.toString().orEmpty()
+            load(item, timePosMillis, com.lamphaus.core.player.PlaybackHeaderRegistry.get(uri))
+            return Futures.immediateVoidFuture()
+        }
         invalidateState()
         return Futures.immediateVoidFuture()
     }
@@ -456,7 +496,10 @@ class MpvPlayer(
 
     override fun handleRelease(): ListenableFuture<*> {
         released = true
+        // The event thread must be out of mpv before its handle is destroyed.
+        MpvLibrary.wakeup(handle)
         eventThread?.interrupt()
+        eventThread?.join(EVENT_THREAD_JOIN_MILLIS)
         MpvLibrary.destroy(handle)
         handle = 0L
         return Futures.immediateVoidFuture()
@@ -492,10 +535,18 @@ class MpvPlayer(
     override fun handleAddMediaItems(index: Int, mediaItems: List<MediaItem>): ListenableFuture<*> =
         handleSetMediaItems(mediaItems, 0, C.TIME_UNSET)
 
+    /**
+     * A MediaSession hands its player a SurfaceHolder wrapping the
+     * controller's Surface (Media3 1.11); an in-process caller may pass the
+     * Surface itself.
+     */
     override fun handleSetVideoOutput(videoOutput: Any): ListenableFuture<*> {
-        if (videoOutput is Surface) {
-            MpvLibrary.attachSurface(handle, videoOutput)
+        val surface = when (videoOutput) {
+            is Surface -> videoOutput
+            is android.view.SurfaceHolder -> videoOutput.surface
+            else -> null
         }
+        if (surface != null && surface.isValid) MpvLibrary.attachSurface(handle, surface)
         return Futures.immediateVoidFuture()
     }
 
@@ -530,21 +581,38 @@ class MpvPlayer(
             {
                 while (!released && handle != 0L) {
                     try {
-                        val event = MpvLibrary.waitEvent(handle, 0.1)
-                        when (event) {
+                        val code = MpvLibrary.waitEvent(handle, 0.1)
+                        if (released) return@Thread
+                        var restarted = false
+                        when (code and 0xFF) {
                             EVENT_FILE_LOADED -> {
                                 fileLoaded = true
                                 onFileLoaded()
                             }
-                            EVENT_END_FILE -> {
-                                // reason: 0=eof-implicit... mpv: 2 stop, 3 quit, 4 eof, 6 error
-                                val reason = endFileReason()
-                                endFileErrorCode = reason
+                            EVENT_END_FILE -> when ((code shr 8) and 0xFF) {
+                                END_FILE_REASON_EOF -> ended = true
+                                END_FILE_REASON_ERROR -> playerError = mpvError(-((code shr 16) and 0xFF))
+                            }
+                            EVENT_PLAYBACK_RESTART -> {
+                                restarted = true
+                                playbackStarted = true
                             }
                             EVENT_SHUTDOWN -> return@Thread
                         }
                         refreshTrackedProperties()
-                        handler.post { if (!released) invalidateState() }
+                        // mpv shows the first frame of a file, paused or not, before it restarts playback.
+                        if (restarted && !firstFrameShown && videoWidth > 0) {
+                            firstFrameShown = true
+                            firstFramePending = true
+                        }
+                        handler.post {
+                            if (!released) invalidateState()
+                            // Reported once: the next state no longer carries the first frame.
+                            if (firstFramePending) {
+                                firstFramePending = false
+                                if (!released) invalidateState()
+                            }
+                        }
                     } catch (_: InterruptedException) {
                         return@Thread
                     }
@@ -554,9 +622,16 @@ class MpvPlayer(
         ).apply { isDaemon = true; start() }
     }
 
-    /** mpv does not hand us the end-file reason through the id-only shim; eof is the common case. */
-    private fun endFileReason(): Int =
-        MpvLibrary.getPropertyString(handle, "eof-reached")?.toBooleanStrictOrNull()?.let { if (it) END_FILE_EOF else 0 } ?: 0
+    /** A file mpv could not open or play, in Media3's terms so the engine switch can judge it. */
+    private fun mpvError(mpvErrorCode: Int): PlaybackException {
+        val code = when (mpvErrorCode) {
+            MPV_ERROR_LOADING_FAILED, MPV_ERROR_NOTHING_TO_PLAY, MPV_ERROR_UNKNOWN_FORMAT ->
+                PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED
+            MPV_ERROR_AO_INIT_FAILED, MPV_ERROR_VO_INIT_FAILED -> PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
+            else -> PlaybackException.ERROR_CODE_UNSPECIFIED
+        }
+        return PlaybackException("libmpv could not play the stream (error $mpvErrorCode)", null, code)
+    }
 
     private fun refreshTrackedProperties() {
         timePosMillis = (MpvLibrary.getPropertyString(handle, "time-pos")?.toDoubleOrNull() ?: 0.0).secondsToMillis()
@@ -645,7 +720,15 @@ class MpvPlayer(
         const val EVENT_SHUTDOWN = 1
         const val EVENT_FILE_LOADED = 8
         const val EVENT_END_FILE = 7
-        const val END_FILE_EOF = 4
+        const val EVENT_PLAYBACK_RESTART = 21
+        const val END_FILE_REASON_EOF = 0
+        const val END_FILE_REASON_ERROR = 4
+        const val MPV_ERROR_LOADING_FAILED = -13
+        const val MPV_ERROR_AO_INIT_FAILED = -14
+        const val MPV_ERROR_VO_INIT_FAILED = -15
+        const val MPV_ERROR_NOTHING_TO_PLAY = -16
+        const val MPV_ERROR_UNKNOWN_FORMAT = -17
+        const val EVENT_THREAD_JOIN_MILLIS = 1_000L
 
     }
 }

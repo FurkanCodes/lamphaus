@@ -7,8 +7,8 @@ import java.util.concurrent.atomic.AtomicReference
  * Absent libmpv: every call degrades to no-op/false and [availability]
  * reports [Availability.UNAVAILABLE], keeping Media3 primary (plan §1).
  *
- * MPV is single-threaded per handle: all calls here are serialized through
- * [lock] by [MpvPlayer] on its event and command paths.
+ * Commands, surfaces, and teardown are serialized through [lock]; waiting
+ * for events is not (see [waitEvent]).
  *
  * Provider stream URLs and headers pass through this class only as mpv
  * arguments — never logged, never echoed (SHR-PROD-06).
@@ -78,7 +78,8 @@ object MpvLibrary {
 
     fun isAvailable(): Boolean = availability == Availability.AVAILABLE
 
-    fun create(): Long = synchronized(lock) { nativeCreate() }
+    /** A new handle, or 0 when libmpv is absent; probing first loads the glue. */
+    fun create(): Long = if (isAvailable()) synchronized(lock) { nativeCreate() } else 0L
 
     fun initialize(handle: Long): Boolean = synchronized(lock) { nativeInitialize(handle) }
 
@@ -99,11 +100,16 @@ object MpvLibrary {
     fun observeProperty(handle: Long, name: String): Boolean =
         synchronized(lock) { nativeObserveProperty(handle, name) }
 
-    /** [timeoutSeconds] 0.0 polls without blocking; >0 sleeps until an event. */
-    fun waitEvent(handle: Long, timeoutSeconds: Double): Int =
-        synchronized(lock) { nativeWaitEvent(handle, timeoutSeconds) }
+    /**
+     * [timeoutSeconds] 0.0 polls without blocking; >0 sleeps until an event.
+     * libmpv is thread-safe and only this call must stay on one thread per
+     * handle, so it never holds [lock]: commands would otherwise wait out
+     * every sleep. The caller destroys the handle only after its event
+     * thread has stopped.
+     */
+    fun waitEvent(handle: Long, timeoutSeconds: Double): Int = nativeWaitEvent(handle, timeoutSeconds)
 
-    fun wakeup(handle: Long) = synchronized(lock) { nativeWakeup(handle) }
+    fun wakeup(handle: Long) = nativeWakeup(handle)
 
     fun attachSurface(handle: Long, surface: Any): Boolean =
         synchronized(lock) { nativeAttachSurface(handle, surface) }

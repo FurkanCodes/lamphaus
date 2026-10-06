@@ -11,6 +11,20 @@ import org.junit.Test
 class PlaybackEnginePolicyTest {
 
     @Test
+    fun `PLY-ENG-01 the engine setting picks where a stream starts`() {
+        assertEquals(PlaybackEngineKind.MPV, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.AUTO, anime = true, mpvAvailable = true))
+        assertEquals(PlaybackEngineKind.MEDIA3, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.AUTO, anime = false, mpvAvailable = true))
+        assertEquals(PlaybackEngineKind.MPV, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.MPV, anime = false, mpvAvailable = true))
+        assertEquals(PlaybackEngineKind.MEDIA3, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.MEDIA3, anime = true, mpvAvailable = true))
+    }
+
+    @Test
+    fun `PLY-ENG-01 without libmpv every stream starts on ExoPlayer`() {
+        assertEquals(PlaybackEngineKind.MEDIA3, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.MPV, anime = true, mpvAvailable = false))
+        assertEquals(PlaybackEngineKind.MEDIA3, PlaybackEnginePolicy.engineFor(PlaybackEngineKind.AUTO, anime = true, mpvAvailable = false))
+    }
+
+    @Test
     fun `auto prefers mpv only when the format needs the native stack and mpv ships`() {
         val mpvFormat = MediaFormatProfile(container = "mkv", videoCodec = "dolby-vision-p7", media3CanPlay = false)
         assertEquals(PlaybackEngineKind.MPV, PlaybackEnginePolicy.resolveInitialEngine(PlaybackEngineKind.AUTO, mpvFormat, mpvAvailable = true))

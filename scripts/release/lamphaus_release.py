@@ -49,6 +49,7 @@ PINNED = {
     "mpv": "v0.40.0",
     "ffmpeg": "n7.1",
     "libass": "0.17.3",
+    "libplacebo": "v7.351.0",
 }
 
 
@@ -261,6 +262,11 @@ def cmd_prepare(args: argparse.Namespace) -> int:
             return fail("production signing location or Keychain identity is incomplete")
         if not Path(store_file).expanduser().is_file():
             return fail("production keystore is missing")
+        # libmpv is built locally (scripts/build-mpv-libs.sh) and never committed.
+        mpv_libs = ROOT / "core" / "player" / "src" / "main" / "jniLibs"
+        missing_built = [abi for abi in REQUIRED_ABIS if not (mpv_libs / abi / "libmpv.so").is_file()]
+        if missing_built:
+            return fail(f"libmpv.so not built for ABIs {missing_built}; run scripts/build-mpv-libs.sh")
         password = keychain_password(keychain_service, keychain_account)
         # Offline checks that do not need a build.
         print("Running unit tests, release lint, neutrality …")
@@ -307,10 +313,13 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         if abis != sorted(REQUIRED_ABIS):
             return fail(f"APK ABIs {abis} != required {list(REQUIRED_ABIS)}")
         missing_mpv = [
-            abi for abi in REQUIRED_ABIS if f"lib/{abi}/liblamphaus_mpv.so" not in libs
+            f"{abi}/{lib}"
+            for abi in REQUIRED_ABIS
+            for lib in ("liblamphaus_mpv.so", "libmpv.so")
+            if f"lib/{abi}/{lib}" not in libs
         ]
         if missing_mpv:
-            return fail(f"liblamphaus_mpv.so missing for ABIs {missing_mpv} (MPV gate)")
+            return fail(f"MPV libraries missing from the APK: {missing_mpv} (MPV gate)")
         # Packaged profile presence.
         with zipfile.ZipFile(apk) as z:
             if "assets/dexopt/baseline.prof" not in z.namelist():

@@ -108,6 +108,7 @@ import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.chunkSizeLabel
+import com.lamphaus.app.ui.playbackEngineLabel
 import com.lamphaus.app.ui.defaultPlayerLabel
 import com.lamphaus.app.ui.AutoSkipRows
 import com.lamphaus.app.ui.downmixLayoutLabel
@@ -462,6 +463,22 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
         item {
             // Default player and what travels to another app (PLY-EXT-01).
             SettingsCard(stringResource(R.string.default_player_setting)) {
+                if (com.lamphaus.core.player.mpv.MpvLibrary.isAvailable()) {
+                    PlaybackEngineChoiceRow(
+                        title = stringResource(R.string.playback_engine_setting),
+                        description = stringResource(R.string.playback_engine_setting_description),
+                        value = playbackEngineLabel(device.engineKind),
+                        onClick = { choiceDialog = PlaybackChoiceDialog.ENGINE },
+                    )
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    PlaybackSettingRow(
+                        title = stringResource(R.string.auto_switch_engine_setting),
+                        description = stringResource(R.string.auto_switch_engine_setting_description),
+                        checked = device.autoSwitchEngineOnStartupError,
+                        onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(autoSwitchEngineOnStartupError = it)) },
+                    )
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                }
                 PlaybackEngineChoiceRow(
                     title = stringResource(R.string.default_player_setting),
                     description = stringResource(R.string.default_player_setting_description),
@@ -603,6 +620,11 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionHandling = mode))
                 }
             }
+            PlaybackChoiceDialog.ENGINE -> PlaybackEngineOptions.engines.map { engine ->
+                PlaybackChoice(playbackEngineLabel(engine), device.engineKind == engine) {
+                    viewModel.setDevicePlaybackConfig(device.copy(engineKind = engine))
+                }
+            }
             PlaybackChoiceDialog.DEFAULT_PLAYER -> com.lamphaus.core.model.DefaultPlayer.entries.map { player ->
                 PlaybackChoice(defaultPlayerLabel(player), playback.defaultPlayer == player) {
                     viewModel.setPlaybackSettings(playback.copy(defaultPlayer = player))
@@ -649,6 +671,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                         PlaybackChoiceDialog.CONNECTIONS -> stringResource(R.string.parallel_connection_count)
                         PlaybackChoiceDialog.DOWNMIX_LAYOUT -> stringResource(R.string.downmix_layout_setting)
                         PlaybackChoiceDialog.DEFAULT_PLAYER -> stringResource(R.string.default_player_setting)
+                        PlaybackChoiceDialog.ENGINE -> stringResource(R.string.playback_engine_setting)
                         PlaybackChoiceDialog.CHUNK_SIZE -> stringResource(R.string.parallel_chunk_size)
                     },
                 )
@@ -679,7 +702,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
 
 private enum class PlaybackChoiceDialog {
     AUDIO, SUBTITLES, SUBTITLE_LANGUAGE, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOWNMIX_LAYOUT, DOLBY_VISION, DECODER,
-    CONNECTIONS, CHUNK_SIZE, DEFAULT_PLAYER,
+    CONNECTIONS, CHUNK_SIZE, DEFAULT_PLAYER, ENGINE,
 }
 
 @Composable

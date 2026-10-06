@@ -1,27 +1,37 @@
 # Lamphaus Player — Third-Party Notices
 
-The player ships two optional native components and one build toolchain. Both
-are dynamically loaded at runtime; the application functions fully without
-them (Media3/ExoPlayer remains the primary engine).
+The player ships libmpv as a second, optional engine, a Kotlin port of
+libdovi, and a patched Media3 module. libmpv is loaded at runtime; the
+application functions fully without it (Media3/ExoPlayer remains the default
+engine).
 
-## libmpv (optional fallback engine)
+## libmpv (second playback engine)
 
-- Source: https://github.com/mpv-player/mpv (pinned `v0.40.0` via
-  `scripts/build-mpv-libs.sh`)
-- License: LGPL-2.1-or-later. Built with `-Dgpl=false` (no GPL components) and
-  linked dynamically by dlopen; no GPL code is compiled into the application.
-- Built FFmpeg dependency: https://github.com/FFmpeg/FFmpeg (pinned `n7.1`),
-  configured `--enable-shared --enable-lgpl --disable-static` (LGPL 2.1+).
-- Built libass dependency: https://github.com/libass/libass (pinned `0.17.3`),
-  ISC license.
-- Reproducible source instructions: `scripts/build-mpv-libs.sh` (clones the
-  pinned refs, verifies, builds per-ABI, strips, and reports sha256 for each
-  produced `libmpv.so`).
+libmpv and its libraries are loaded at runtime with dlopen; Lamphaus links
+none of them. Each is LGPL or permissively licensed, and none is built with
+GPL components. They are built from pinned tags by `scripts/build-mpv-libs.sh`,
+which records each resolved commit and every library's SHA-256 in its build
+manifest; the same script reproduces them.
 
-mpv is Copyright (c) mpv-player developers; FFmpeg is Copyright (c) the FFmpeg
-developers; libass is Copyright (c) the libass developers. Their license texts
-ship with the respective source trees and must accompany any distribution of
-the built libraries.
+| Library | Pinned source | License |
+| --- | --- | --- |
+| mpv | https://github.com/mpv-player/mpv `v0.40.0`, `-Dgpl=false`, libmpv only | LGPL-2.1-or-later |
+| FFmpeg | https://github.com/FFmpeg/FFmpeg `n7.1`, `--disable-gpl --enable-version3`, JNI and MediaCodec, no encoders or muxers | LGPL-3.0-or-later |
+| libplacebo | https://code.videolan.org/videolan/libplacebo `v7.351.0`, OpenGL ES only | LGPL-2.1-or-later |
+| Mbed TLS | https://github.com/Mbed-TLS/mbedtls `mbedtls-3.6.2`, linked into FFmpeg | Apache-2.0 |
+
+libmpv renders subtitles with the `libass.so` that ass-media
+(`io.github.peerless2012:ass-media`, already used for ExoPlayer's styled
+subtitles) ships, so no second libass is packaged; the script builds libass
+0.17.3 and its font libraries only to compile mpv against. libplacebo uses
+the `libc++_shared.so` the app already ships.
+
+mpv is Copyright (c) mpv-player developers; FFmpeg is Copyright (c) the
+FFmpeg developers; the other libraries are copyright their respective
+authors. Their license texts ship with the respective source trees and
+accompany any distribution of the built libraries. Because the libraries are
+separate shared objects, a user may replace any of them with a compatible
+build of their own.
 
 ## libdovi (ported, Dolby Vision profile 7 → 8.1)
 
@@ -72,6 +82,7 @@ SOFTWARE.
 ## Behavioral references
 
 - NuvioTV (https://github.com/NuvioMedia/NuvioTV) was consulted as a
-  behavioral reference only; no GPL source is copied. Its streaming
-  behaviour (parallel range downloads, native memory buffering, recovery)
-  is re-implemented from observed settings and constants.
+  behavioral reference only; no GPL source or binaries are copied. Its
+  streaming behaviour (parallel range downloads, native memory buffering,
+  recovery), Dolby Vision modes, audio options, engine choice, and external
+  player hand-off are re-implemented from observed settings and constants.

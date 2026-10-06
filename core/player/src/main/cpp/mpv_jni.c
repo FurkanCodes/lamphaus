@@ -9,7 +9,7 @@
  */
 #include <jni.h>
 #include <dlfcn.h>
-#include <android/native_window_jni.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -59,6 +59,14 @@ typedef struct mpv_event {
     void *data;
 } mpv_event;
 
+typedef struct mpv_event_end_file {
+    int reason;
+    int error;
+    int64_t playlist_entry_id;
+    int64_t playlist_insert_id;
+    int playlist_insert_num_entries;
+} mpv_event_end_file;
+
 typedef enum mpv_format {
     MPV_FORMAT_NONE = 0,
     MPV_FORMAT_STRING = 1,
@@ -82,6 +90,7 @@ static struct {
     mpv_event *(*wait_event)(mpv_handle *, double);
     void (*wakeup)(mpv_handle *);
     int (*free)(void *);
+    int (*set_property)(mpv_handle *, const char *, mpv_format, void *);
 } mpv;
 
 // One native event loop per player handle; serialized by the Kotlin side.
@@ -89,8 +98,55 @@ static mpv_handle *handle_of(jlong raw) {
     return (mpv_handle *) (intptr_t) raw;
 }
 
+static JavaVM *java_vm = NULL;
+
+/*
+ * The Surface each player draws into: a global reference, as mpv expects for
+ * "wid". Kept per handle, because an engine switch creates the next player
+ * before the old one is destroyed. Calls are serialized by MpvLibrary's lock.
+ */
+#define MAX_PLAYERS 4
+static struct {
+    mpv_handle *handle;
+    jobject surface;
+} surfaces[MAX_PLAYERS];
+
+static void release_surface(JNIEnv *env, mpv_handle *handle) {
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (surfaces[i].handle != handle) continue;
+        if (surfaces[i].surface != NULL) (*env)->DeleteGlobalRef(env, surfaces[i].surface);
+        surfaces[i].handle = NULL;
+        surfaces[i].surface = NULL;
+    }
+}
+
+/* Takes ownership of [surface] for [handle]; false when every slot is taken. */
+static int keep_surface(mpv_handle *handle, jobject surface) {
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (surfaces[i].handle == NULL) {
+            surfaces[i].handle = handle;
+            surfaces[i].surface = surface;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+    java_vm = vm;
     return JNI_VERSION_1_6;
+}
+
+/*
+ * mpv's Android outputs (audiotrack, mediacodec, the EGL context) reach Java
+ * through FFmpeg's JNI helper, which needs the VM before mpv is created.
+ */
+static void share_java_vm_with_ffmpeg(void) {
+    void *avcodec = dlopen("libavcodec.so", RTLD_NOW | RTLD_LOCAL);
+    if (avcodec == NULL) return;
+    int (*set_java_vm)(void *, void *) = NULL;
+    *(void **) (&set_java_vm) = dlsym(avcodec, "av_jni_set_java_vm");
+    if (set_java_vm != NULL && java_vm != NULL) set_java_vm(java_vm, NULL);
 }
 
 JNIEXPORT jlong JNICALL
@@ -114,7 +170,9 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeCreate(JNIEnv *env, jclass cl
         SYM(wait_event, "mpv_wait_event");
         SYM(wakeup, "mpv_wakeup");
         SYM(free, "mpv_free");
+        SYM(set_property, "mpv_set_property");
 #undef SYM
+        share_java_vm_with_ffmpeg();
     }
     mpv_handle *handle = mpv.create();
     return (jlong) (intptr_t) handle;
@@ -129,7 +187,9 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeInitialize(JNIEnv *env, jclas
 JNIEXPORT void JNICALL
 Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeDestroy(JNIEnv *env, jclass clazz, jlong raw) {
     mpv_handle *handle = handle_of(raw);
-    if (handle != NULL) mpv.terminate_destroy(handle);
+    if (handle == NULL) return;
+    mpv.terminate_destroy(handle);
+    release_surface(env, handle);
 }
 
 JNIEXPORT jboolean JNICALL
@@ -207,8 +267,9 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeObserveProperty(
 
 /**
  * Returns the event id of the next event, or MPV_EVENT_NONE (0) on timeout.
- * Values of property changes are intentionally not marshalled: the Kotlin
- * side re-reads the properties it tracks through get-property calls.
+ * An end-file event also carries its reason in bits 8-15 and its negated
+ * mpv_error in bits 16-23. Values of property changes are intentionally not
+ * marshalled: the Kotlin side re-reads the properties it tracks.
  */
 JNIEXPORT jint JNICALL
 Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeWaitEvent(
@@ -217,6 +278,10 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeWaitEvent(
     if (handle == NULL) return 0;
     mpv_event *event = mpv.wait_event(handle, timeoutSeconds);
     if (event == NULL) return 0;
+    if (event->event_id == MPV_EVENT_END_FILE && event->data != NULL) {
+        mpv_event_end_file *end = (mpv_event_end_file *) event->data;
+        return (jint) (event->event_id | ((end->reason & 0xFF) << 8) | (((-end->error) & 0xFF) << 16));
+    }
     return (jint) event->event_id;
 }
 
@@ -226,24 +291,39 @@ Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeWakeup(JNIEnv *env, jclass cl
     if (handle != NULL) mpv.wakeup(handle);
 }
 
-/** Attach an android.view.Surface: mediacodec_embed renders straight to it. */
+/*
+ * Attach an android.view.Surface. On Android mpv's "wid" is a global
+ * reference to the Surface object (mediacodec_embed and the EGL context take
+ * it from there), held until the surface is detached.
+ */
 JNIEXPORT jboolean JNICALL
 Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeAttachSurface(
         JNIEnv *env, jclass clazz, jlong raw, jobject surface) {
     mpv_handle *handle = handle_of(raw);
     if (handle == NULL || surface == NULL) return JNI_FALSE;
-    ANativeWindow *window = ANativeWindow_fromSurface(env, surface);
-    if (window == NULL) return JNI_FALSE;
-    char wid[32];
-    snprintf(wid, sizeof(wid), "%lld", (long long) (intptr_t) window);
-    int result = mpv.set_property_string(handle, "wid", wid);
-    // The window handle stays owned by mpv until wid changes or teardown.
-    return result == 0 ? JNI_TRUE : JNI_FALSE;
+    jobject ref = (*env)->NewGlobalRef(env, surface);
+    int64_t wid = (int64_t) (intptr_t) ref;
+    if (mpv.set_property(handle, "wid", MPV_FORMAT_INT64, &wid) != 0) {
+        (*env)->DeleteGlobalRef(env, ref);
+        return JNI_FALSE;
+    }
+    // mpv now holds the new surface; the one it replaced can go.
+    release_surface(env, handle);
+    if (!keep_surface(handle, ref)) {
+        int64_t none = 0;
+        mpv.set_property(handle, "wid", MPV_FORMAT_INT64, &none);
+        (*env)->DeleteGlobalRef(env, ref);
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_lamphaus_core_player_mpv_MpvLibrary_nativeDetachSurface(JNIEnv *env, jclass clazz, jlong raw) {
     mpv_handle *handle = handle_of(raw);
     if (handle == NULL) return JNI_FALSE;
-    return mpv.set_property_string(handle, "wid", "0") == 0 ? JNI_TRUE : JNI_FALSE;
+    int64_t none = 0;
+    int result = mpv.set_property(handle, "wid", MPV_FORMAT_INT64, &none);
+    release_surface(env, handle);
+    return result == 0 ? JNI_TRUE : JNI_FALSE;
 }

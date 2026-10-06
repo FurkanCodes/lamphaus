@@ -108,6 +108,17 @@ data class MediaPreview(
     val stableKey: String get() = "${rawType.lowercase()}:$id"
 }
 
+/**
+ * Anime by Nuvio's rule for its Auto engine (PLY-ENG-01): an anime type or
+ * genre, or an id from an anime database (Kitsu, MyAnimeList, AniList, AniDB).
+ */
+fun MediaPreview.looksLikeAnime(): Boolean =
+    rawType.equals("anime", ignoreCase = true) ||
+        genres.any { it.equals("anime", ignoreCase = true) } ||
+        ANIME_ID_PREFIXES.any { id.startsWith(it, ignoreCase = true) }
+
+private val ANIME_ID_PREFIXES = listOf("kitsu:", "mal:", "anilist:", "anidb:")
+
 @Serializable
 data class Episode(
     val id: String,

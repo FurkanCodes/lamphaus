@@ -41,6 +41,9 @@ import com.lamphaus.app.R
 import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.CompletionPolicy
 import com.lamphaus.core.model.DefaultPlayer
+import com.lamphaus.core.model.looksLikeAnime
+import com.lamphaus.core.player.PlaybackEnginePolicy
+import com.lamphaus.core.player.mpv.MpvLibrary
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.Episode
@@ -403,7 +406,20 @@ class PlayerActivity : ComponentActivity() {
             PlaybackHeaderRegistry.put(subtitle.url, subtitle.headers)
         }
         val token = SessionToken(this, ComponentName(this, LamphausPlaybackService::class.java))
-        val future = MediaController.Builder(this, token).buildAsync()
+        val future = MediaController.Builder(this, token)
+            .setListener(object : MediaController.Listener {
+                override fun onCustomCommand(
+                    controller: MediaController,
+                    command: androidx.media3.session.SessionCommand,
+                    args: Bundle,
+                ): com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.SessionResult> {
+                    if (command.customAction == ACTION_ENGINE_CHANGED) resendVideoSurface()
+                    return com.google.common.util.concurrent.Futures.immediateFuture(
+                        androidx.media3.session.SessionResult(androidx.media3.session.SessionResult.RESULT_SUCCESS),
+                    )
+                }
+            })
+            .buildAsync()
         controllerFuture = future
         future.addListener(
             {
@@ -412,71 +428,83 @@ class PlayerActivity : ComponentActivity() {
                     val delayed = com.lamphaus.core.player.DelayedCuePlayer(mediaController)
                     uiPlayer = delayed
                     controllerState.value = mediaController
-                    resetTrackSelection(mediaController, profilePlaybackPreferencesState.value)
-                    mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
-                    trackDefaults.attach(mediaController)
-                    mediaController.addListener(object : Player.Listener {
-                        override fun onRenderedFirstFrame() {
-                            PerfTrace.mark(PerfTrace.FIRST_VIDEO_FRAME)
-                            startupErrorJob?.cancel()
-                            firstFrameDeferred?.complete(true)
-                        }
-
-                        override fun onIsPlayingChanged(isPlaying: Boolean) {
-                            // Saves come every 90 s while playing; a pause keeps the spot now.
-                            if (!isPlaying && playbackStartupPhaseState.value == PlaybackStartupPhase.READY) {
-                                saveProgress(final = false)
+                    // The engine is in place before the media item: libmpv when Settings
+                    // (or Auto, for anime) asks for it, ExoPlayer otherwise (PLY-ENG-01).
+                    val engine = PlaybackEnginePolicy.engineFor(
+                        requested = Media3EngineFactory.deviceConfig.engineKind,
+                        anime = playback.preview?.looksLikeAnime() == true,
+                        mpvAvailable = MpvLibrary.isAvailable(),
+                    )
+                    mediaController.sendCustomCommand(
+                        androidx.media3.session.SessionCommand(ACTION_SELECT_ENGINE, Bundle.EMPTY),
+                        Bundle().apply { putString(EXTRA_ENGINE, engine.name) },
+                    ).addListener({
+                        resetTrackSelection(mediaController, profilePlaybackPreferencesState.value)
+                        mediaController.setMediaItem(playback.toMediaItem(), playback.startPositionMillis)
+                        trackDefaults.attach(mediaController)
+                        mediaController.addListener(object : Player.Listener {
+                            override fun onRenderedFirstFrame() {
+                                PerfTrace.mark(PerfTrace.FIRST_VIDEO_FRAME)
+                                startupErrorJob?.cancel()
+                                firstFrameDeferred?.complete(true)
                             }
-                        }
 
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                            if (playbackState == Player.STATE_READY) {
-                                playerReadyDeferred?.complete(true)
+                            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                                // Saves come every 90 s while playing; a pause keeps the spot now.
+                                if (!isPlaying && playbackStartupPhaseState.value == PlaybackStartupPhase.READY) {
+                                    saveProgress(final = false)
+                                }
                             }
-                            if (playbackState == Player.STATE_ENDED) {
-                                playerReadyDeferred?.complete(false)
+
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                if (playbackState == Player.STATE_READY) {
+                                    playerReadyDeferred?.complete(true)
+                                }
+                                if (playbackState == Player.STATE_ENDED) {
+                                    playerReadyDeferred?.complete(false)
+                                    firstFrameDeferred?.complete(false)
+                                    displayModeSwitchInFlight = false
+                                    displayModeController?.restore()
+                                    saveProgress(final = true, naturalEnd = true)
+                                    onEpisodeEnded()
+                                }
+                            }
+
+                            override fun onEvents(player: Player, events: Player.Events) {
+                                if (events.contains(Player.EVENT_VIDEO_SIZE_CHANGED) ||
+                                    events.contains(Player.EVENT_TRACKS_CHANGED)
+                                ) {
+                                    updateDisplayVideoFormat()
+                                }
+                            }
+
+                            override fun onPlayerError(error: PlaybackException) {
                                 firstFrameDeferred?.complete(false)
                                 displayModeSwitchInFlight = false
                                 displayModeController?.restore()
-                                saveProgress(final = true, naturalEnd = true)
-                                onEpisodeEnded()
-                            }
-                        }
-
-                        override fun onEvents(player: Player, events: Player.Events) {
-                            if (events.contains(Player.EVENT_VIDEO_SIZE_CHANGED) ||
-                                events.contains(Player.EVENT_TRACKS_CHANGED)
-                            ) {
-                                updateDisplayVideoFormat()
-                            }
-                        }
-
-                        override fun onPlayerError(error: PlaybackException) {
-                            firstFrameDeferred?.complete(false)
-                            displayModeSwitchInFlight = false
-                            displayModeController?.restore()
-                            if (playbackStartupPhaseState.value == PlaybackStartupPhase.LOADING) {
-                                val waiting = playerReadyDeferred
-                                startupErrorJob?.cancel()
-                                startupErrorJob = lifecycleScope.launch {
-                                    // PlaybackEngineFallback may replace the
-                                    // failed Media3 player with MPV here, and
-                                    // the engine retries recoverable errors
-                                    // (SHR-PROD-04): wait those out first.
-                                    delay(4_000L)
-                                    while (PlaybackRecovery.isRecovering) delay(250L)
-                                    if (mediaController.playerError == null) return@launch
-                                    if (waiting == null) {
-                                        playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
-                                    } else if (playerReadyDeferred === waiting && !waiting.isCompleted) {
-                                        waiting.complete(false)
-                                        playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
+                                if (playbackStartupPhaseState.value == PlaybackStartupPhase.LOADING) {
+                                    val waiting = playerReadyDeferred
+                                    startupErrorJob?.cancel()
+                                    startupErrorJob = lifecycleScope.launch {
+                                        // PlaybackEngineFallback may replace the
+                                        // failed Media3 player with MPV here, and
+                                        // the engine retries recoverable errors
+                                        // (SHR-PROD-04): wait those out first.
+                                        delay(4_000L)
+                                        while (PlaybackRecovery.isRecovering) delay(250L)
+                                        if (mediaController.playerError == null) return@launch
+                                        if (waiting == null) {
+                                            playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
+                                        } else if (playerReadyDeferred === waiting && !waiting.isCompleted) {
+                                            waiting.complete(false)
+                                            playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
+                                        }
                                     }
                                 }
                             }
-                        }
-                    })
-                    prepareAndStartPlayback(mediaController, playback)
+                        })
+                        prepareAndStartPlayback(mediaController, playback)
+                    }, ContextCompat.getMainExecutor(this))
                 }.onFailure {
                     playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
                 }
@@ -1076,6 +1104,17 @@ class PlayerActivity : ComponentActivity() {
         )
     }
 
+    /**
+     * The session's engine changed under a bound PlayerView (PLY-ENG-01):
+     * binding the view again sends its surface to the new engine.
+     */
+    private fun resendVideoSurface() {
+        val view = attachedPlayerView as? androidx.media3.ui.PlayerView ?: return
+        val player = view.player ?: return
+        view.player = null
+        view.player = player
+    }
+
     private fun updatePipSourceRect(playerView: android.view.View) {
         attachedPlayerView = playerView
         surfaceFrameRateHost?.attachPlayerView(playerView)
@@ -1631,6 +1670,9 @@ class PlayerActivity : ComponentActivity() {
         private const val ACTION_SET_SUBTITLE_DELAY = "lamphaus.playback.SET_SUBTITLE_DELAY"
         private const val EXTRA_DELAY_MILLIS = "delay_millis"
         private const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"
+        private const val ACTION_SELECT_ENGINE = "lamphaus.playback.SELECT_ENGINE"
+        private const val ACTION_ENGINE_CHANGED = "lamphaus.playback.ENGINE_CHANGED"
+        private const val EXTRA_ENGINE = "engine"
         private const val EXTRA_STYLE_JSON = "style_json"
         private const val EXTRA_LIFT_FRACTION = "lift_fraction"
         private val JSON = Json { ignoreUnknownKeys = true }

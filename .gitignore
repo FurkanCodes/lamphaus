@@ -13,6 +13,8 @@ google-services.json
 firebase-debug.log
 .firebase/
 captures/
+# libmpv and its libraries, built locally by scripts/build-mpv-libs.sh
+core/player/src/main/jniLibs/
 app/release/
 dist/
 release/signing.properties

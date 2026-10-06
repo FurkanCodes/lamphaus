@@ -19,7 +19,8 @@
 #   - Build flags are fixed below; do not "improve" them ad hoc — bump the
 #     pin and re-verify instead.
 #
-# Licensing: FFmpeg is configured --enable-lgpl (LGPL 2.1+), mpv is LGPL
+# Licensing: FFmpeg is LGPL with --enable-version3 (LGPL-3.0+, needed for
+# mbedtls), never --enable-gpl; mpv is LGPL
 # 2.1+ when built without GPL components, libass is ISC, mbedtls is
 # Apache-2.0, freetype is FTL/GPL-dual (built without GPL helpers),
 # fontconfig is MIT, harfbuzz is MIT, fribidi is LGPL-2.1+, expat is MIT.
@@ -38,6 +39,8 @@ HARFBUZZ_REF="10.2.0"
 FRIBIDI_REF="v1.0.16"
 FONTCONFIG_REF="2.15.0"
 EXPAT_REF="R_2_6_3"
+# mpv 0.40 requires libplacebo (>= 6.338.2).
+LIBPLACEBO_REF="v7.351.0"
 # Pinned NDK (plan §6). Any other revision aborts the build.
 REQUIRED_NDK_REV="28.2.13676358"
 
@@ -91,9 +94,8 @@ case "$(uname -s)" in
   *) echo "Unsupported host" >&2; exit 1 ;;
 esac
 TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG"
-: > "$MANIFEST"
-
 mkdir -p "$WORK" && cd "$WORK"
+: > "$MANIFEST"
 
 clone_pinned() { # repo url, ref, dir — resolves the ref and records the SHA
   local url="$1" ref="$2" dir="$3"
@@ -117,11 +119,16 @@ clone_pinned https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_REF" ffmpeg
 clone_pinned https://github.com/mpv-player/mpv.git "$MPV_REF" mpv
 clone_pinned https://github.com/libass/libass.git "$LIBASS_REF" libass
 clone_pinned https://github.com/Mbed-TLS/mbedtls.git "$MBEDTLS_REF" mbedtls
+# mbedtls 3.6 keeps its build framework in a submodule.
+git -C mbedtls submodule update --quiet --init --recursive
 clone_pinned https://github.com/freetype/freetype.git "$FREETYPE_REF" freetype
 clone_pinned https://github.com/harfbuzz/harfbuzz.git "$HARFBUZZ_REF" harfbuzz
 clone_pinned https://github.com/fribidi/fribidi.git "$FRIBIDI_REF" fribidi
 clone_pinned https://github.com/fontconfig/fontconfig.git "$FONTCONFIG_REF" fontconfig
 clone_pinned https://github.com/libexpat/libexpat.git "$EXPAT_REF" expat
+clone_pinned https://github.com/haasn/libplacebo.git "$LIBPLACEBO_REF" libplacebo
+# libplacebo vendors glad, jinja, markupsafe, and fast_float as submodules.
+git -C libplacebo submodule update --quiet --init --recursive
 
 echo "ndk $REQUIRED_NDK_REV" >> "$MANIFEST"
 
@@ -180,8 +187,11 @@ build_abi() {
   mkdir -p "$prefix"
   local cross
   cross="$(write_crossfile "$abi" "$triple" "$prefix")"
-  export PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$prefix/lib/x86_64-linux-gnu/pkgconfig:$prefix/share/pkgconfig"
-  export PKG_CONFIG_SYSROOT_DIR="$TOOLCHAIN/sysroot"
+  # Only this ABI's prefix: host (Homebrew) libraries must never leak into
+  # the Android build, and the prefix paths are absolute, so no sysroot.
+  export PKG_CONFIG_PATH="$prefix/lib/pkgconfig:$prefix/share/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$PKG_CONFIG_PATH"
+  unset PKG_CONFIG_SYSROOT_DIR
 
   # expat (fontconfig dependency)
   if [ ! -f "$prefix/lib/libexpat.so" ]; then
@@ -193,7 +203,7 @@ build_abi() {
   if [ ! -f "$prefix/lib/libfreetype.so" ]; then
     (cd freetype && rm -rf "build-$abi" && meson setup "build-$abi" --cross-file "$cross" \
       --prefix="$prefix" --buildtype=release -Ddefault_library=shared \
-      -Dharfbuzz=disabled -Dbrotli=disabled && ninja -C "build-$abi" install)
+      -Dharfbuzz=disabled -Dbrotli=disabled -Dpng=disabled -Dbzip2=disabled && ninja -C "build-$abi" install)
   fi
 
   # harfbuzz
@@ -225,42 +235,62 @@ build_abi() {
   fi
 
   # FFmpeg: LGPL only, software video output (swscale ON), network + mbedtls.
+  # Playback never encodes or muxes, so encoders and muxers stay out (size).
+  # JNI lets mpv's Android video output and MediaCodec decoding reach Java.
+  # 32-bit x86 assembly needs text relocations, which Android refuses.
+  local ffmpeg_asm=""
+  [ "$abi" = "x86" ] && ffmpeg_asm="--disable-asm"
   if [ ! -f "$prefix/lib/libavcodec.so" ]; then
     make -C ffmpeg distclean >/dev/null 2>&1 || true
     (cd ffmpeg && ./configure \
       --enable-cross-compile --target-os=android --arch="$(ffmpeg_arch "$abi")" \
       --cc="$cc" --sysroot="$TOOLCHAIN/sysroot" \
       --prefix="$prefix" \
-      --enable-shared --disable-static --enable-lgpl --disable-gpl \
+      --enable-shared --disable-static --disable-gpl --enable-version3 \
       --disable-programs --disable-doc --disable-debug --disable-avdevice \
-      --disable-postproc \
+      --disable-postproc --disable-encoders --disable-muxers \
+      --enable-jni --enable-mediacodec \
       --enable-network --enable-mbedtls \
-      --extra-ldflags="$PAGE_LDFLAGS")
+      --pkg-config=pkg-config $ffmpeg_asm \
+      --extra-cflags="-I$prefix/include" \
+      --extra-ldflags="-L$prefix/lib $PAGE_LDFLAGS")
     make -C ffmpeg -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)" install
   fi
 
-  # libass (ASS rendering)
+  # libass (ASS rendering). Its x86 assembly does not build for Android.
+  local libass_asm="enabled"
+  case "$abi" in x86|x86_64) libass_asm="disabled" ;; esac
   if [ ! -f "$prefix/lib/libass.so" ]; then
     (cd libass && rm -rf "build-$abi" && meson setup "build-$abi" --cross-file "$cross" \
-      --prefix="$prefix" --buildtype=release -Ddefault_library=shared && ninja -C "build-$abi" install)
+      --prefix="$prefix" --buildtype=release -Ddefault_library=shared -Dasm="$libass_asm" && ninja -C "build-$abi" install)
+  fi
+
+  # libplacebo (mpv's renderer; OpenGL ES only, no Vulkan or shader compilers)
+  if [ ! -f "$prefix/lib/libplacebo.so" ]; then
+    (cd libplacebo && rm -rf "build-$abi" && meson setup "build-$abi" --cross-file "$cross" \
+      --prefix="$prefix" --buildtype=release -Ddefault_library=shared \
+      -Dvulkan=disabled -Dopengl=enabled -Dd3d11=disabled -Dglslang=disabled -Dshaderc=disabled \
+      -Dlcms=disabled -Ddovi=disabled -Dlibdovi=disabled -Ddemos=false -Dtests=false && ninja -C "build-$abi" install)
   fi
 
   # mpv (LGPL build, no GPL components)
   if [ ! -f "$prefix/lib/libmpv.so" ]; then
     (cd mpv && rm -rf "build-$abi" && meson setup "build-$abi" --cross-file "$cross" \
       --prefix="$prefix" --buildtype=release -Ddefault_library=shared \
-      -Dlibmpv=true -Dcplayer=disabled -Dlua=disabled -Djavascript=disabled \
+      -Dgpl=false -Dlibmpv=true -Dcplayer=false -Dlua=disabled -Djavascript=disabled \
       -Dmanpage-build=disabled && ninja -C "build-$abi" install)
   fi
 
-  # Package EVERY non-system shared library for this ABI — copying only
-  # libmpv.so is insufficient when its dependencies are dynamically linked.
+  # Package every non-system shared library libmpv needs, except libass.so:
+  # the app already ships ass-media's libass.so (libass with FreeType,
+  # FriBidi, HarfBuzz, and Fontconfig built in), which exports every libass
+  # function libmpv calls. Two libass.so files cannot share an APK, so libmpv
+  # loads that one; the libass built above only compiles mpv. libplacebo's
+  # libc++_shared.so also comes with ass-media.
   mkdir -p "$OUT/$abi"
+  rm -f "$OUT/$abi"/*.so
   for so in "$prefix"/lib/libmpv.so "$prefix"/lib/libav*.so "$prefix"/lib/libsw*.so \
-            "$prefix"/lib/libass.so "$prefix"/lib/libfontconfig.so \
-            "$prefix"/lib/libfreetype.so "$prefix"/lib/libharfbuzz.so \
-            "$prefix"/lib/libfribidi.so "$prefix"/lib/libexpat.so \
-            "$prefix"/lib/libmbed*.so; do
+            "$prefix"/lib/libplacebo.so "$prefix"/lib/libmbed*.so; do
     [ -e "$so" ] || continue
     cp "$so" "$OUT/$abi/"
   done

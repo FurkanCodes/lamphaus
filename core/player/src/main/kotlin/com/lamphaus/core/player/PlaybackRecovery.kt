@@ -137,8 +137,10 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
         val status = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
         val stateOrNull = error.cause is IllegalStateException || error.cause is NullPointerException
         val decoderShaped = EngineHandoff.failureKindFrom(error.errorCode) in DECODER_FAILURES
-        // When libmpv is packaged, PlaybackEngineFallback owns decoder failures.
-        val recoverable = !(decoderShaped && MpvLibrary.isAvailable()) &&
+        // With Auto-switch on, a startup decoder failure belongs to PlaybackEngineFallback.
+        val engineSwitches = decoderShaped && !firstFrameRendered && MpvLibrary.isAvailable() &&
+            Media3EngineFactory.deviceConfig.autoSwitchEngineOnStartupError
+        val recoverable = !engineSwitches &&
             (
                 error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ||
                     StreamingPolicy.isRecoverable(error.errorCode, status, stateOrNull)

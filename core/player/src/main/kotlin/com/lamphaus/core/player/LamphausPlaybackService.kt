@@ -54,14 +54,27 @@ class LamphausPlaybackService : MediaSessionService() {
     }
 
     private fun installFallback(session: MediaSession) {
-        PlaybackEngineFallback.install(session) { state ->
-            // The session now exposes MPV's Media3-compatible state. Drop the
-            // failed ExoPlayer snapshot so callers use MPV's selected video
-            // format (including its observed frame rate) instead.
-            Media3EngineFactory.sessionPlayer = null
+        PlaybackEngineFallback.install(this, session) { replacement, state ->
+            adoptPlayer(session, replacement)
             // Diagnostics record only the engine switch, never the source (SHR-PROD-06).
-            android.util.Log.i("LamphausPlayback", "engine fallback: ${state.fallbackReason}")
+            android.util.Log.i("LamphausPlayback", "engine switch: ${state.fallbackReason}")
         }
+    }
+
+    /**
+     * The session now runs [player]: ExoPlayer is published for the panels
+     * and Info, while an MPV session clears it so callers read MPV's state.
+     */
+    private fun adoptPlayer(session: MediaSession, player: androidx.media3.common.Player) {
+        Media3EngineFactory.sessionPlayer = player as? androidx.media3.exoplayer.ExoPlayer
+        if (player is androidx.media3.exoplayer.ExoPlayer) playerConfig = Media3EngineFactory.deviceConfig
+        installFallback(session)
+        // The session never passes the video surface on to a new player: the
+        // player screen sends it again when told.
+        session.broadcastCustomCommand(
+            androidx.media3.session.SessionCommand(ACTION_ENGINE_CHANGED, android.os.Bundle.EMPTY),
+            android.os.Bundle.EMPTY,
+        )
     }
 
     /**
@@ -105,6 +118,11 @@ class LamphausPlaybackService : MediaSessionService() {
         ): com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.SessionResult> {
             val mpv = session.player as? com.lamphaus.core.player.mpv.MpvPlayer
             when (customCommand.customAction) {
+                ACTION_SELECT_ENGINE -> {
+                    val engine = args.getString(EXTRA_ENGINE)
+                        ?.let { name -> runCatching { com.lamphaus.core.model.PlaybackEngineKind.valueOf(name) }.getOrNull() }
+                    if (engine != null) PlaybackEngineFallback.select(this@LamphausPlaybackService, session, engine) { adoptPlayer(session, it) }
+                }
                 ACTION_SET_SUBTITLE_DELAY ->
                     mpv?.setSubtitleDelayMillis(args.getLong(EXTRA_DELAY_MILLIS, 0L))
                 ACTION_SET_AUDIO_DELAY ->
@@ -151,10 +169,18 @@ class LamphausPlaybackService : MediaSessionService() {
         const val ACTION_SET_SUBTITLE_DELAY = "lamphaus.playback.SET_SUBTITLE_DELAY"
         const val ACTION_SET_AUDIO_DELAY = "lamphaus.playback.SET_AUDIO_DELAY"
         const val ACTION_APPLY_SUBTITLE_STYLE = "lamphaus.playback.APPLY_SUBTITLE_STYLE"
+
+        /** Puts the engine a stream starts on in place before its media item is set (PLY-ENG-01). */
+        const val ACTION_SELECT_ENGINE = "lamphaus.playback.SELECT_ENGINE"
+        const val EXTRA_ENGINE = "engine"
+
+        /** Sent to the player screen when the session's engine changed, to re-send the surface. */
+        const val ACTION_ENGINE_CHANGED = "lamphaus.playback.ENGINE_CHANGED"
         val CUSTOM_ACTIONS = listOf(
             ACTION_SET_SUBTITLE_DELAY,
             ACTION_SET_AUDIO_DELAY,
             ACTION_APPLY_SUBTITLE_STYLE,
+            ACTION_SELECT_ENGINE,
         )
         const val EXTRA_DELAY_MILLIS = "delay_millis"
         const val EXTRA_STYLE_JSON = "style_json"

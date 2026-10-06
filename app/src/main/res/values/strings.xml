@@ -105,6 +105,13 @@
     <string name="external_subtitles_setting_description">Add-on subtitles in your language travel with the stream</string>
     <string name="external_skip_segments_setting">Send intro and outro times</string>
     <string name="external_skip_segments_setting_description">For players that can skip them; others ignore them</string>
+    <string name="playback_engine_setting">Playback engine</string>
+    <string name="playback_engine_setting_description">ExoPlayer plays most streams; libmpv handles unusual formats and heavily styled subtitles</string>
+    <string name="playback_engine_auto">Auto (libmpv for anime)</string>
+    <string name="playback_engine_exoplayer">ExoPlayer</string>
+    <string name="playback_engine_mpv">libmpv</string>
+    <string name="auto_switch_engine_setting">Switch engine when a stream fails to start</string>
+    <string name="auto_switch_engine_setting_description">Tries the other engine once at the same position</string>
     <string name="streaming_settings">Streaming</string>
     <string name="streaming_settings_applies">Streaming · changes apply from the next playback</string>
     <string name="native_memory_setting">Native memory buffer</string>

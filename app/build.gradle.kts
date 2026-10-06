@@ -128,6 +128,10 @@ android {
 
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
+        // One universal APK carries native code for four ABIs, libmpv's
+        // included (PLY-ENG-01). Compressed, it downloads at about half the
+        // size, and installing unpacks only the device's own ABI.
+        jniLibs.useLegacyPackaging = true
     }
 
     lint {

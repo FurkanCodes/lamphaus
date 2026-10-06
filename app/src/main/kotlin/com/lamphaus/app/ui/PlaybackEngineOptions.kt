@@ -69,6 +69,13 @@ internal object PlaybackEngineOptions {
 
     const val APPLIES_NEXT_PLAYBACK = "Changes apply from the next playback"
 
+    /** Playback engines in Nuvio's order (PLY-ENG-01). */
+    val engines = listOf(
+        com.lamphaus.core.model.PlaybackEngineKind.AUTO,
+        com.lamphaus.core.model.PlaybackEngineKind.MEDIA3,
+        com.lamphaus.core.model.PlaybackEngineKind.MPV,
+    )
+
     /** Parallel connection counts and chunk sizes (PLY-NET-01), as Nuvio offers them. */
     val connectionCounts = StreamingChoices.CONNECTION_COUNTS
     val chunkSizesKb = StreamingChoices.CHUNK_SIZES_KB

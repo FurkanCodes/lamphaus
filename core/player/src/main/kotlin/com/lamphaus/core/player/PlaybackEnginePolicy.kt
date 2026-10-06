@@ -76,6 +76,18 @@ object PlaybackEnginePolicy {
     }
 
     /**
+     * The engine a stream starts on (PLY-ENG-01, Nuvio's internal engine):
+     * the chosen one when the build ships it, and for Auto, libmpv for anime
+     * and ExoPlayer for everything else.
+     */
+    fun engineFor(requested: PlaybackEngineKind, anime: Boolean, mpvAvailable: Boolean): PlaybackEngineKind = when {
+        !mpvAvailable -> PlaybackEngineKind.MEDIA3
+        requested == PlaybackEngineKind.MPV -> PlaybackEngineKind.MPV
+        requested == PlaybackEngineKind.AUTO && anime -> PlaybackEngineKind.MPV
+        else -> PlaybackEngineKind.MEDIA3
+    }
+
+    /**
      * True when the failure justifies handing the session to MPV. Network,
      * authorization, and provider errors are the source's problem: switching
      * engines cannot fix them and would only restart playback.
