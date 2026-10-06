@@ -67,14 +67,14 @@ class ParallelRangeDataSourceTest {
         server.shutdown()
     }
 
-    private fun factory(prefetch: Boolean = true) = ParallelRangeDataSource.Factory(
+    private fun factory(prefetch: Boolean = true, memory: ChunkMemory = HeapChunkMemory(keep = 2)) = ParallelRangeDataSource.Factory(
         upstream = OkHttpDataSource.Factory(OkHttpClient()),
         settings = ParallelDownloadSettings(
             connections = 2,
             chunkBytes = chunkBytes,
             depth = 3,
             sessionChunkCap = 7,
-            memory = HeapChunkMemory(keep = 2),
+            memory = memory,
         ),
         prefetchAllowed = { prefetch },
         eligible = { true },
@@ -106,6 +106,11 @@ class ParallelRangeDataSourceTest {
         // The probe read to the first boundary; later chunks were ranged requests.
         assertEquals("bytes=0-${chunkBytes - 1}", ranges.first())
         assertTrue("expected several chunk requests, got $ranges", ranges.size >= content.size / chunkBytes)
+    }
+
+    @Test
+    fun offHeapChunksReadBackIntact() {
+        assertArrayEquals(content, readAll(factory = factory(memory = NativeChunkMemory(keep = 2))))
     }
 
     @Test

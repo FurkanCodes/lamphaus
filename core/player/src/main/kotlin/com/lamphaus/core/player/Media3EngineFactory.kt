@@ -16,6 +16,10 @@ import com.lamphaus.core.player.audio.DelayAudioProcessor
 import com.lamphaus.core.player.audio.NightListeningAudioProcessor
 import com.lamphaus.core.player.audio.SpeedAwareAudioSink
 import com.lamphaus.core.player.network.HeapChunkMemory
+import com.lamphaus.core.player.network.NativeChunkMemory
+import androidx.media3.exoplayer.upstream.DefaultAllocator
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.exoplayer.upstream.NativeBuffers
 import com.lamphaus.core.player.network.ParallelDownloadPolicy
 import com.lamphaus.core.player.network.ParallelDownloadSettings
 import com.lamphaus.core.player.network.ParallelRangeDataSource
@@ -69,12 +73,21 @@ object Media3EngineFactory {
 
     fun createPlayer(context: Context, config: DevicePlaybackConfig = deviceConfig): ExoPlayer {
         val httpDataSource = PlaybackNetworking.httpDataSourceFactory()
+        // Native memory buffer (PLY-NET-01): buffered media and download
+        // chunks live off the Java heap, sized by the device's physical RAM.
+        val nativeMemory = config.nativeMemoryBuffer && NativeBuffers.isAvailable()
+        val totalRamBytes = if (nativeMemory) NativeMemoryPolicy.totalRamBytes(context) else 0L
+        val parallel = if (config.parallelConnections) {
+            parallelSettings(config, Runtime.getRuntime().maxMemory(), totalRamBytes.takeIf { nativeMemory })
+        } else {
+            null
+        }
         // Parallel connections (PLY-NET-01): the playback's own progressive
         // stream downloads in ranged chunks; everything else stays as it was.
-        val streamDataSource = if (config.parallelConnections) {
+        val streamDataSource = if (parallel != null) {
             ParallelRangeDataSource.Factory(
                 upstream = httpDataSource,
-                settings = parallelSettings(config, Runtime.getRuntime().maxMemory()),
+                settings = parallel,
                 prefetchAllowed = { parallelPrefetchOpen },
                 eligible = { dataSpec -> PlaybackHeaderRegistry.isProgressiveStream(dataSpec.uri.toString()) },
             )
@@ -207,7 +220,22 @@ object Media3EngineFactory {
             // Surface.setFrameRate call. Media3 can only request seamless
             // changes, so it must stay off to avoid competing surface votes.
             .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategy(config))
-            .setLoadControl(loadControl())
+            .setLoadControl(
+                if (nativeMemory) {
+                    nativeLoadControl(totalRamBytes, parallel?.let { ParallelDownloadPolicy.overheadBytes(it.connections, it.chunkBytes) } ?: 0L)
+                } else {
+                    loadControl()
+                },
+            )
+            .apply {
+                if (nativeMemory) {
+                    setBandwidthMeter(
+                        DefaultBandwidthMeter.Builder(context)
+                            .setInitialBitrateEstimate(NativeMemoryPolicy.INITIAL_BITRATE_ESTIMATE)
+                            .build(),
+                    )
+                }
+            }
             // Holds Wi-Fi out of power save while playing; a dozing radio is a
             // classic cause of short mid-episode stalls on TV boxes (QA-08).
             .setWakeMode(C.WAKE_MODE_NETWORK)
@@ -273,22 +301,56 @@ object Media3EngineFactory {
             .build()
 
     /**
+     * Native memory buffer (Nuvio's values): off-heap 64 KiB segments, 15 to
+     * 45 s of media capped by the RAM-tier byte target minus what parallel
+     * downloads hold. The byte target gates everything, back buffer included,
+     * and the back buffer gives way first.
+     */
+    private fun nativeLoadControl(totalRamBytes: Long, parallelOverheadBytes: Long): DefaultLoadControl =
+        DefaultLoadControl.Builder()
+            .setAllocator(DefaultAllocator(true, NativeMemoryPolicy.SEGMENT_BYTES, 0, true))
+            .setTargetBufferBytes(NativeMemoryPolicy.targetBufferBytes(totalRamBytes, parallelOverheadBytes))
+            .setBufferDurationsMs(
+                NativeMemoryPolicy.MIN_BUFFER_MS,
+                NativeMemoryPolicy.MAX_BUFFER_MS,
+                NativeMemoryPolicy.BUFFER_FOR_PLAYBACK_MS,
+                NativeMemoryPolicy.BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+            )
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .setBackBuffer(NativeMemoryPolicy.backBufferMs, true)
+            .build()
+
+    /**
      * Parallel prefetch waits until playback is ready or shows its first
      * frame, so start-up bandwidth goes to the bytes needed first.
      */
     @Volatile
     private var parallelPrefetchOpen = false
 
-    internal fun parallelSettings(config: DevicePlaybackConfig, maxHeapBytes: Long): ParallelDownloadSettings {
+    /**
+     * [nativeRamBytes] is the device's RAM when chunks live off-heap: the
+     * RAM-tier budget beyond the sample buffer then sets the prefetch depth.
+     */
+    internal fun parallelSettings(
+        config: DevicePlaybackConfig,
+        maxHeapBytes: Long,
+        nativeRamBytes: Long?,
+    ): ParallelDownloadSettings {
         val connections = config.parallelConnectionCount.coerceIn(ParallelDownloadPolicy.CONNECTION_RANGE)
         val chunkBytes = ParallelDownloadPolicy.chunkBytes(config.parallelChunkSizeKb, maxHeapBytes)
-        val depth = ParallelDownloadPolicy.prefetchDepth(connections, chunkBytes, nativeBudgetBytes = null, reservedBufferBytes = 0L)
+        val nativeBudget = nativeRamBytes?.let(NativeMemoryPolicy::safeLimitBytes)
+        val depth = ParallelDownloadPolicy.prefetchDepth(
+            connections = connections,
+            chunkBytes = chunkBytes,
+            nativeBudgetBytes = nativeBudget,
+            reservedBufferBytes = nativeBudget ?: 0L,
+        )
         return ParallelDownloadSettings(
             connections = connections,
             chunkBytes = chunkBytes,
             depth = depth,
             sessionChunkCap = ParallelDownloadPolicy.sessionChunkCap(depth, maxHeapBytes),
-            memory = HeapChunkMemory(keep = 2),
+            memory = if (nativeRamBytes != null) NativeChunkMemory(keep = 2) else HeapChunkMemory(keep = 2),
         )
     }
 

@@ -1,0 +1,421 @@
+diff --git a/libraries/exoplayer/build.gradle.kts b/libraries/exoplayer/build.gradle.kts
+index e3087c5..8022a09 100644
+--- a/libraries/exoplayer/build.gradle.kts
++++ b/libraries/exoplayer/build.gradle.kts
+@@ -21,6 +21,18 @@ plugins {
+ android {
+   namespace = "androidx.media3.exoplayer"
+ 
++  // Lamphaus native memory patch: off-heap buffers (src/main/jni).
++  defaultConfig {
++    externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
++    ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64") }
++  }
++  externalNativeBuild {
++    cmake {
++      path = file("src/main/jni/CMakeLists.txt")
++      version = "3.22.1"
++    }
++  }
++
+   sourceSets {
+     getByName("androidTest").assets.directories.add("../test_data/src/test/assets")
+     getByName("test").assets.directories.add("../test_data/src/test/assets/")
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/SampleDataQueue.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/SampleDataQueue.java
+index 17db195..0a4e9b7 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/SampleDataQueue.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/SampleDataQueue.java
+@@ -45,6 +45,9 @@ import java.util.Arrays;
+ 
+   private final Allocator allocator;
+   private final int allocationLength;
++
++  /** Heap staging for {@link DataReader} writes into off-heap allocations; loading thread only. */
++  @Nullable private byte[] nativeWriteScratch;
+   private final ParsableByteArray scratch;
+ 
+   // References into the linked list of allocations.
+@@ -177,11 +180,25 @@ import java.util.Arrays;
+ 
+   public int sampleData(DataReader input, int length, boolean allowEndOfInput) throws IOException {
+     length = preAppend(length);
+-    int bytesAppended =
+-        input.read(
+-            writeAllocationNode.allocation.data,
+-            writeAllocationNode.translateOffset(totalBytesWritten),
+-            length);
++    Allocation allocation = writeAllocationNode.allocation;
++    int offset = writeAllocationNode.translateOffset(totalBytesWritten);
++    int bytesAppended;
++    if (allocation.nativeBuffer == null) {
++      bytesAppended = input.read(allocation.data, offset, length);
++    } else {
++      // Off-heap allocation: read into a heap scratch, then copy (Lamphaus native memory patch).
++      byte[] scratch = nativeWriteScratch;
++      if (scratch == null) {
++        scratch = new byte[allocationLength];
++        nativeWriteScratch = scratch;
++      }
++      bytesAppended = input.read(scratch, 0, min(length, scratch.length));
++      if (bytesAppended > 0) {
++        ByteBuffer target = allocation.nativeBuffer.duplicate();
++        target.position(offset);
++        target.put(scratch, 0, bytesAppended);
++      }
++    }
+     if (bytesAppended == C.RESULT_END_OF_INPUT) {
+       if (allowEndOfInput) {
+         return C.RESULT_END_OF_INPUT;
+@@ -195,10 +212,16 @@ import java.util.Arrays;
+   public void sampleData(ParsableByteArray buffer, int length) {
+     while (length > 0) {
+       int bytesAppended = preAppend(length);
+-      buffer.readBytes(
+-          writeAllocationNode.allocation.data,
+-          writeAllocationNode.translateOffset(totalBytesWritten),
+-          bytesAppended);
++      Allocation allocation = writeAllocationNode.allocation;
++      int offset = writeAllocationNode.translateOffset(totalBytesWritten);
++      if (allocation.nativeBuffer == null) {
++        buffer.readBytes(allocation.data, offset, bytesAppended);
++      } else {
++        ByteBuffer target = allocation.nativeBuffer.duplicate();
++        target.position(offset);
++        target.put(buffer.getData(), buffer.getPosition(), bytesAppended);
++        buffer.skipBytes(bytesAppended);
++      }
+       length -= bytesAppended;
+       postAppend(bytesAppended);
+     }
+@@ -408,7 +431,15 @@ import java.util.Arrays;
+     while (remaining > 0) {
+       int toCopy = min(remaining, (int) (allocationNode.endPosition - absolutePosition));
+       Allocation allocation = allocationNode.allocation;
+-      target.put(allocation.data, allocationNode.translateOffset(absolutePosition), toCopy);
++      int offset = allocationNode.translateOffset(absolutePosition);
++      if (allocation.nativeBuffer == null) {
++        target.put(allocation.data, offset, toCopy);
++      } else {
++        ByteBuffer source = allocation.nativeBuffer.duplicate();
++        source.position(offset);
++        source.limit(offset + toCopy);
++        target.put(source);
++      }
+       remaining -= toCopy;
+       absolutePosition += toCopy;
+       if (absolutePosition == allocationNode.endPosition) {
+@@ -434,12 +465,14 @@ import java.util.Arrays;
+     while (remaining > 0) {
+       int toCopy = min(remaining, (int) (allocationNode.endPosition - absolutePosition));
+       Allocation allocation = allocationNode.allocation;
+-      System.arraycopy(
+-          allocation.data,
+-          allocationNode.translateOffset(absolutePosition),
+-          target,
+-          length - remaining,
+-          toCopy);
++      int offset = allocationNode.translateOffset(absolutePosition);
++      if (allocation.nativeBuffer == null) {
++        System.arraycopy(allocation.data, offset, target, length - remaining, toCopy);
++      } else {
++        ByteBuffer source = allocation.nativeBuffer.duplicate();
++        source.position(offset);
++        source.get(target, length - remaining, toCopy);
++      }
+       remaining -= toCopy;
+       absolutePosition += toCopy;
+       if (absolutePosition == allocationNode.endPosition) {
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/Allocation.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/Allocation.java
+index cca3d6b..ce00b4e 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/Allocation.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/Allocation.java
+@@ -15,7 +15,9 @@
+  */
+ package androidx.media3.exoplayer.upstream;
+ 
++import androidx.annotation.Nullable;
+ import androidx.media3.common.util.UnstableApi;
++import java.nio.ByteBuffer;
+ 
+ /**
+  * An allocation within a byte array.
+@@ -35,12 +37,28 @@ public final class Allocation {
+   /** The offset of the allocated space in {@link #data}. */
+   public final int offset;
+ 
++  /**
++   * Off-heap memory holding the allocated space, starting at index 0, or null when the space is in
++   * {@link #data}. When set, {@link #data} is empty. (Lamphaus native memory patch.)
++   */
++  @Nullable public final ByteBuffer nativeBuffer;
++
+   /**
+    * @param data The array containing the allocated space.
+    * @param offset The offset of the allocated space in {@code data}.
+    */
+   public Allocation(byte[] data, int offset) {
++    this(data, offset, /* nativeBuffer= */ null);
++  }
++
++  /**
++   * @param data The array containing the allocated space, or an empty array for off-heap space.
++   * @param offset The offset of the allocated space in {@code data}.
++   * @param nativeBuffer The direct buffer holding off-heap space, or null.
++   */
++  public Allocation(byte[] data, int offset, @Nullable ByteBuffer nativeBuffer) {
+     this.data = data;
+     this.offset = offset;
++    this.nativeBuffer = nativeBuffer;
+   }
+ }
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/DefaultAllocator.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/DefaultAllocator.java
+index 6513444..2cbe040 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/DefaultAllocator.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/DefaultAllocator.java
+@@ -23,6 +23,7 @@ import androidx.annotation.Nullable;
+ import androidx.media3.common.util.NullableType;
+ import androidx.media3.common.util.UnstableApi;
+ import androidx.media3.common.util.Util;
++import java.nio.ByteBuffer;
+ import java.util.Arrays;
+ 
+ /** Default implementation of {@link Allocator}. */
+@@ -30,8 +31,10 @@ import java.util.Arrays;
+ public final class DefaultAllocator implements Allocator {
+ 
+   private static final int AVAILABLE_EXTRA_CAPACITY = 100;
++  private static final byte[] NO_HEAP_DATA = new byte[0];
+ 
+   private final boolean trimOnReset;
++  private final boolean useNativeMemory;
+   private final int individualAllocationSize;
+   @Nullable private final byte[] initialAllocationBlock;
+ 
+@@ -65,9 +68,28 @@ public final class DefaultAllocator implements Allocator {
+    */
+   public DefaultAllocator(
+       boolean trimOnReset, int individualAllocationSize, int initialAllocationCount) {
++    this(trimOnReset, individualAllocationSize, initialAllocationCount, /* useNativeMemory= */ false);
++  }
++
++  /**
++   * Constructs an instance whose new allocations live off the Java heap when {@code
++   * useNativeMemory} is true and {@link NativeBuffers} is available, falling back to the heap
++   * otherwise. (Lamphaus native memory patch.)
++   *
++   * @param trimOnReset Whether memory is freed when the allocator is reset.
++   * @param individualAllocationSize The length of each individual {@link Allocation}.
++   * @param initialAllocationCount The number of heap allocations to create up front.
++   * @param useNativeMemory Whether new allocations use off-heap memory.
++   */
++  public DefaultAllocator(
++      boolean trimOnReset,
++      int individualAllocationSize,
++      int initialAllocationCount,
++      boolean useNativeMemory) {
+     checkArgument(individualAllocationSize > 0);
+     checkArgument(initialAllocationCount >= 0);
+     this.trimOnReset = trimOnReset;
++    this.useNativeMemory = useNativeMemory;
+     this.individualAllocationSize = individualAllocationSize;
+     this.availableCount = initialAllocationCount;
+     this.availableAllocations = new Allocation[initialAllocationCount + AVAILABLE_EXTRA_CAPACITY];
+@@ -104,7 +126,13 @@ public final class DefaultAllocator implements Allocator {
+       allocation = checkNotNull(availableAllocations[--availableCount]);
+       availableAllocations[availableCount] = null;
+     } else {
+-      allocation = new Allocation(new byte[individualAllocationSize], 0);
++      @Nullable
++      ByteBuffer nativeBuffer =
++          useNativeMemory ? NativeBuffers.allocate(individualAllocationSize) : null;
++      allocation =
++          nativeBuffer != null
++              ? new Allocation(NO_HEAP_DATA, 0, nativeBuffer)
++              : new Allocation(new byte[individualAllocationSize], 0);
+       if (allocatedCount > availableAllocations.length) {
+         // Make availableAllocations be large enough to contain all allocations made by this
+         // allocator so that release() does not need to grow the availableAllocations array. See
+@@ -167,7 +195,13 @@ public final class DefaultAllocator implements Allocator {
+       }
+     }
+ 
+-    // Discard allocations beyond the target.
++    // Discard allocations beyond the target, freeing any off-heap memory they hold.
++    for (int i = targetAvailableCount; i < availableCount; i++) {
++      @Nullable ByteBuffer nativeBuffer = checkNotNull(availableAllocations[i]).nativeBuffer;
++      if (nativeBuffer != null) {
++        NativeBuffers.free(nativeBuffer);
++      }
++    }
+     Arrays.fill(availableAllocations, targetAvailableCount, availableCount, null);
+     availableCount = targetAvailableCount;
+   }
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/NativeBuffers.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/NativeBuffers.java
+new file mode 100644
+index 0000000..2860745
+--- /dev/null
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/upstream/NativeBuffers.java
+@@ -0,0 +1,107 @@
++/*
++ * Copyright 2026 Lamphaus. Licensed under the Apache License, Version 2.0 (the "License"); you may
++ * not use this file except in compliance with the License. You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software distributed under the
++ * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
++ * express or implied. See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package androidx.media3.exoplayer.upstream;
++
++import androidx.annotation.Nullable;
++import androidx.media3.common.util.UnstableApi;
++import java.nio.ByteBuffer;
++import java.util.concurrent.Executors;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicLong;
++
++/**
++ * Off-heap memory for buffered media (Lamphaus native memory patch).
++ *
++ * <p>Each buffer is a zeroed native block wrapped as a direct {@link ByteBuffer}, so it does not
++ * count against the Java heap limit. Java code reads and writes it only through bounds-checked
++ * {@link ByteBuffer} calls; native code only allocates and frees. Freeing is deferred by a few
++ * seconds, so a late access while a loader winds down never reaches freed memory.
++ */
++@UnstableApi
++public final class NativeBuffers {
++
++  private static final String LIBRARY_NAME = "lamphaus_media3_native";
++  private static final long FREE_DELAY_MS = 5_000;
++
++  private static final AtomicLong allocatedBytes = new AtomicLong();
++  private static final ScheduledExecutorService freer =
++      Executors.newSingleThreadScheduledExecutor(
++          runnable -> {
++            Thread thread = new Thread(runnable, "Media3NativeBufferFree");
++            thread.setDaemon(true);
++            return thread;
++          });
++
++  private static volatile boolean loadAttempted;
++  private static volatile boolean available;
++
++  private NativeBuffers() {}
++
++  /** Whether the native library loaded on this device. */
++  public static boolean isAvailable() {
++    if (!loadAttempted) {
++      synchronized (NativeBuffers.class) {
++        if (!loadAttempted) {
++          try {
++            System.loadLibrary(LIBRARY_NAME);
++            available = true;
++          } catch (Throwable error) {
++            available = false;
++          }
++          loadAttempted = true;
++        }
++      }
++    }
++    return available;
++  }
++
++  /**
++   * Returns a zeroed off-heap buffer of {@code size} bytes, or null when native memory is
++   * unavailable or exhausted.
++   */
++  @Nullable
++  public static ByteBuffer allocate(int size) {
++    if (size <= 0 || !isAvailable()) {
++      return null;
++    }
++    @Nullable ByteBuffer buffer = nativeAllocate(size);
++    if (buffer != null) {
++      allocatedBytes.addAndGet(size);
++    }
++    return buffer;
++  }
++
++  /**
++   * Frees a buffer returned by {@link #allocate(int)} after a short delay. The caller must not use
++   * the buffer, or any duplicate of it, afterwards.
++   */
++  public static void free(ByteBuffer buffer) {
++    freer.schedule(
++        () -> {
++          allocatedBytes.addAndGet(-buffer.capacity());
++          nativeFree(buffer);
++        },
++        FREE_DELAY_MS,
++        TimeUnit.MILLISECONDS);
++  }
++
++  /** Returns the off-heap bytes currently allocated, for diagnostics. */
++  public static long getAllocatedBytes() {
++    return allocatedBytes.get();
++  }
++
++  @Nullable
++  private static native ByteBuffer nativeAllocate(int size);
++
++  private static native void nativeFree(ByteBuffer buffer);
++}
+diff --git a/libraries/exoplayer/src/main/jni/CMakeLists.txt b/libraries/exoplayer/src/main/jni/CMakeLists.txt
+new file mode 100644
+index 0000000..16a9473
+--- /dev/null
++++ b/libraries/exoplayer/src/main/jni/CMakeLists.txt
+@@ -0,0 +1,5 @@
++# Lamphaus native memory patch: off-heap buffers for Media3's DefaultAllocator.
++cmake_minimum_required(VERSION 3.22.1)
++project(lamphaus_media3_native C)
++
++add_library(lamphaus_media3_native SHARED native_buffers.c)
+diff --git a/libraries/exoplayer/src/main/jni/native_buffers.c b/libraries/exoplayer/src/main/jni/native_buffers.c
+new file mode 100644
+index 0000000..5b4299c
+--- /dev/null
++++ b/libraries/exoplayer/src/main/jni/native_buffers.c
+@@ -0,0 +1,39 @@
++/*
++ * Copyright 2026 Lamphaus. Licensed under the Apache License, Version 2.0.
++ *
++ * Off-heap memory for androidx.media3.exoplayer.upstream.NativeBuffers (Lamphaus native memory
++ * patch). Only allocation and release happen here; every read and write goes through Java's
++ * bounds-checked ByteBuffer calls.
++ */
++#include <jni.h>
++#include <stdlib.h>
++
++JNIEXPORT jobject JNICALL
++Java_androidx_media3_exoplayer_upstream_NativeBuffers_nativeAllocate(JNIEnv *env, jclass clazz,
++                                                                     jint size) {
++  (void) clazz;
++  if (size <= 0) {
++    return NULL;
++  }
++  void *memory = calloc(1, (size_t) size);
++  if (memory == NULL) {
++    return NULL;
++  }
++  jobject buffer = (*env)->NewDirectByteBuffer(env, memory, (jlong) size);
++  if (buffer == NULL) {
++    (*env)->ExceptionClear(env);
++    free(memory);
++    return NULL;
++  }
++  return buffer;
++}
++
++JNIEXPORT void JNICALL
++Java_androidx_media3_exoplayer_upstream_NativeBuffers_nativeFree(JNIEnv *env, jclass clazz,
++                                                                 jobject buffer) {
++  (void) clazz;
++  if (buffer == NULL) {
++    return;
++  }
++  free((*env)->GetDirectBufferAddress(env, buffer));
++}

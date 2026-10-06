@@ -11,6 +11,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Lamphaus's patched Media3 ExoPlayer (scripts/build-media3-exoplayer.sh).
+        maven {
+            url = uri("third_party/maven")
+            content { includeGroup("com.lamphaus.media3") }
+        }
     }
 }
 

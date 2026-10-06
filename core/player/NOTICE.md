@@ -59,8 +59,19 @@ SOFTWARE.
 
 - Artifacts: androidx.media3 (ExoPlayer, media3-session, media3-ui), Apache
   License 2.0. https://github.com/androidx/media
+- `media3-exoplayer` is a patched build of release 1.11.0
+  (`com.lamphaus.media3:media3-exoplayer:1.11.0-lamphaus.1` in
+  `third_party/maven/`), made by `scripts/build-media3-exoplayer.sh` from the
+  upstream tag plus `third_party/media3/patches/`. The patch, Lamphaus's own
+  work under the same Apache License 2.0, keeps buffered samples in off-heap
+  memory: `Allocation`, `DefaultAllocator`, and `SampleDataQueue` gain a
+  direct-buffer path, and the new `NativeBuffers` class with
+  `src/main/jni/native_buffers.c` allocates and frees that memory. Every
+  other Media3 module is the stock 1.11.0 artifact.
 
 ## Behavioral references
 
 - NuvioTV (https://github.com/NuvioMedia/NuvioTV) was consulted as a
-  behavioral reference only; no GPL source is copied.
+  behavioral reference only; no GPL source is copied. Its streaming
+  behaviour (parallel range downloads, native memory buffering, recovery)
+  is re-implemented from observed settings and constants.
