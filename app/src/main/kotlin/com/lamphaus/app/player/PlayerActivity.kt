@@ -166,6 +166,14 @@ class PlayerActivity : ComponentActivity() {
     private val isTelevision by lazy { packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // While the player is visible its UI thread runs at display priority, as Nuvio's does.
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) =
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+
+            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) =
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT)
+        })
         super.onCreate(savedInstanceState)
         request = intent.getStringExtra(EXTRA_REQUEST)
             ?.let { runCatching { JSON.decodeFromString<PlaybackRequest>(it) }.getOrNull() }
@@ -388,6 +396,13 @@ class PlayerActivity : ComponentActivity() {
                             PerfTrace.mark(PerfTrace.FIRST_VIDEO_FRAME)
                             startupErrorJob?.cancel()
                             firstFrameDeferred?.complete(true)
+                        }
+
+                        override fun onIsPlayingChanged(isPlaying: Boolean) {
+                            // Saves come every 90 s while playing; a pause keeps the spot now.
+                            if (!isPlaying && playbackStartupPhaseState.value == PlaybackStartupPhase.READY) {
+                                saveProgress(final = false)
+                            }
                         }
 
                         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1468,7 +1483,9 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_REQUEST = "playback_request"
 
         /** How often playback position is persisted while the player is open. */
-        private const val PROGRESS_SAVE_INTERVAL_MILLIS = 10_000L
+        // Nuvio's cadence: each local save re-runs Continue Watching, which costs
+    // a weak TV box frames mid-playback. Pause, stop, and the end save at once.
+    private const val PROGRESS_SAVE_INTERVAL_MILLIS = 90_000L
         /** Longest wait for add-on subtitles before the stream starts without the rest. */
         private const val ADDON_SUBTITLES_WAIT_MILLIS = 8_000L
 
