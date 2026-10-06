@@ -15,6 +15,10 @@ import com.lamphaus.core.model.AudioOutputMode
 import com.lamphaus.core.player.audio.DelayAudioProcessor
 import com.lamphaus.core.player.audio.NightListeningAudioProcessor
 import com.lamphaus.core.player.audio.SpeedAwareAudioSink
+import com.lamphaus.core.player.network.HeapChunkMemory
+import com.lamphaus.core.player.network.ParallelDownloadPolicy
+import com.lamphaus.core.player.network.ParallelDownloadSettings
+import com.lamphaus.core.player.network.ParallelRangeDataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -65,8 +69,20 @@ object Media3EngineFactory {
 
     fun createPlayer(context: Context, config: DevicePlaybackConfig = deviceConfig): ExoPlayer {
         val httpDataSource = PlaybackNetworking.httpDataSourceFactory()
+        // Parallel connections (PLY-NET-01): the playback's own progressive
+        // stream downloads in ranged chunks; everything else stays as it was.
+        val streamDataSource = if (config.parallelConnections) {
+            ParallelRangeDataSource.Factory(
+                upstream = httpDataSource,
+                settings = parallelSettings(config, Runtime.getRuntime().maxMemory()),
+                prefetchAllowed = { parallelPrefetchOpen },
+                eligible = { dataSpec -> PlaybackHeaderRegistry.isProgressiveStream(dataSpec.uri.toString()) },
+            )
+        } else {
+            httpDataSource
+        }
         val resolvingDataSource = ResolvingDataSource.Factory(
-            DefaultDataSource.Factory(context, httpDataSource),
+            DefaultDataSource.Factory(context, streamDataSource),
         ) { dataSpec ->
             val scheme = dataSpec.uri.scheme
             if (scheme != "http" && scheme != "https") return@Factory dataSpec
@@ -207,6 +223,16 @@ object Media3EngineFactory {
                 addListener(object : Player.Listener {
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         videoCadenceEstimator.reset()
+                        // A new playback holds prefetch until it can play (Nuvio).
+                        parallelPrefetchOpen = false
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY) parallelPrefetchOpen = true
+                    }
+
+                    override fun onRenderedFirstFrame() {
+                        parallelPrefetchOpen = true
                     }
                 })
                 setAudioAttributes(
@@ -247,6 +273,26 @@ object Media3EngineFactory {
             .build()
 
     /**
+     * Parallel prefetch waits until playback is ready or shows its first
+     * frame, so start-up bandwidth goes to the bytes needed first.
+     */
+    @Volatile
+    private var parallelPrefetchOpen = false
+
+    internal fun parallelSettings(config: DevicePlaybackConfig, maxHeapBytes: Long): ParallelDownloadSettings {
+        val connections = config.parallelConnectionCount.coerceIn(ParallelDownloadPolicy.CONNECTION_RANGE)
+        val chunkBytes = ParallelDownloadPolicy.chunkBytes(config.parallelChunkSizeKb, maxHeapBytes)
+        val depth = ParallelDownloadPolicy.prefetchDepth(connections, chunkBytes, nativeBudgetBytes = null, reservedBufferBytes = 0L)
+        return ParallelDownloadSettings(
+            connections = connections,
+            chunkBytes = chunkBytes,
+            depth = depth,
+            sessionChunkCap = ParallelDownloadPolicy.sessionChunkCap(depth, maxHeapBytes),
+            memory = HeapChunkMemory(keep = 2),
+        )
+    }
+
+    /**
      * Live session player in the same process (set by LamphausPlaybackService).
      * Lets the activity apply the frame-rate hint without recreating the player.
      */
@@ -282,8 +328,8 @@ object Media3EngineFactory {
 
     /**
      * True when [wanted] changes something only a new player can apply:
-     * audio output, decoder priority, downmix, night listening, or Dolby
-     * Vision handling.
+     * audio output, decoder priority, downmix, night listening, Dolby Vision
+     * handling, or the streaming engine (PLY-NET-01).
      * Frame-rate matching applies live and never needs a rebuild.
      */
     fun needsRebuild(builtWith: DevicePlaybackConfig, wanted: DevicePlaybackConfig): Boolean =
@@ -291,6 +337,10 @@ object Media3EngineFactory {
             builtWith.decoderPriority != wanted.decoderPriority ||
             builtWith.downmixMode != wanted.downmixMode ||
             builtWith.nightListening != wanted.nightListening ||
+            builtWith.nativeMemoryBuffer != wanted.nativeMemoryBuffer ||
+            builtWith.parallelConnections != wanted.parallelConnections ||
+            builtWith.parallelConnectionCount != wanted.parallelConnectionCount ||
+            builtWith.parallelChunkSizeKb != wanted.parallelChunkSizeKb ||
             builtWith.dolbyVisionHandling != wanted.dolbyVisionHandling
 
     /**

@@ -195,4 +195,24 @@ data class DevicePlaybackConfig(
     val downmixMode: DownmixMode = DownmixMode.AUTO,
     /** Night listening (SHR-PROD-15): compress loud and quiet moments, lift dialogue; decodes on the device. */
     val nightListening: Boolean = false,
+    /** Native memory buffer (PLY-NET-01): buffered media and download chunks live outside the Java heap. */
+    val nativeMemoryBuffer: Boolean = false,
+    /** Parallel connections (PLY-NET-01): progressive streams download in ranged chunks over several connections. */
+    val parallelConnections: Boolean = false,
+    val parallelConnectionCount: Int = StreamingChoices.DEFAULT_CONNECTIONS,
+    val parallelChunkSizeKb: Int = StreamingChoices.DEFAULT_CHUNK_SIZE_KB,
 )
+
+/** The streaming choices Settings offers (PLY-NET-01), with Nuvio's ranges and defaults. */
+object StreamingChoices {
+    const val DEFAULT_CONNECTIONS = 2
+    val CONNECTION_COUNTS = listOf(2, 3, 4)
+    const val DEFAULT_CHUNK_SIZE_KB = 16 * 1024
+    val CHUNK_SIZES_KB = listOf(256, 512, 1024, 2048, 4096, 8192, 16384, 24576, 32768, 49152, 65536, 98304, 131072)
+
+    fun connections(value: Int?): Int = value?.coerceIn(CONNECTION_COUNTS.first(), CONNECTION_COUNTS.last()) ?: DEFAULT_CONNECTIONS
+
+    /** The offered size nearest a stored one, so a corrupt value never reaches the player. */
+    fun chunkSizeKb(value: Int?): Int = value?.let { stored -> CHUNK_SIZES_KB.minBy { kotlin.math.abs(it - stored) } }
+        ?: DEFAULT_CHUNK_SIZE_KB
+}

@@ -15,6 +15,7 @@ import com.lamphaus.core.model.NextEpisodeThresholdMode
 import com.lamphaus.core.model.AudioOutputMode
 import com.lamphaus.core.model.DecoderPriority
 import com.lamphaus.core.model.DevicePlaybackConfig
+import com.lamphaus.core.model.StreamingChoices
 import com.lamphaus.core.model.DolbyVisionHandling
 import com.lamphaus.core.model.DownmixMode
 import com.lamphaus.core.model.FrameRateMatching
@@ -170,6 +171,10 @@ class UserPreferences(private val context: Context) {
                 decoderPriority = values[PLAYBACK_DECODER_PRIORITY],
                 downmixMode = values[PLAYBACK_DOWNMIX],
                 nightListening = values[PLAYBACK_NIGHT_LISTENING],
+                nativeMemoryBuffer = values[PLAYBACK_NATIVE_MEMORY],
+                parallelConnections = values[PLAYBACK_PARALLEL],
+                parallelConnectionCount = values[PLAYBACK_PARALLEL_CONNECTIONS],
+                parallelChunkSizeKb = values[PLAYBACK_PARALLEL_CHUNK_KB],
             ),
             updatedAtEpochMillis = values[SETTINGS_UPDATED] ?: 0L,
         )
@@ -433,6 +438,10 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_DECODER_PRIORITY] = config.decoderPriority.name
             it[PLAYBACK_DOWNMIX] = config.downmixMode.name
             it[PLAYBACK_NIGHT_LISTENING] = config.nightListening
+            it[PLAYBACK_NATIVE_MEMORY] = config.nativeMemoryBuffer
+            it[PLAYBACK_PARALLEL] = config.parallelConnections
+            it[PLAYBACK_PARALLEL_CONNECTIONS] = StreamingChoices.connections(config.parallelConnectionCount)
+            it[PLAYBACK_PARALLEL_CHUNK_KB] = StreamingChoices.chunkSizeKb(config.parallelChunkSizeKb)
         }
     }
 
@@ -531,6 +540,10 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_DECODER_PRIORITY = stringPreferencesKey("playback_decoder_priority")
         val PLAYBACK_DOWNMIX = stringPreferencesKey("playback_downmix")
         val PLAYBACK_NIGHT_LISTENING = booleanPreferencesKey("playback_night_listening")
+        val PLAYBACK_NATIVE_MEMORY = booleanPreferencesKey("playback_native_memory")
+        val PLAYBACK_PARALLEL = booleanPreferencesKey("playback_parallel_connections")
+        val PLAYBACK_PARALLEL_CONNECTIONS = intPreferencesKey("playback_parallel_connection_count")
+        val PLAYBACK_PARALLEL_CHUNK_KB = intPreferencesKey("playback_parallel_chunk_kb")
         val SETTINGS_UPDATED = longPreferencesKey("settings_updated_epoch_millis")
     }
 }
@@ -583,6 +596,10 @@ internal fun devicePlaybackConfigFromKeys(
     decoderPriority: String?,
     downmixMode: String?,
     nightListening: Boolean? = null,
+    nativeMemoryBuffer: Boolean? = null,
+    parallelConnections: Boolean? = null,
+    parallelConnectionCount: Int? = null,
+    parallelChunkSizeKb: Int? = null,
 ): DevicePlaybackConfig {
 
     return DevicePlaybackConfig(
@@ -594,6 +611,10 @@ internal fun devicePlaybackConfigFromKeys(
         decoderPriority = parseEnum(decoderPriority, DecoderPriority.AUTO),
         downmixMode = parseEnum(downmixMode, DownmixMode.AUTO),
         nightListening = nightListening ?: false,
+        nativeMemoryBuffer = nativeMemoryBuffer ?: false,
+        parallelConnections = parallelConnections ?: false,
+        parallelConnectionCount = StreamingChoices.connections(parallelConnectionCount),
+        parallelChunkSizeKb = StreamingChoices.chunkSizeKb(parallelChunkSizeKb),
     )
 }
 

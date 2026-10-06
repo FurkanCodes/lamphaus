@@ -366,7 +366,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun connect(playback: PlaybackRequest) {
         playbackStartupPhaseState.value = PlaybackStartupPhase.LOADING
-        PlaybackHeaderRegistry.begin(playback.source.uri, playback.source.headers)
+        PlaybackHeaderRegistry.begin(playback.source.uri, playback.source.headers, playback.source.mimeType)
         playback.source.subtitles.forEach { subtitle ->
             PlaybackHeaderRegistry.put(subtitle.url, subtitle.headers)
         }
