@@ -9,7 +9,9 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
+import java.net.SocketTimeoutException
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -29,20 +31,40 @@ internal object PlaybackNetworking {
             // so one slow stream can starve the others. HTTP/1.1 gives every
             // load its own connection, the way dedicated players fetch media.
             .protocols(listOf(Protocol.HTTP_1_1))
+            // Media3's OkHttp source enqueues its calls, so OkHttp's default of
+            // five per host would queue parallel range downloads behind each other.
+            .dispatcher(Dispatcher().apply { maxRequests = 64; maxRequestsPerHost = 32 })
             .dns(Ipv4FirstDns)
-            .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
+            // Room for every warm range connection, so none is evicted mid-playback.
+            .connectionPool(ConnectionPool(32, 3, TimeUnit.MINUTES))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
     }
 
-    fun httpDataSourceFactory(): HttpDataSource.Factory =
-        OkHttpDataSource.Factory(client).setUserAgent(USER_AGENT)
+    /**
+     * No factory-level User-Agent: OkHttpDataSource would add it next to an
+     * add-on's own, so [withDefaultUserAgent] fills it in per request instead.
+     */
+    fun httpDataSourceFactory(): HttpDataSource.Factory = OkHttpDataSource.Factory(client)
 
-    private const val USER_AGENT = "Lamphaus/1.0"
+    /** Adds the browser User-Agent unless the add-on supplied one (header names are case-insensitive). */
+    fun withDefaultUserAgent(headers: Map<String, String>): Map<String, String> =
+        if (headers.keys.any { it.equals(USER_AGENT_HEADER, ignoreCase = true) }) {
+            headers
+        } else {
+            headers + (USER_AGENT_HEADER to DEFAULT_USER_AGENT)
+        }
+
+    private const val USER_AGENT_HEADER = "User-Agent"
+
+    /** The browser identity streaming hosts expect; some throttle or refuse unknown clients. */
+    const val DEFAULT_USER_AGENT =
+        "Mozilla/5.0 (Linux; Android 13; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
 /**
@@ -66,12 +88,15 @@ internal class StreamingLoadErrorPolicy :
     DefaultLoadErrorHandlingPolicy(StreamingPolicy.MIN_LOADABLE_RETRY_COUNT) {
 
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+        val causes = generateSequence<Throwable>(loadErrorInfo.exception) { it.cause }.toList()
+        val status = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
         // Parser, cleartext, and position errors stay fatal as Media3 decides.
-        if (super.getRetryDelayMsFor(loadErrorInfo) == C.TIME_UNSET) return C.TIME_UNSET
-        val status = generateSequence<Throwable>(loadErrorInfo.exception) { it.cause }
-            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-            .firstOrNull()
-            ?.responseCode
-        return StreamingPolicy.retryDelayMillis(loadErrorInfo.errorCount, status) ?: C.TIME_UNSET
+        val mediaDelay = super.getRetryDelayMsFor(loadErrorInfo).takeUnless { it == C.TIME_UNSET }
+        return StreamingPolicy.retryDelayMillis(
+            errorCount = loadErrorInfo.errorCount,
+            httpStatus = status,
+            timedOut = causes.any { it is SocketTimeoutException },
+            mediaDelayMillis = mediaDelay,
+        ) ?: C.TIME_UNSET
     }
 }

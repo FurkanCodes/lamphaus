@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.lamphaus.core.model.AudioOutputMode
 import com.lamphaus.core.player.audio.DelayAudioProcessor
 import com.lamphaus.core.player.audio.NightListeningAudioProcessor
+import com.lamphaus.core.player.audio.SpeedAwareAudioSink
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -63,25 +64,20 @@ object Media3EngineFactory {
     val audioDelayProcessor = DelayAudioProcessor()
 
     fun createPlayer(context: Context, config: DevicePlaybackConfig = deviceConfig): ExoPlayer {
-        val bufferPlan = StreamingPolicy.bufferPlan(Runtime.getRuntime().maxMemory())
         val httpDataSource = PlaybackNetworking.httpDataSourceFactory()
         val resolvingDataSource = ResolvingDataSource.Factory(
             DefaultDataSource.Factory(context, httpDataSource),
         ) { dataSpec ->
-            val headers = PlaybackHeaderRegistry.get(dataSpec.uri.toString())
-            if (headers.isEmpty()) dataSpec else dataSpec.withRequestHeaders(dataSpec.httpRequestHeaders + headers)
+            val scheme = dataSpec.uri.scheme
+            if (scheme != "http" && scheme != "https") return@Factory dataSpec
+            val headers = dataSpec.httpRequestHeaders + PlaybackHeaderRegistry.get(dataSpec.uri.toString())
+            dataSpec.withRequestHeaders(PlaybackNetworking.withDefaultUserAgent(headers))
         }
-        // Audio output policy (plan §2): AUTO reads the route's real
-        // capabilities so passthrough happens only when the receiver can
-        // carry the bitstream; FORCE_DECODE restricts capabilities to PCM.
-        // FORCE_PASSTHROUGH still respects actual capability — a device
-        // cannot carry a format it cannot carry.
-        // Night listening shapes decoded PCM, so it decodes like FORCE_DECODE.
-        val audioCapabilities = when {
-            config.nightListening || config.audioOutputMode == AudioOutputMode.FORCE_DECODE ->
-                AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES
-            else -> AudioCapabilities.getCapabilities(context)
-        }
+        // Audio output policy (plan §2): AUTO and FORCE_PASSTHROUGH follow the
+        // route's live capabilities, so passthrough happens only when the
+        // receiver can carry the bitstream. FORCE_DECODE restricts output to
+        // PCM, and night listening shapes decoded PCM, so it decodes too.
+        val forcePcm = config.nightListening || config.audioOutputMode == AudioOutputMode.FORCE_DECODE
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
@@ -116,12 +112,26 @@ object Media3EngineFactory {
                 context: Context,
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
-            ): AudioSink =
-                DefaultAudioSink.Builder(context)
-                    .setAudioCapabilities(audioCapabilities)
-                    .setAudioProcessors(audioProcessors(config.downmixMode, config.nightListening))
-                    .setEnableAudioTrackPlaybackParams(true)
-                    .build()
+            ): AudioSink {
+                // With a context DefaultAudioSink follows the route and ignores
+                // explicit capabilities, so PCM-only output needs the
+                // context-less builder.
+                @Suppress("DEPRECATION")
+                val builder = if (forcePcm) {
+                    DefaultAudioSink.Builder().setAudioCapabilities(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+                } else {
+                    DefaultAudioSink.Builder(context)
+                }
+                // AudioTrack playback params stay at Media3's default (off): on,
+                // every AudioTrack buffer is sized for 8x speed. Speed changes
+                // go through Sonic on decoded PCM instead (SpeedAwareAudioSink).
+                return SpeedAwareAudioSink(
+                    builder
+                        .setAudioProcessors(audioProcessors(config.downmixMode, config.nightListening))
+                        .setEnableFloatOutput(enableFloatOutput)
+                        .build(),
+                )
+            }
         }
             .setEnableDecoderFallback(true)
             .setMediaCodecSelector(MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
@@ -181,14 +191,14 @@ object Media3EngineFactory {
             // Surface.setFrameRate call. Media3 can only request seamless
             // changes, so it must stay off to avoid competing surface votes.
             .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategy(config))
-            .setLoadControl(loadControl(bufferPlan))
+            .setLoadControl(loadControl())
             // Holds Wi-Fi out of power save while playing; a dozing radio is a
             // classic cause of short mid-episode stalls on TV boxes (QA-08).
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             .apply {
                 assHandler.init(this)
-                addListener(AutoRetryListener(this))
+                addListener(PlaybackRecoveryListener(this))
                 statsCollector = PlaybackStatsCollector().also(::addAnalyticsListener)
                 videoCadenceEstimator.reset()
                 setVideoFrameMetadataListener { presentationTimeUs, _, _, _ ->
@@ -227,51 +237,14 @@ object Media3EngineFactory {
     }
 
     /**
-     * Time wins over the byte budget until the minimum buffer is met, so a
-     * high-bitrate remux cannot starve itself (Nuvio's setting). Media3 still
-     * stops early when the heap nears its limit.
+     * Nuvio's default load control: Media3's stock durations (50 s target,
+     * playback after 1 s, 2 s after a rebuffer) and byte budget, so loading
+     * tops up continuously instead of idling the socket between thresholds.
      */
-    private fun loadControl(plan: PlaybackBufferPlan): DefaultLoadControl =
+    private fun loadControl(): DefaultLoadControl =
         DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                plan.minBufferMs,
-                plan.maxBufferMs,
-                plan.bufferForPlaybackMs,
-                plan.bufferForPlaybackAfterRebufferMs,
-            )
-            .setTargetBufferBytes(plan.targetBufferBytes)
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(plan.backBufferMs, true)
+            .setBackBuffer(StreamingPolicy.STOCK_BACK_BUFFER_MS, true)
             .build()
-
-    /**
-     * Nuvio-style recovery for errors that escape the load retries: re-prepare
-     * at the same position after a short pause, at most twice per stretch of
-     * healthy playback (SHR-PROD-04).
-     */
-    private class AutoRetryListener(private val player: ExoPlayer) : Player.Listener {
-        private val handler = android.os.Handler(player.applicationLooper)
-        private var attempts = 0
-        private var lastRetryAt = 0L
-
-        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastRetryAt > StreamingPolicy.AUTO_RETRY_RESET_MS) attempts = 0
-            val status = generateSequence<Throwable>(error) { it.cause }
-                .filterIsInstance<androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException>()
-                .firstOrNull()?.responseCode
-            if (!StreamingPolicy.shouldAutoRetry(error.errorCode, status, attempts)) return
-            attempts++
-            lastRetryAt = now
-            handler.postDelayed({
-                if (player.playerError == null) return@postDelayed
-                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
-                    player.seekToDefaultPosition()
-                }
-                player.prepare()
-            }, StreamingPolicy.AUTO_RETRY_DELAY_MS)
-        }
-    }
 
     /**
      * Live session player in the same process (set by LamphausPlaybackService).
@@ -309,13 +282,15 @@ object Media3EngineFactory {
 
     /**
      * True when [wanted] changes something only a new player can apply:
-     * audio output, decoder priority, downmix, or Dolby Vision handling.
+     * audio output, decoder priority, downmix, night listening, or Dolby
+     * Vision handling.
      * Frame-rate matching applies live and never needs a rebuild.
      */
     fun needsRebuild(builtWith: DevicePlaybackConfig, wanted: DevicePlaybackConfig): Boolean =
         builtWith.audioOutputMode != wanted.audioOutputMode ||
             builtWith.decoderPriority != wanted.decoderPriority ||
             builtWith.downmixMode != wanted.downmixMode ||
+            builtWith.nightListening != wanted.nightListening ||
             builtWith.dolbyVisionHandling != wanted.dolbyVisionHandling
 
     /**

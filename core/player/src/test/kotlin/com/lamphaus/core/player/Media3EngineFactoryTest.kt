@@ -41,5 +41,7 @@ class Media3EngineFactoryTest {
             true,
             Media3EngineFactory.needsRebuild(base, base.copy(audioOutputMode = com.lamphaus.core.model.AudioOutputMode.FORCE_DECODE)),
         )
+        // Night listening builds its processor and PCM-only sink with the player (SHR-PROD-15).
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(nightListening = true)))
     }
 }

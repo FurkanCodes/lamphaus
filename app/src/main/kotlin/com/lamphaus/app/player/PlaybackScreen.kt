@@ -189,6 +189,8 @@ import com.lamphaus.core.model.PlaybackSegmentType
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.NextEpisodePolicy
 import com.lamphaus.core.model.SkipSegmentPolicy
+import com.lamphaus.core.player.PlaybackSeeks
+import com.lamphaus.core.player.SeekKind
 import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.SpoilerProtectionSettings
@@ -364,6 +366,7 @@ internal fun PlaybackScreen(
     LaunchedEffect(keySeekTarget) {
         val target = keySeekTarget ?: return@LaunchedEffect
         delay(REMOTE_SEEK_COMMIT_DELAY_MILLIS)
+        PlaybackSeeks.prepare(SeekKind.JUMP)
         player?.seekTo(target)
         keySeekTarget = null
     }
@@ -716,6 +719,7 @@ internal fun PlaybackScreen(
                     if (duration > 0) {
                         val target = (snapshot.positionMillis + if (forward) 10_000L else -10_000L)
                             .coerceIn(0L, duration)
+                        PlaybackSeeks.prepare(if (forward) SeekKind.STEP_FORWARD else SeekKind.STEP_BACK)
                         player?.seekTo(target)
                         showHud(
                             if (forward) Icons.Rounded.Forward10 else Icons.Rounded.Replay10,
@@ -734,7 +738,10 @@ internal fun PlaybackScreen(
                     }
                 },
                 onSeekEnd = {
-                    seekTarget?.let { player?.seekTo(it) }
+                    seekTarget?.let {
+                        PlaybackSeeks.prepare(SeekKind.JUMP)
+                        player?.seekTo(it)
+                    }
                     seekTarget = null
                     interactionVersion++
                 },
@@ -816,10 +823,23 @@ internal fun PlaybackScreen(
                 isTelevision = isTelevision,
                 onInteraction = ::revealControls,
                 onTogglePlay = { if (snapshot.playing) player?.pause() else player?.play() },
-                onReplay = { player?.seekTo(0); player?.play() },
-                onSeekBack = { player?.seekBack() },
-                onSeekForward = { player?.seekForward() },
-                onSeekTo = { player?.seekTo(it) },
+                onReplay = {
+                    PlaybackSeeks.prepare(SeekKind.EXACT)
+                    player?.seekTo(0)
+                    player?.play()
+                },
+                onSeekBack = {
+                    PlaybackSeeks.prepare(SeekKind.STEP_BACK)
+                    player?.seekBack()
+                },
+                onSeekForward = {
+                    PlaybackSeeks.prepare(SeekKind.STEP_FORWARD)
+                    player?.seekForward()
+                },
+                onSeekTo = {
+                    PlaybackSeeks.prepare(SeekKind.JUMP)
+                    player?.seekTo(it)
+                },
                 onEnterPictureInPicture = onEnterPictureInPicture,
                 pictureInPictureAvailable = pictureInPictureAvailable,
                 canPlayNext = settings.nextEpisodeEnabled && nextEpisode != null && nextEpisode.hasAired(),
@@ -871,7 +891,13 @@ internal fun PlaybackScreen(
         val visibleSegment = if (nextEpisodeSkipInCard) null else activeSegment
         val skipSegment: () -> Unit = {
             activeSegment?.let { segment ->
-                SkipSegmentPolicy.skipTarget(segment, segments, snapshot.durationMillis)?.let { player?.seekTo(it) }
+                SkipSegmentPolicy.skipTarget(segment, segments, snapshot.durationMillis)?.let { target ->
+                    // A skip to the scene after the credits must not land past its start.
+                    PlaybackSeeks.prepare(
+                        if (segment.type == PlaybackSegmentType.ENDING) SeekKind.EXACT else SeekKind.SKIP,
+                    )
+                    player?.seekTo(target)
+                }
                 dismissedSegment = segment
             }
         }

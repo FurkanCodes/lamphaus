@@ -65,6 +65,7 @@ import com.lamphaus.core.model.SourceFitPolicy
 import com.lamphaus.core.model.streamTraits
 import com.lamphaus.core.player.LamphausPlaybackService
 import com.lamphaus.core.player.Media3EngineFactory
+import com.lamphaus.core.player.PlaybackRecovery
 import com.lamphaus.core.player.PlaybackHeaderRegistry
 import com.lamphaus.core.player.toMediaItem
 import com.lamphaus.app.ui.SourceResolution
@@ -421,8 +422,11 @@ class PlayerActivity : ComponentActivity() {
                                 startupErrorJob = lifecycleScope.launch {
                                     // PlaybackEngineFallback may replace the
                                     // failed Media3 player with MPV here, and
-                                    // the engine re-prepares network errors.
+                                    // the engine retries recoverable errors
+                                    // (SHR-PROD-04): wait those out first.
                                     delay(4_000L)
+                                    while (PlaybackRecovery.isRecovering) delay(250L)
+                                    if (mediaController.playerError == null) return@launch
                                     if (waiting == null) {
                                         playbackStartupPhaseState.value = PlaybackStartupPhase.FAILED
                                     } else if (playerReadyDeferred === waiting && !waiting.isCompleted) {
@@ -456,7 +460,9 @@ class PlayerActivity : ComponentActivity() {
             if (mediaController.playbackState == Player.STATE_READY) {
                 ready.complete(true)
             }
-            val prepared = withTimeoutOrNull(20_000L) { ready.await() } ?: false
+            // No deadline: a stuck load ends in an error, and errors end in
+            // recovery or FAILED, which completes [ready] (SHR-PROD-04).
+            val prepared = ready.await()
             if (playerReadyDeferred === ready) playerReadyDeferred = null
             if (!prepared || playbackStartupPhaseState.value == PlaybackStartupPhase.FAILED) {
                 if (firstFrameDeferred === firstFrame) firstFrameDeferred = null
