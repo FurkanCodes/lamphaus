@@ -43,5 +43,26 @@ class Media3EngineFactoryTest {
         )
         // Night listening builds its processor and PCM-only sink with the player (SHR-PROD-15).
         assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(nightListening = true)))
+        // The streaming engine is built with the player too (PLY-NET-01).
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(nativeMemoryBuffer = true)))
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(parallelConnections = true)))
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(parallelConnectionCount = 3)))
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(parallelChunkSizeKb = 8_192)))
+    }
+
+    @Test
+    fun `PLY-NET-01 heap chunks prefetch one per connection plus one, native ones two per connection`() {
+        val mib = 1024L * 1024L
+        val config = DevicePlaybackConfig(parallelConnections = true)
+        val heap = Media3EngineFactory.parallelSettings(config, maxHeapBytes = 512 * mib, nativeRamBytes = null)
+        assertEquals(2, heap.connections)
+        assertEquals(16 * mib, heap.chunkBytes)
+        assertEquals(3, heap.depth)
+        assertEquals(7, heap.sessionChunkCap)
+        val native = Media3EngineFactory.parallelSettings(config, maxHeapBytes = 512 * mib, nativeRamBytes = 4L * 1024 * mib)
+        assertEquals(4, native.depth)
+        // Heap-bound devices cap chunks at 16 MiB.
+        val big = Media3EngineFactory.parallelSettings(config.copy(parallelChunkSizeKb = 65_536), 256 * mib, null)
+        assertEquals(16 * mib, big.chunkBytes)
     }
 }

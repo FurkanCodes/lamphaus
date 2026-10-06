@@ -4,6 +4,7 @@ import com.lamphaus.core.model.AudioOutputMode
 import com.lamphaus.core.model.DecoderPriority
 import com.lamphaus.core.model.DolbyVisionHandling
 import com.lamphaus.core.model.DownmixMode
+import com.lamphaus.core.model.StreamingChoices
 
 /**
  * Audio and video engine choices shown in both TV and mobile Settings, so the
@@ -62,6 +63,10 @@ internal object PlaybackEngineOptions {
         "Which audio decoder to try first; the other remains the fallback"
 
     const val APPLIES_NEXT_PLAYBACK = "Changes apply from the next playback"
+
+    /** Parallel connection counts and chunk sizes (PLY-NET-01), as Nuvio offers them. */
+    val connectionCounts = StreamingChoices.CONNECTION_COUNTS
+    val chunkSizesKb = StreamingChoices.CHUNK_SIZES_KB
 
     /** The option after [current] in [options], wrapping; values not listed start over. */
     fun <T> next(options: List<T>, current: T): T =

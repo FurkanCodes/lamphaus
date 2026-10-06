@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.exoplayer.upstream.NativeBuffers
 import com.lamphaus.core.player.network.ParallelDownloadPolicy
 import com.lamphaus.core.player.network.ParallelDownloadSettings
+import com.lamphaus.core.player.network.ParallelDownloadStats
 import com.lamphaus.core.player.network.ParallelRangeDataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
@@ -380,6 +381,9 @@ object Media3EngineFactory {
             measuredFrameRate = videoCadenceEstimator.frameRate,
             bufferedMillis = player.totalBufferedDuration,
             droppedFrames = player.videoDecoderCounters?.droppedBufferCount ?: 0,
+            nativeBufferBytes = if (NativeBuffers.isAvailable()) NativeBuffers.getAllocatedBytes() else 0L,
+            parallelDownloads = ParallelDownloadStats.activeDownloads.get(),
+            rateLimitedResponses = ParallelDownloadStats.rateLimitedResponses.get(),
         )
     }
 

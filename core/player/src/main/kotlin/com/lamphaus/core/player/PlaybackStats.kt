@@ -27,6 +27,12 @@ data class PlaybackStats(
     val measuredFrameRate: Float,
     val bufferedMillis: Long,
     val droppedFrames: Int,
+    /** Buffered media and download chunks held outside the Java heap (PLY-NET-01). */
+    val nativeBufferBytes: Long = 0L,
+    /** Range downloads running right now; 0 when parallel connections are off. */
+    val parallelDownloads: Int = 0,
+    /** Rate-limited (429/503) range responses this session. */
+    val rateLimitedResponses: Int = 0,
 )
 
 /** Remembers what only analytics events reveal: decoder names and the audio output format. */

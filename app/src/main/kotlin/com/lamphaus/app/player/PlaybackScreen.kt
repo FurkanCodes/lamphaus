@@ -2562,8 +2562,25 @@ private fun PlayerStreamInfoPanel(
                 else -> null
             }
             output?.let { add(stringResource(R.string.player_stats_output) to it) }
+            val nativeMb = (current.nativeBufferBytes / (1024 * 1024)).toInt()
             add(stringResource(R.string.player_stats_buffer) to
-                stringResource(R.string.player_stats_buffer_value, current.bufferedMillis / 1_000f))
+                if (nativeMb > 0) {
+                    stringResource(R.string.player_stats_buffer_native_value, current.bufferedMillis / 1_000f, nativeMb)
+                } else {
+                    stringResource(R.string.player_stats_buffer_value, current.bufferedMillis / 1_000f)
+                })
+            if (current.parallelDownloads > 0 || current.rateLimitedResponses > 0) {
+                add(stringResource(R.string.player_stats_downloads) to
+                    if (current.rateLimitedResponses > 0) {
+                        stringResource(
+                            R.string.player_stats_downloads_limited_value,
+                            current.parallelDownloads,
+                            current.rateLimitedResponses,
+                        )
+                    } else {
+                        stringResource(R.string.player_stats_downloads_value, current.parallelDownloads)
+                    })
+            }
             add(stringResource(R.string.player_stats_dropped) to current.droppedFrames.toString())
         }
         streamInfo?.let { add(stringResource(R.string.player_stats_display) to it) }

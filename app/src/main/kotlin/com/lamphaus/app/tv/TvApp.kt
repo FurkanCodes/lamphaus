@@ -227,6 +227,7 @@ import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
+import com.lamphaus.app.ui.chunkSizeLabel
 import com.lamphaus.app.ui.seekrLimitLines
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
@@ -3582,6 +3583,72 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
                         device.copy(
                             decoderPriority = PlaybackEngineOptions.next(
                                 PlaybackEngineOptions.decoderPriorities, device.decoderPriority,
+                            ),
+                        ),
+                    )
+                },
+            )
+        }
+        // Streaming engine (PLY-NET-01): device-local, off by default.
+        item {
+            Text(
+                text = stringResource(R.string.streaming_settings_applies),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.native_memory_setting),
+                description = stringResource(R.string.native_memory_setting_description),
+                checked = device.nativeMemoryBuffer,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(nativeMemoryBuffer = it)) },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.parallel_connections_setting),
+                description = stringResource(R.string.parallel_connections_setting_description),
+                checked = device.parallelConnections,
+                onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(parallelConnections = it)) },
+            )
+        }
+        item {
+            // Depends on Parallel connections (MOB-SET-05 applied to TV settings).
+            TvSettingsChoiceRow(
+                title = stringResource(R.string.parallel_connection_count),
+                description = stringResource(
+                    if (device.parallelConnections) R.string.parallel_connection_count_description
+                    else R.string.parallel_requires_setting,
+                ),
+                value = device.parallelConnectionCount.toString(),
+                enabled = device.parallelConnections,
+                onClick = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(
+                            parallelConnectionCount = PlaybackEngineOptions.next(
+                                PlaybackEngineOptions.connectionCounts, device.parallelConnectionCount,
+                            ),
+                        ),
+                    )
+                },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = stringResource(R.string.parallel_chunk_size),
+                description = stringResource(
+                    if (device.parallelConnections) R.string.parallel_chunk_size_description
+                    else R.string.parallel_requires_setting,
+                ),
+                value = chunkSizeLabel(device.parallelChunkSizeKb),
+                enabled = device.parallelConnections,
+                onClick = {
+                    viewModel.setDevicePlaybackConfig(
+                        device.copy(
+                            parallelChunkSizeKb = PlaybackEngineOptions.next(
+                                PlaybackEngineOptions.chunkSizesKb, device.parallelChunkSizeKb,
                             ),
                         ),
                     )

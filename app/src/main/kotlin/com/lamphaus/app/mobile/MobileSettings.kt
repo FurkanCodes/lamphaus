@@ -107,6 +107,7 @@ import com.lamphaus.core.model.NextEpisodeThresholdMode
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
+import com.lamphaus.app.ui.chunkSizeLabel
 import com.lamphaus.app.ui.playbackLanguageLabel
 import com.lamphaus.app.ui.playbackLanguageOptions
 import com.lamphaus.app.ui.seekrLimitLines
@@ -343,6 +344,53 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
+            // Streaming engine (PLY-NET-01): device-local, off by default.
+            SettingsCard(stringResource(R.string.streaming_settings)) {
+                PlaybackSettingRow(
+                    title = stringResource(R.string.native_memory_setting),
+                    description = stringResource(R.string.native_memory_setting_description),
+                    checked = device.nativeMemoryBuffer,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(nativeMemoryBuffer = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackSettingRow(
+                    title = stringResource(R.string.parallel_connections_setting),
+                    description = stringResource(R.string.parallel_connections_setting_description),
+                    checked = device.parallelConnections,
+                    onCheckedChange = { viewModel.setDevicePlaybackConfig(device.copy(parallelConnections = it)) },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                // Depend on Parallel connections (MOB-SET-05).
+                PlaybackEngineChoiceRow(
+                    title = stringResource(R.string.parallel_connection_count),
+                    description = stringResource(
+                        if (device.parallelConnections) R.string.parallel_connection_count_description
+                        else R.string.parallel_requires_setting,
+                    ),
+                    value = device.parallelConnectionCount.toString(),
+                    enabled = device.parallelConnections,
+                    onClick = { choiceDialog = PlaybackChoiceDialog.CONNECTIONS },
+                )
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                PlaybackEngineChoiceRow(
+                    title = stringResource(R.string.parallel_chunk_size),
+                    description = stringResource(
+                        if (device.parallelConnections) R.string.parallel_chunk_size_description
+                        else R.string.parallel_requires_setting,
+                    ),
+                    value = chunkSizeLabel(device.parallelChunkSizeKb),
+                    enabled = device.parallelConnections,
+                    onClick = { choiceDialog = PlaybackChoiceDialog.CHUNK_SIZE },
+                )
+                Text(
+                    PlaybackEngineOptions.APPLIES_NEXT_PLAYBACK,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+        }
+        item {
             SettingsCard(stringResource(R.string.episode_playback)) {
                 PlaybackSettingRow(
                     title = stringResource(R.string.skip_intro),
@@ -456,6 +504,16 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setDevicePlaybackConfig(device.copy(dolbyVisionHandling = mode))
                 }
             }
+            PlaybackChoiceDialog.CONNECTIONS -> PlaybackEngineOptions.connectionCounts.map { count ->
+                PlaybackChoice(count.toString(), device.parallelConnectionCount == count) {
+                    viewModel.setDevicePlaybackConfig(device.copy(parallelConnectionCount = count))
+                }
+            }
+            PlaybackChoiceDialog.CHUNK_SIZE -> PlaybackEngineOptions.chunkSizesKb.map { kilobytes ->
+                PlaybackChoice(chunkSizeLabel(kilobytes), device.parallelChunkSizeKb == kilobytes) {
+                    viewModel.setDevicePlaybackConfig(device.copy(parallelChunkSizeKb = kilobytes))
+                }
+            }
             PlaybackChoiceDialog.DECODER -> PlaybackEngineOptions.decoderPriorities.map { priority ->
                 PlaybackChoice(
                     PlaybackEngineOptions.decoderPriorityLabel(priority),
@@ -479,6 +537,8 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                         PlaybackChoiceDialog.DOWNMIX -> "Downmix"
                         PlaybackChoiceDialog.DOLBY_VISION -> "Dolby Vision"
                         PlaybackChoiceDialog.DECODER -> "Decoder priority"
+                        PlaybackChoiceDialog.CONNECTIONS -> stringResource(R.string.parallel_connection_count)
+                        PlaybackChoiceDialog.CHUNK_SIZE -> stringResource(R.string.parallel_chunk_size)
                     },
                 )
             },
@@ -506,15 +566,25 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
     }
 }
 
-private enum class PlaybackChoiceDialog { AUDIO, SUBTITLES, SUBTITLE_LANGUAGE, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOLBY_VISION, DECODER }
+private enum class PlaybackChoiceDialog {
+    AUDIO, SUBTITLES, SUBTITLE_LANGUAGE, FRAME_RATE, AUDIO_OUTPUT, DOWNMIX, DOLBY_VISION, DECODER, CONNECTIONS, CHUNK_SIZE,
+}
 
 @Composable
-private fun PlaybackEngineChoiceRow(title: String, description: String, value: String, onClick: () -> Unit) {
+private fun PlaybackEngineChoiceRow(
+    title: String,
+    description: String,
+    value: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(description) },
         trailingContent = { Text(value) },
-        modifier = Modifier.clickable(role = Role.Button, onClick = onClick),
+        modifier = Modifier
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.38f),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
 }
