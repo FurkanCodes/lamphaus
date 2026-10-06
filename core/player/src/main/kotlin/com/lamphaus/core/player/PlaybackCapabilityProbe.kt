@@ -71,19 +71,8 @@ class PlaybackCapabilityProbe(context: Context) {
                 .maxOfOrNull { info -> info.maxHeight(mimeType) } ?: 0
             (family to height).takeIf { height > 0 }
         }.toMap()
-        // The player skips emulator Dolby Vision decoders (PlaybackEnginePolicy).
-        val dolbyVisionProfiles = if (DeviceEnvironment.isAndroidEmulator()) {
-            emptySet()
-        } else {
-            infos.filter { MimeTypes.VIDEO_DOLBY_VISION in it.supportedTypes }
-                .flatMap { info ->
-                    runCatching { info.getCapabilitiesForType(MimeTypes.VIDEO_DOLBY_VISION).profileLevels.toList() }
-                        .getOrDefault(emptyList())
-                }
-                // Each DolbyVisionProfile* constant is 1 shl its profile number.
-                .mapNotNull { level -> Integer.numberOfTrailingZeros(level.profile).takeIf { level.profile > 0 } }
-                .toSet()
-        }
+        // Shared with the engine, so predictions match what playback does.
+        val dolbyVisionProfiles = DolbyVisionDecoders.profiles
         return Decoders(maxHeights, dolbyVisionProfiles)
     }
 

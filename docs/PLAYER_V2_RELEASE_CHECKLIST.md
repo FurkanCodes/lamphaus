@@ -25,7 +25,9 @@ release gate: run this list on the target hardware before shipping.
 ### Video / HDR
 - [ ] SDR phone: playback, subtitle rendering, PiP enter/exit, return state
 - [ ] HDR10 device: HDR playback with Original colors on, tone-map path with Original colors off
-- [ ] Dolby Vision TV: profile 5/8 native; profile 7 sample with `Convert P7 to P8.1` (requires libdovi-packaged libmpv)
+- [ ] Dolby Vision TV: profile 5/8 native; profile 7 remux (single-track MKV, FEL and MEL) on a profile 8-only
+      decoder plays as Dolby Vision with `Auto` (TV shows its Dolby Vision indicator), seeks cleanly, and
+      `HDR10` still plays the base layer
 - [ ] Non-DV TV: profile 7/5 falls back to HDR10 base layer without color washout
 - [ ] Frame-rate matching: 23.976/24, 25/50, 29.97/59.94, 30/60 sources on a mode-switching TV;
       `Seamless only` never blanks; `Always` blanks and restores; ABR switches do not re-trigger

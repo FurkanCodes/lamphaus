@@ -29,7 +29,7 @@ enum class DolbyVisionAction {
     /** Feed DV to the display untouched (original colors, plan §2). */
     NATIVE,
 
-    /** Convert profile 7's enhancement layer to 8.1 via libdovi. */
+    /** Rewrite profile 7 as 8.1: drop the enhancement layer and convert each RPU. */
     CONVERT_PROFILE7_TO_81,
 
     /** Discard the DV layer and render the HDR10 base layer. */
@@ -43,6 +43,16 @@ enum class DolbyVisionAction {
 }
 
 object DolbyVisionPolicy {
+
+    /**
+     * True when Media3 rewrites a profile 7 stream as 8.1 (as Nuvio does) so
+     * it plays as Dolby Vision: the device's decoder takes profile 8 but not
+     * 7, and the setting allows conversion. A decoder that takes 7 gets the
+     * original stream.
+     */
+    fun convertsProfile7(handling: DolbyVisionHandling, decoderProfiles: Set<Int>): Boolean =
+        (handling == DolbyVisionHandling.AUTO || handling == DolbyVisionHandling.CONVERT_PROFILE7_TO_81) &&
+            8 in decoderProfiles && 7 !in decoderProfiles
 
     /**
      * Resolution order (plan §2): user override → native 5/8 when display and
