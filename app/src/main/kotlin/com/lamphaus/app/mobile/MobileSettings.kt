@@ -108,6 +108,7 @@ import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.chunkSizeLabel
+import com.lamphaus.app.ui.AutoSkipRows
 import com.lamphaus.app.ui.downmixLayoutLabel
 import com.lamphaus.app.ui.playbackLanguageLabel
 import com.lamphaus.app.ui.playbackLanguageOptions
@@ -476,6 +477,11 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
                         viewModel.setPlaybackSettings(playback.copy(skipEndingEnabled = it))
                     },
                 )
+                // Automatic skipping depends on its skip button (MOB-SET-05, PLY-SKIP-01).
+                AutoSkipRows(playback, onUpdate = viewModel::setPlaybackSettings) { title, description, checked, enabled, onChange ->
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
+                    PlaybackSettingRow(title = title, description = description, checked = checked, enabled = enabled, onCheckedChange = onChange)
+                }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
                 PlaybackSettingRow(
                     title = stringResource(R.string.next_episode),

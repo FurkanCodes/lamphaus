@@ -35,6 +35,13 @@ data class PlaybackSettings(
      * answered, and only Back or a choice closes them.
      */
     val endPromptAutoClose: Boolean = false,
+    /** Automatic skipping (PLY-SKIP-01): intros and openings skip without a press. */
+    val autoSkipIntro: Boolean = false,
+    val autoSkipRecap: Boolean = false,
+    /** A series' outro or ending. */
+    val autoSkipOutro: Boolean = false,
+    /** A movie's end credits. */
+    val autoSkipCredits: Boolean = false,
 )
 
 @Serializable

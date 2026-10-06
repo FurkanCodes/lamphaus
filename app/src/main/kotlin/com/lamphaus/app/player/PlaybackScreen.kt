@@ -901,6 +901,18 @@ internal fun PlaybackScreen(
                 dismissedSegment = segment
             }
         }
+        // Automatic skipping (PLY-SKIP-01): each segment skips itself once; a
+        // seek back into it plays it.
+        var autoSkippedSegment by remember(request.videoId) { mutableStateOf<PlaybackSegment?>(null) }
+        LaunchedEffect(activeSegment) {
+            val segment = activeSegment ?: return@LaunchedEffect
+            if (segment == autoSkippedSegment || segment == dismissedSegment) return@LaunchedEffect
+            if (!SkipSegmentPolicy.skipsAutomatically(segment.type, isEpisode = request.episode != null, settings)) {
+                return@LaunchedEffect
+            }
+            autoSkippedSegment = segment
+            skipSegment()
+        }
         val cueBottomPadding = if (controlsVisible) 190.dp else if (isTelevision) 32.dp else 28.dp
         val cueHorizontalPadding = if (isTelevision) 58.dp else 16.dp
         val cuesAllowed = !loadingSurfaceVisible && !inPictureInPicture && panel == null && shownError == null

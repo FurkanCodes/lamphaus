@@ -197,6 +197,17 @@
     <string name="skip_intro_description">Show a skip button when exact intro timestamps are available.</string>
     <string name="skip_ending">Skip ending</string>
     <string name="skip_ending_description">Show a skip button when exact credits timestamps are available.</string>
+    <string name="auto_skip_heading">Automatic skipping</string>
+    <string name="auto_skip_intro">Skip intros automatically</string>
+    <string name="auto_skip_intro_description">Intros and anime openings skip without a press</string>
+    <string name="auto_skip_recap">Skip recaps automatically</string>
+    <string name="auto_skip_recap_description">Previously-on recaps skip without a press</string>
+    <string name="auto_skip_outro">Skip outros automatically</string>
+    <string name="auto_skip_outro_description">Series outros and endings skip without a press</string>
+    <string name="auto_skip_credits">Skip end credits automatically</string>
+    <string name="auto_skip_credits_description">Movie end credits skip without a press, to any scene after them</string>
+    <string name="auto_skip_requires_skip_intro">Turn on Skip intro first</string>
+    <string name="auto_skip_requires_skip_ending">Turn on Skip ending first</string>
     <string name="next_episode">Next episode</string>
     <string name="next_episode_description">Offer the next episode near the end of playback.</string>
     <string name="next_episode_source_unavailable">The next episode has no playable source from your installed add-ons.</string>

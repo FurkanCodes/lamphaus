@@ -228,6 +228,7 @@ import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.chunkSizeLabel
+import com.lamphaus.app.ui.AutoSkipRows
 import com.lamphaus.app.ui.downmixLayoutLabel
 import com.lamphaus.app.ui.seekrLimitLines
 import com.lamphaus.core.model.ResolutionMatching
@@ -3430,6 +3431,36 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
                     viewModel.setPlaybackSettings(state.playbackSettings.copy(autoPlayNextEpisode = it))
                 },
             )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.skip_intro),
+                description = stringResource(R.string.skip_intro_description),
+                checked = state.playbackSettings.skipIntroEnabled,
+                onCheckedChange = { viewModel.setPlaybackSettings(state.playbackSettings.copy(skipIntroEnabled = it)) },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.skip_ending),
+                description = stringResource(R.string.skip_ending_description),
+                checked = state.playbackSettings.skipEndingEnabled,
+                onCheckedChange = { viewModel.setPlaybackSettings(state.playbackSettings.copy(skipEndingEnabled = it)) },
+            )
+        }
+        item {
+            // Automatic skipping depends on its skip button (PLY-SKIP-01).
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AutoSkipRows(state.playbackSettings, onUpdate = viewModel::setPlaybackSettings) { title, description, checked, enabled, onChange ->
+                    TvSettingsToggleRow(
+                        title = title,
+                        description = description,
+                        checked = checked,
+                        enabled = enabled,
+                        onCheckedChange = onChange,
+                    )
+                }
+            }
         }
         item {
             TvSettingsToggleRow(

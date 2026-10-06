@@ -162,6 +162,10 @@ class UserPreferences(private val context: Context) {
                 autoPlayNext = values[PLAYBACK_AUTO_PLAY_NEXT],
                 askBeforeNext = values[PLAYBACK_ASK_BEFORE_NEXT],
                 endPromptAutoClose = values[PLAYBACK_END_PROMPT_AUTO_CLOSE],
+                autoSkipIntro = values[PLAYBACK_AUTO_SKIP_INTRO],
+                autoSkipRecap = values[PLAYBACK_AUTO_SKIP_RECAP],
+                autoSkipOutro = values[PLAYBACK_AUTO_SKIP_OUTRO],
+                autoSkipCredits = values[PLAYBACK_AUTO_SKIP_CREDITS],
             ),
             devicePlayback = devicePlaybackConfigFromKeys(
                 engine = values[PLAYBACK_ENGINE],
@@ -434,6 +438,10 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_AUTO_PLAY_NEXT] = settings.autoPlayNextEpisode
             it[PLAYBACK_ASK_BEFORE_NEXT] = settings.askBeforeNextEpisode
             it[PLAYBACK_END_PROMPT_AUTO_CLOSE] = settings.endPromptAutoClose
+            it[PLAYBACK_AUTO_SKIP_INTRO] = settings.autoSkipIntro
+            it[PLAYBACK_AUTO_SKIP_RECAP] = settings.autoSkipRecap
+            it[PLAYBACK_AUTO_SKIP_OUTRO] = settings.autoSkipOutro
+            it[PLAYBACK_AUTO_SKIP_CREDITS] = settings.autoSkipCredits
         }
     }
 
@@ -551,6 +559,10 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_AUTO_PLAY_NEXT = booleanPreferencesKey("playback_auto_play_next")
         val PLAYBACK_ASK_BEFORE_NEXT = booleanPreferencesKey("playback_ask_before_next")
         val PLAYBACK_END_PROMPT_AUTO_CLOSE = booleanPreferencesKey("playback_end_prompt_auto_close")
+        val PLAYBACK_AUTO_SKIP_INTRO = booleanPreferencesKey("playback_auto_skip_intro")
+        val PLAYBACK_AUTO_SKIP_RECAP = booleanPreferencesKey("playback_auto_skip_recap")
+        val PLAYBACK_AUTO_SKIP_OUTRO = booleanPreferencesKey("playback_auto_skip_outro")
+        val PLAYBACK_AUTO_SKIP_CREDITS = booleanPreferencesKey("playback_auto_skip_credits")
         val PLAYBACK_ENGINE = stringPreferencesKey("playback_engine")
         val PLAYBACK_DOLBY_VISION = stringPreferencesKey("playback_dolby_vision")
         val PLAYBACK_FRAME_RATE_MATCHING = stringPreferencesKey("playback_frame_rate_matching")
@@ -592,6 +604,10 @@ internal fun playbackSettingsFromKeys(
     autoPlayNext: Boolean? = null,
     askBeforeNext: Boolean? = null,
     endPromptAutoClose: Boolean? = null,
+    autoSkipIntro: Boolean? = null,
+    autoSkipRecap: Boolean? = null,
+    autoSkipOutro: Boolean? = null,
+    autoSkipCredits: Boolean? = null,
 ): PlaybackSettings = PlaybackSettings(
     skipIntroEnabled = skipIntro ?: true,
     skipEndingEnabled = skipEnding ?: true,
@@ -605,6 +621,10 @@ internal fun playbackSettingsFromKeys(
     autoPlayNextEpisode = autoPlayNext ?: true,
     askBeforeNextEpisode = askBeforeNext ?: false,
     endPromptAutoClose = endPromptAutoClose ?: false,
+    autoSkipIntro = autoSkipIntro ?: false,
+    autoSkipRecap = autoSkipRecap ?: false,
+    autoSkipOutro = autoSkipOutro ?: false,
+    autoSkipCredits = autoSkipCredits ?: false,
 )
 
 /**

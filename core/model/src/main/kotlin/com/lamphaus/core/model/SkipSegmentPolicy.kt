@@ -6,6 +6,21 @@ package com.lamphaus.core.model
  * ending lands on a following post-credits scene when there is one.
  */
 object SkipSegmentPolicy {
+    /**
+     * Whether [type] skips itself (PLY-SKIP-01, Nuvio's Automatic Skipping):
+     * intros and recaps need Skip Intro, endings need Skip Ending, and an
+     * ending is a series' outro or, without an episode, a movie's credits.
+     * A post-credits scene is never skipped.
+     */
+    fun skipsAutomatically(type: PlaybackSegmentType, isEpisode: Boolean, settings: PlaybackSettings): Boolean =
+        when (type) {
+            PlaybackSegmentType.INTRO -> settings.skipIntroEnabled && settings.autoSkipIntro
+            PlaybackSegmentType.RECAP -> settings.skipIntroEnabled && settings.autoSkipRecap
+            PlaybackSegmentType.ENDING ->
+                settings.skipEndingEnabled && if (isEpisode) settings.autoSkipOutro else settings.autoSkipCredits
+            PlaybackSegmentType.POST_CREDITS -> false
+        }
+
     /** The skip button hides itself after this long unless the chrome is shown. */
     const val AUTO_HIDE_MILLIS = 10_000
 
