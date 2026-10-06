@@ -40,6 +40,7 @@ import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.R
 import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.CompletionPolicy
+import com.lamphaus.core.model.DefaultPlayer
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.model.DisplayModeCandidate
 import com.lamphaus.core.model.Episode
@@ -97,6 +98,14 @@ class PlayerActivity : ComponentActivity() {
     private val requestState = mutableStateOf<PlaybackRequest?>(null)
     private val playbackSettingsState = mutableStateOf(PlaybackSettings())
     private val segmentsState = mutableStateOf<List<PlaybackSegment>>(emptyList())
+
+    /** Default player "Ask" (PLY-EXT-01): the stream waits for the viewer's choice. */
+    private val playerChoiceState = mutableStateOf<PlaybackRequest?>(null)
+
+    /** Why another app is playing: instead of this player, or from inside it. */
+    private enum class ExternalLaunch { INSTEAD, FROM_PLAYER }
+    private var externalLaunch: ExternalLaunch? = null
+    private val externalPlayerLauncher = registerForActivityResult(ExternalPlayerContract(), ::onExternalPlayerResult)
     /** The mode frame-rate matching settled on; announced once per item (Nuvio). */
     private val matchedDisplayModeState = mutableStateOf<DisplayModeCandidate?>(null)
     private val playerSourcesState = mutableStateOf(PlayerSourcesState())
@@ -249,7 +258,7 @@ class PlayerActivity : ComponentActivity() {
         val lookup = playback.addonSubtitles
         val media = playback.preview
         if (lookup == null || media == null) {
-            connect(playback)
+            start(playback)
         } else {
             // The player opened at once; add-on subtitles arrive while it
             // connects and are attached before the stream starts. A slow or
@@ -279,7 +288,7 @@ class PlayerActivity : ComponentActivity() {
                 )
                 request = ready
                 requestState.value = ready
-                connect(ready)
+                start(ready)
             }
         }
         lifecycleScope.launch {
@@ -305,6 +314,21 @@ class PlayerActivity : ComponentActivity() {
                 }
         }
         setContent {
+            playerChoiceState.value?.let { pending ->
+                PlayerChoice(
+                    isTelevision = isTelevision,
+                    onInternal = {
+                        playerChoiceState.value = null
+                        connect(pending)
+                    },
+                    onExternal = {
+                        playerChoiceState.value = null
+                        lifecycleScope.launch { launchExternal(pending, ExternalLaunch.INSTEAD) }
+                    },
+                    onDismiss = ::finish,
+                )
+                return@setContent
+            }
             requestState.value?.let { currentRequest ->
                 androidx.compose.runtime.CompositionLocalProvider(LocalSeekPreviews provides seekPreviews) {
                 PlaybackScreen(
@@ -1068,13 +1092,120 @@ class PlayerActivity : ComponentActivity() {
         )
     }
 
-    private fun openExternally() {
-        val uri = request?.source?.uri ?: return
-        val viewIntent = Intent(Intent.ACTION_VIEW, uri.toUri()).apply {
-            addCategory(Intent.CATEGORY_BROWSABLE)
+    /** Starts [ready] in the player the Default player setting names (PLY-EXT-01). */
+    private fun start(ready: PlaybackRequest) {
+        lifecycleScope.launch {
+            when (container.preferences.settings.first().playback.defaultPlayer) {
+                DefaultPlayer.INTERNAL -> connect(ready)
+                DefaultPlayer.EXTERNAL -> launchExternal(ready, ExternalLaunch.INSTEAD)
+                DefaultPlayer.ASK -> playerChoiceState.value = ready
+            }
         }
-        runCatching {
-            startActivity(Intent.createChooser(viewIntent, getString(R.string.open_with_external_player)))
+    }
+
+    /** "Open in another player": this player pauses and resumes from where the other app stopped. */
+    private fun openExternally() {
+        val playback = request ?: return
+        val position = controller?.currentPosition?.coerceAtLeast(0) ?: playback.startPositionMillis
+        controller?.pause()
+        lifecycleScope.launch { launchExternal(playback, ExternalLaunch.FROM_PLAYER, position) }
+    }
+
+    /**
+     * Hands [playback] to another app with its headers and resume position,
+     * plus add-on subtitles and skip timestamps when Settings asks for them.
+     * Without an app that plays video, the stream plays here instead.
+     */
+    private suspend fun launchExternal(
+        playback: PlaybackRequest,
+        mode: ExternalLaunch,
+        positionMillis: Long = playback.startPositionMillis,
+    ) {
+        val settings = container.preferences.settings.first().playback
+        val subtitles = if (settings.externalForwardSubtitles) externalSubtitles(playback) else emptyList()
+        val segments = if (settings.externalSendSkipSegments) {
+            playback.preview?.let { media ->
+                withTimeoutOrNull(EXTERNAL_SEGMENTS_WAIT_MILLIS) { container.skipRepository.segments(media, playback.episode) }
+            }.orEmpty()
+        } else {
+            emptyList()
+        }
+        externalLaunch = mode
+        val launched = runCatching {
+            externalPlayerLauncher.launch(
+                ExternalPlayback(
+                    uri = playback.source.uri,
+                    title = listOfNotNull(playback.title, playback.subtitle?.takeIf(String::isNotBlank)).joinToString(" · "),
+                    headers = playback.source.headers,
+                    resumePositionMillis = positionMillis,
+                    subtitles = subtitles,
+                    skipSegments = segments,
+                ),
+            )
+        }.isSuccess
+        if (launched) return
+        externalLaunch = null
+        android.widget.Toast.makeText(this, R.string.external_player_missing, android.widget.Toast.LENGTH_LONG).show()
+        if (mode == ExternalLaunch.INSTEAD) connect(playback)
+    }
+
+    /** Add-on subtitles for the other app: the preferred (or device) language first, at most eight. */
+    private fun externalSubtitles(playback: PlaybackRequest): List<ExternalSubtitle> {
+        val preferred = profilePlaybackPreferencesState.value?.preferredSubtitleLanguageTag
+            ?.takeIf(String::isNotBlank) ?: java.util.Locale.getDefault().language
+        return playback.source.subtitles
+            .filter { it.url.startsWith("http://") || it.url.startsWith("https://") }
+            .sortedByDescending { it.language.take(2).equals(preferred.take(2), ignoreCase = true) }
+            .take(EXTERNAL_SUBTITLE_LIMIT)
+            .map { track ->
+                ExternalSubtitle(
+                    uri = track.url,
+                    name = listOfNotNull(track.providerName, track.label ?: track.language).distinct().joinToString(" · "),
+                    language = track.language,
+                )
+            }
+    }
+
+    private fun onExternalPlayerResult(result: ExternalPlaybackResult?) {
+        val mode = externalLaunch ?: return
+        externalLaunch = null
+        val playback = request
+        if (playback != null && result != null) saveExternalProgress(playback, result)
+        when (mode) {
+            ExternalLaunch.INSTEAD -> finish()
+            ExternalLaunch.FROM_PLAYER -> result?.positionMillis?.takeIf { it > 0 }?.let { controller?.seekTo(it) }
+        }
+    }
+
+    /** Saves where the other app stopped, as a final save does here (cloud sync, widget). */
+    private fun saveExternalProgress(playback: PlaybackRequest, result: ExternalPlaybackResult) {
+        container.applicationScope.launch {
+            val profileId = container.preferences.settings.first().activeProfileId ?: return@launch
+            val duration = result.durationMillis ?: playback.preview?.runtimeMinutes?.let { it * 60_000L }
+                ?: result.positionMillis
+            val completed = result.completed || CompletionPolicy.isComplete(
+                positionMillis = result.positionMillis,
+                durationMillis = duration,
+                naturalEnd = result.completed,
+                endingSegments = segmentsState.value,
+            )
+            val progress = container.libraryRepository.saveProgress(
+                WatchProgress(
+                    profileId = profileId,
+                    mediaKey = playback.mediaKey,
+                    videoId = playback.videoId,
+                    positionMillis = if (completed) duration else result.positionMillis,
+                    durationMillis = duration,
+                    completed = completed,
+                    updatedAtEpochMillis = System.currentTimeMillis(),
+                    preview = playback.preview,
+                    episodeLabel = playback.subtitle?.takeIf { it.isNotBlank() },
+                ),
+            )
+            com.lamphaus.app.widget.ContinueWatchingWidget.refresh(applicationContext)
+            (container.accountGateway.state.value as? AccountState.SignedIn)?.let { signedIn ->
+                container.cloudSyncGateway.saveProgress(signedIn.userId, progress)
+            }
         }
     }
 
@@ -1491,6 +1622,8 @@ class PlayerActivity : ComponentActivity() {
 
         /** Minimum playback advance between periodic progress writes. */
         private const val PROGRESS_SAVE_DELTA_MILLIS = 5_000L
+    private const val EXTERNAL_SEGMENTS_WAIT_MILLIS = 4_000L
+    private const val EXTERNAL_SUBTITLE_LIMIT = 8
         private const val DISPLAY_TICK_INTERVAL_MILLIS = 500L
         private const val DISPLAY_STARTUP_TICK_MILLIS = 100L
         private const val DISPLAY_STARTUP_TIMEOUT_MILLIS = 12_000L

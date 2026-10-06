@@ -166,6 +166,9 @@ class UserPreferences(private val context: Context) {
                 autoSkipRecap = values[PLAYBACK_AUTO_SKIP_RECAP],
                 autoSkipOutro = values[PLAYBACK_AUTO_SKIP_OUTRO],
                 autoSkipCredits = values[PLAYBACK_AUTO_SKIP_CREDITS],
+                defaultPlayer = values[PLAYBACK_DEFAULT_PLAYER],
+                externalForwardSubtitles = values[PLAYBACK_EXTERNAL_SUBTITLES],
+                externalSendSkipSegments = values[PLAYBACK_EXTERNAL_SKIP_SEGMENTS],
             ),
             devicePlayback = devicePlaybackConfigFromKeys(
                 engine = values[PLAYBACK_ENGINE],
@@ -442,6 +445,9 @@ class UserPreferences(private val context: Context) {
             it[PLAYBACK_AUTO_SKIP_RECAP] = settings.autoSkipRecap
             it[PLAYBACK_AUTO_SKIP_OUTRO] = settings.autoSkipOutro
             it[PLAYBACK_AUTO_SKIP_CREDITS] = settings.autoSkipCredits
+            it[PLAYBACK_DEFAULT_PLAYER] = settings.defaultPlayer.name
+            it[PLAYBACK_EXTERNAL_SUBTITLES] = settings.externalForwardSubtitles
+            it[PLAYBACK_EXTERNAL_SKIP_SEGMENTS] = settings.externalSendSkipSegments
         }
     }
 
@@ -563,6 +569,9 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_AUTO_SKIP_RECAP = booleanPreferencesKey("playback_auto_skip_recap")
         val PLAYBACK_AUTO_SKIP_OUTRO = booleanPreferencesKey("playback_auto_skip_outro")
         val PLAYBACK_AUTO_SKIP_CREDITS = booleanPreferencesKey("playback_auto_skip_credits")
+        val PLAYBACK_DEFAULT_PLAYER = stringPreferencesKey("playback_default_player")
+        val PLAYBACK_EXTERNAL_SUBTITLES = booleanPreferencesKey("playback_external_subtitles")
+        val PLAYBACK_EXTERNAL_SKIP_SEGMENTS = booleanPreferencesKey("playback_external_skip_segments")
         val PLAYBACK_ENGINE = stringPreferencesKey("playback_engine")
         val PLAYBACK_DOLBY_VISION = stringPreferencesKey("playback_dolby_vision")
         val PLAYBACK_FRAME_RATE_MATCHING = stringPreferencesKey("playback_frame_rate_matching")
@@ -608,6 +617,9 @@ internal fun playbackSettingsFromKeys(
     autoSkipRecap: Boolean? = null,
     autoSkipOutro: Boolean? = null,
     autoSkipCredits: Boolean? = null,
+    defaultPlayer: String? = null,
+    externalForwardSubtitles: Boolean? = null,
+    externalSendSkipSegments: Boolean? = null,
 ): PlaybackSettings = PlaybackSettings(
     skipIntroEnabled = skipIntro ?: true,
     skipEndingEnabled = skipEnding ?: true,
@@ -625,6 +637,11 @@ internal fun playbackSettingsFromKeys(
     autoSkipRecap = autoSkipRecap ?: false,
     autoSkipOutro = autoSkipOutro ?: false,
     autoSkipCredits = autoSkipCredits ?: false,
+    defaultPlayer = defaultPlayer
+        ?.let { name -> runCatching { com.lamphaus.core.model.DefaultPlayer.valueOf(name) }.getOrNull() }
+        ?: com.lamphaus.core.model.DefaultPlayer.INTERNAL,
+    externalForwardSubtitles = externalForwardSubtitles ?: false,
+    externalSendSkipSegments = externalSendSkipSegments ?: false,
 )
 
 /**

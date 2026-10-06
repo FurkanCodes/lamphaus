@@ -42,7 +42,17 @@ data class PlaybackSettings(
     val autoSkipOutro: Boolean = false,
     /** A movie's end credits. */
     val autoSkipCredits: Boolean = false,
+    /** Which player starts a stream (PLY-EXT-01). */
+    val defaultPlayer: DefaultPlayer = DefaultPlayer.INTERNAL,
+    /** Add-on subtitles in the preferred language travel to the external player. */
+    val externalForwardSubtitles: Boolean = false,
+    /** Intro and outro timestamps travel to the external player, for players that skip them. */
+    val externalSendSkipSegments: Boolean = false,
 )
+
+/** Which player starts a stream (PLY-EXT-01, Nuvio's Default Player). */
+@Serializable
+enum class DefaultPlayer { INTERNAL, EXTERNAL, ASK }
 
 @Serializable
 enum class PlaybackSegmentType {

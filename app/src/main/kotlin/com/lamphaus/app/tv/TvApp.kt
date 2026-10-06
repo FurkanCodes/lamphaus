@@ -228,6 +228,7 @@ import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.FrameRateMatching
 import com.lamphaus.app.ui.PlaybackEngineOptions
 import com.lamphaus.app.ui.chunkSizeLabel
+import com.lamphaus.app.ui.defaultPlayerLabel
 import com.lamphaus.app.ui.AutoSkipRows
 import com.lamphaus.app.ui.downmixLayoutLabel
 import com.lamphaus.app.ui.seekrLimitLines
@@ -3430,6 +3431,35 @@ private fun TvPlaybackSettings(state: AppUiState, viewModel: AppViewModel) {
                 onCheckedChange = {
                     viewModel.setPlaybackSettings(state.playbackSettings.copy(autoPlayNextEpisode = it))
                 },
+            )
+        }
+        item {
+            TvSettingsChoiceRow(
+                title = stringResource(R.string.default_player_setting),
+                description = stringResource(R.string.default_player_setting_description),
+                value = defaultPlayerLabel(state.playbackSettings.defaultPlayer),
+                onClick = {
+                    val players = com.lamphaus.core.model.DefaultPlayer.entries
+                    viewModel.setPlaybackSettings(
+                        state.playbackSettings.copy(defaultPlayer = PlaybackEngineOptions.next(players, state.playbackSettings.defaultPlayer)),
+                    )
+                },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.external_subtitles_setting),
+                description = stringResource(R.string.external_subtitles_setting_description),
+                checked = state.playbackSettings.externalForwardSubtitles,
+                onCheckedChange = { viewModel.setPlaybackSettings(state.playbackSettings.copy(externalForwardSubtitles = it)) },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.external_skip_segments_setting),
+                description = stringResource(R.string.external_skip_segments_setting_description),
+                checked = state.playbackSettings.externalSendSkipSegments,
+                onCheckedChange = { viewModel.setPlaybackSettings(state.playbackSettings.copy(externalSendSkipSegments = it)) },
             )
         }
         item {

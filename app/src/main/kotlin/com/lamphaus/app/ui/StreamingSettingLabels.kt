@@ -22,3 +22,13 @@ internal fun downmixLayoutLabel(channels: Int): String = stringResource(
         else -> R.string.downmix_layout_stereo
     },
 )
+
+/** The Default player choice's label (PLY-EXT-01). */
+@Composable
+internal fun defaultPlayerLabel(player: com.lamphaus.core.model.DefaultPlayer): String = stringResource(
+    when (player) {
+        com.lamphaus.core.model.DefaultPlayer.INTERNAL -> R.string.default_player_internal
+        com.lamphaus.core.model.DefaultPlayer.EXTERNAL -> R.string.default_player_external
+        com.lamphaus.core.model.DefaultPlayer.ASK -> R.string.default_player_ask
+    },
+)

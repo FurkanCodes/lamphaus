@@ -92,6 +92,19 @@
     <string name="downmix_layout_51">5.1</string>
     <string name="downmix_keep_volume_setting">Keep original volume</string>
     <string name="downmix_keep_volume_setting_description">Off evens out the mix so nothing clips, which can make it quieter</string>
+    <string name="external_player_missing">No other video player is installed, so Lamphaus plays it</string>
+    <string name="player_choice_title">Play with</string>
+    <string name="player_choice_internal">Lamphaus player</string>
+    <string name="player_choice_external">Another app</string>
+    <string name="default_player_setting">Default player</string>
+    <string name="default_player_setting_description">Which player opens a stream</string>
+    <string name="default_player_internal">Lamphaus</string>
+    <string name="default_player_external">Another app</string>
+    <string name="default_player_ask">Ask every time</string>
+    <string name="external_subtitles_setting">Send subtitles to the other app</string>
+    <string name="external_subtitles_setting_description">Add-on subtitles in your language travel with the stream</string>
+    <string name="external_skip_segments_setting">Send intro and outro times</string>
+    <string name="external_skip_segments_setting_description">For players that can skip them; others ignore them</string>
     <string name="streaming_settings">Streaming</string>
     <string name="streaming_settings_applies">Streaming · changes apply from the next playback</string>
     <string name="native_memory_setting">Native memory buffer</string>
@@ -197,7 +210,6 @@
     <string name="skip_intro_description">Show a skip button when exact intro timestamps are available.</string>
     <string name="skip_ending">Skip ending</string>
     <string name="skip_ending_description">Show a skip button when exact credits timestamps are available.</string>
-    <string name="auto_skip_heading">Automatic skipping</string>
     <string name="auto_skip_intro">Skip intros automatically</string>
     <string name="auto_skip_intro_description">Intros and anime openings skip without a press</string>
     <string name="auto_skip_recap">Skip recaps automatically</string>
@@ -457,7 +469,6 @@
     <string name="audio_format_eac3_joc" translatable="false">Dolby Atmos</string>
     <string name="audio_format_eac3" translatable="false">Dolby Digital Plus</string>
     <string name="audio_format_ac3" translatable="false">Dolby Digital</string>
-    <string name="open_with_external_player">Open with another player</string>
 
     <!-- Device management (M6) -->
     <string name="paired_devices">Paired devices</string>
