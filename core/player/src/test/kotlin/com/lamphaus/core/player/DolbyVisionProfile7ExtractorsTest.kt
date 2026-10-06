@@ -18,10 +18,20 @@ import com.lamphaus.core.player.dolbyvision.TestRpus
 import com.lamphaus.core.player.dolbyvision.TestRpus.Layer
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.After
 import org.junit.Assert.assertSame
+import org.junit.Before
 import org.junit.Test
 
 class DolbyVisionProfile7ExtractorsTest {
+
+    // Media3 decides this from Build.FINGERPRINT, which is null on the plain
+    // JVM; set it so ParsableByteArray never reads the stub.
+    @Before
+    fun enforceParsableByteArrayLimits() = ParsableByteArray.setShouldEnforceLimitOnLegacyMethods(true)
+
+    @After
+    fun resetParsableByteArrayLimits() = ParsableByteArray.setShouldEnforceLimitOnLegacyMethods(null)
 
     private val slice = byteArrayOf(0x26, 0x01, 0xAF.toByte(), 0x00, 0x00, 0x03, 0x01, 0x42)
     private val enhancementLayer = byteArrayOf(0x7E, 0x01, 0x26, 0x09, 0x11)

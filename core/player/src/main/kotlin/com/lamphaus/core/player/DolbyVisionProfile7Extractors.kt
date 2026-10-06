@@ -2,10 +2,12 @@ package com.lamphaus.core.player
 
 import android.media.MediaCodecList
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.DataReader
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.ExperimentalApi
 import androidx.media3.common.util.ParsableByteArray
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.Extractor
@@ -60,6 +62,7 @@ internal object DolbyVisionDecoders {
 internal class DolbyVisionProfile7ExtractorsFactory(private val delegate: ExtractorsFactory) : ExtractorsFactory {
 
     @Deprecated("Media3's legacy subtitle path; forwarded so the wrapped factory keeps its configuration.")
+    @OptIn(ExperimentalApi::class)
     override fun experimentalSetTextTrackTranscodingEnabled(textTrackTranscodingEnabled: Boolean): ExtractorsFactory {
         @Suppress("DEPRECATION")
         delegate.experimentalSetTextTrackTranscodingEnabled(textTrackTranscodingEnabled)
@@ -71,6 +74,7 @@ internal class DolbyVisionProfile7ExtractorsFactory(private val delegate: Extrac
         return this
     }
 
+    @OptIn(ExperimentalApi::class)
     override fun experimentalSetCodecsToParseWithinGopSampleDependencies(
         codecsToParseWithinGopSampleDependencies: Int,
     ): ExtractorsFactory {
