@@ -26,9 +26,13 @@ release gate: run this list on the target hardware before shipping.
 - [ ] SDR phone: playback, subtitle rendering, PiP enter/exit, return state
 - [ ] HDR10 device: HDR playback with Original colors on, tone-map path with Original colors off
 - [ ] Dolby Vision TV: profile 5/8 native; profile 7 remux (single-track MKV, FEL and MEL) on a profile 8-only
-      decoder plays as Dolby Vision with `Auto` (TV shows its Dolby Vision indicator), seeks cleanly, and
-      `HDR10` still plays the base layer
-- [ ] Non-DV TV: profile 7/5 falls back to HDR10 base layer without color washout
+      decoder plays as Dolby Vision with `Auto` (libdovi mode 1) and `Convert to DV8.1` (mode 2), the TV shows
+      its Dolby Vision indicator, seeks cleanly, and `HDR10 base layer` / `Strip Dolby Vision` play the base
+      layer on the HEVC decoder
+- [ ] A converted stream that fails to decode, or shows no picture for 12 s, reloads at the same position as
+      HDR10 (PLY-DV-01)
+- [ ] Non-DV TV: profile 7/8 play the HDR10 base layer without color washout; profile 5 keeps its Dolby Vision
+      decoder
 - [ ] Frame-rate matching: 23.976/24, 25/50, 29.97/59.94, 30/60 sources on a mode-switching TV;
       `Seamless only` never blanks; `Always` blanks and restores; ABR switches do not re-trigger
 - [ ] Resolution matching `Match source` on 720p/1080p/4K TVs; original mode restored after exit

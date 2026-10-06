@@ -28,7 +28,7 @@ class PlaybackCapabilityProbe(context: Context) {
 
     @OptIn(UnstableApi::class)
     suspend fun capabilities(): PlaybackCapabilities = withContext(Dispatchers.Default) {
-        val hdrTypes = displayHdrTypes()
+        val hdrTypes = displayHdrTypes(context)
         val audio = AudioCapabilities.getCapabilities(context)
         PlaybackCapabilities(
             supportsDolbyVision = Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION in hdrTypes,
@@ -46,18 +46,6 @@ class PlaybackCapabilityProbe(context: Context) {
             hardwareVideoMaxHeight = decoders.maxHeights,
             dolbyVisionDecoderProfiles = decoders.dolbyVisionProfiles,
         )
-    }
-
-    @Suppress("DEPRECATION")
-    private fun displayHdrTypes(): Set<Int> {
-        val display = context.getSystemService(DisplayManager::class.java)
-            ?.getDisplay(Display.DEFAULT_DISPLAY) ?: return emptySet()
-        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            display.mode.supportedHdrTypes
-        } else {
-            display.hdrCapabilities?.supportedHdrTypes
-        }
-        return types?.toSet().orEmpty()
     }
 
     private class Decoders(val maxHeights: Map<VideoCodecFamily, Int>, val dolbyVisionProfiles: Set<Int>)
@@ -90,14 +78,36 @@ class PlaybackCapabilityProbe(context: Context) {
         }?.second ?: 0
     }
 
-    private companion object {
-        val VIDEO_TYPES = listOf(
+    companion object {
+        /**
+         * HDR types the display reports: the display's own list joined with
+         * its current mode's (Android 14 moved them to modes, and some TV
+         * boxes still fill only one of the two). Empty when it reports none.
+         */
+        @Suppress("DEPRECATION")
+        fun displayHdrTypes(context: Context): Set<Int> {
+            val display = context.getSystemService(DisplayManager::class.java)
+                ?.getDisplay(Display.DEFAULT_DISPLAY) ?: return emptySet()
+            val fromDisplay = runCatching { display.hdrCapabilities?.supportedHdrTypes?.toSet() }.getOrNull().orEmpty()
+            val fromMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                runCatching { display.mode.supportedHdrTypes.toSet() }.getOrNull().orEmpty()
+            } else {
+                emptySet()
+            }
+            return fromDisplay + fromMode
+        }
+
+        /** Whether the display takes Dolby Vision, or null when it reports no HDR types at all. */
+        fun displayDolbyVision(context: Context): Boolean? =
+            displayHdrTypes(context).takeIf { it.isNotEmpty() }?.contains(Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION)
+
+        private val VIDEO_TYPES = listOf(
             VideoCodecFamily.AVC to MimeTypes.VIDEO_H264,
             VideoCodecFamily.HEVC to MimeTypes.VIDEO_H265,
             VideoCodecFamily.AV1 to MimeTypes.VIDEO_AV1,
             VideoCodecFamily.VP9 to MimeTypes.VIDEO_VP9,
         )
-        val FRAME_SIZES = listOf(3840 to 2160, 2560 to 1440, 1920 to 1080, 1280 to 720, 854 to 480)
-        val SOFTWARE_PREFIXES = listOf("OMX.google.", "c2.android.", "OMX.ffmpeg.", "c2.ffmpeg.")
+        private val FRAME_SIZES = listOf(3840 to 2160, 2560 to 1440, 1920 to 1080, 1280 to 720, 854 to 480)
+        private val SOFTWARE_PREFIXES = listOf("OMX.google.", "c2.android.", "OMX.ffmpeg.", "c2.ffmpeg.")
     }
 }

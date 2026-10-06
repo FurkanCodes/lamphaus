@@ -71,17 +71,35 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
         }
     }
 
+    /**
+     * Nuvio's Dolby Vision fallback: a stream converted to 8.1 signalling
+     * that shows no picture this long after it could play reloads at the same
+     * position as its HDR10 base layer.
+     */
+    private val firstFrameWatchdog = Runnable {
+        if (!firstFrameRendered && player.playbackState == Player.STATE_READY && player.playWhenReady) {
+            fallBackToBaseLayer()
+        }
+    }
+
     override fun onRenderedFirstFrame() {
         firstFrameRendered = true
+        handler.removeCallbacks(firstFrameWatchdog)
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         firstFrameRendered = false
+        handler.removeCallbacks(firstFrameWatchdog)
         if (reloading) return
-        // A new playback starts with both budgets full.
+        // A new playback starts with both budgets full and its own Dolby Vision decision.
         cancelRetry()
         startupAttempts = 0
         playbackAttempts = 0
+        DolbyVisionSession.reset()
+    }
+
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        armFirstFrameWatchdog()
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -91,6 +109,7 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
                 reloading = false
                 PlaybackRecovery.isRecovering = false
                 scheduleBudgetRefill()
+                armFirstFrameWatchdog()
             }
             Player.STATE_BUFFERING -> {
                 stallBufferedMillis = player.bufferedPosition
@@ -107,6 +126,13 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
     override fun onPlayerError(error: PlaybackException) {
         handler.removeCallbacks(stallPoll)
         handler.removeCallbacks(refillBudgets)
+        handler.removeCallbacks(firstFrameWatchdog)
+        val decoding = error.errorCode in PlaybackException.ERROR_CODE_DECODER_INIT_FAILED..PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED
+        // A converted Dolby Vision stream gets its base layer before anything else.
+        if (decoding && canFallBackToBaseLayer()) {
+            fallBackToBaseLayer()
+            return
+        }
         val causes = generateSequence<Throwable>(error) { it.cause }.toList()
         val status = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
         val stateOrNull = error.cause is IllegalStateException || error.cause is NullPointerException
@@ -155,6 +181,34 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
         handler.postDelayed(retry, StreamingPolicy.RECOVERY_DELAY_MS)
     }
 
+    private fun canFallBackToBaseLayer(): Boolean =
+        DolbyVisionSession.converting && !DolbyVisionSession.forceBaseLayer && player.currentMediaItem != null
+
+    private fun armFirstFrameWatchdog() {
+        handler.removeCallbacks(firstFrameWatchdog)
+        if (!firstFrameRendered && canFallBackToBaseLayer() &&
+            player.playbackState == Player.STATE_READY && player.playWhenReady
+        ) {
+            handler.postDelayed(firstFrameWatchdog, DOLBY_VISION_FIRST_FRAME_TIMEOUT_MS)
+        }
+    }
+
+    private fun fallBackToBaseLayer() {
+        if (!canFallBackToBaseLayer() || Media3EngineFactory.sessionPlayer !== player) return
+        val item = player.currentMediaItem ?: return
+        val position = player.currentPosition.coerceAtLeast(0L)
+        val playWhenReady = player.playWhenReady
+        DolbyVisionSession.forceBaseLayer = true
+        DolbyVisionSession.converting = false
+        PlaybackRecovery.isRecovering = true
+        cancelRetry()
+        reloading = true
+        player.stop()
+        player.setMediaItem(item, position)
+        player.playWhenReady = playWhenReady
+        player.prepare()
+    }
+
     private fun scheduleBudgetRefill() {
         handler.removeCallbacks(refillBudgets)
         handler.postDelayed(refillBudgets, StreamingPolicy.RECOVERY_RESET_MS)
@@ -167,5 +221,6 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
 
     private companion object {
         val DECODER_FAILURES = setOf(EngineFailureKind.DECODER_INIT_FAILED, EngineFailureKind.DECODER_FAILED)
+        const val DOLBY_VISION_FIRST_FRAME_TIMEOUT_MS = 12_000L
     }
 }

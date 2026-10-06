@@ -42,17 +42,64 @@ enum class DolbyVisionAction {
     DISABLED,
 }
 
+/** What the extractor does with one Dolby Vision video track (Nuvio's handling). */
+enum class DolbyVisionTrackAction {
+    /** Leave the track as it is. */
+    PASS_THROUGH,
+
+    /** Profile 7 → 8.1 signalling with libdovi mode 1: the RPU keeps its mapping as a MEL. */
+    CONVERT_TO_MEL,
+
+    /** Profile 7 → 8.1 with libdovi mode 2, falling back to mode 1 per RPU. */
+    CONVERT_TO_81,
+
+    /** Drop the RPU and enhancement layer: the HDR10 base layer plays on the HEVC decoder. */
+    STRIP_TO_BASE_LAYER,
+}
+
 object DolbyVisionPolicy {
 
     /**
-     * True when Media3 rewrites a profile 7 stream as 8.1 (as Nuvio does) so
-     * it plays as Dolby Vision: the device's decoder takes profile 8 but not
-     * 7, and the setting allows conversion. A decoder that takes 7 gets the
-     * original stream.
+     * Nuvio's per-track Dolby Vision decision. Auto plays a profile 7 remux
+     * as is where the decoder takes 7, converts it where the decoder takes 8,
+     * and strips it to HDR10 otherwise; any profile 7 or 8 track on a display
+     * known to lack Dolby Vision plays its HDR10 base layer. Profile 5 has no
+     * base layer and always keeps its Dolby Vision decoder. An unknown
+     * display ([displayDolbyVision] null) is treated as Dolby Vision capable.
      */
-    fun convertsProfile7(handling: DolbyVisionHandling, decoderProfiles: Set<Int>): Boolean =
-        (handling == DolbyVisionHandling.AUTO || handling == DolbyVisionHandling.CONVERT_PROFILE7_TO_81) &&
-            8 in decoderProfiles && 7 !in decoderProfiles
+    fun trackAction(
+        handling: DolbyVisionHandling,
+        profile: Int?,
+        decoderProfiles: Set<Int>,
+        displayDolbyVision: Boolean?,
+    ): DolbyVisionTrackAction {
+        if (profile != 7 && profile != 8) return DolbyVisionTrackAction.PASS_THROUGH
+        return when (handling) {
+            DolbyVisionHandling.NATIVE_ONLY -> DolbyVisionTrackAction.PASS_THROUGH
+            DolbyVisionHandling.HDR10_BASE_LAYER, DolbyVisionHandling.DISABLED ->
+                DolbyVisionTrackAction.STRIP_TO_BASE_LAYER
+            DolbyVisionHandling.CONVERT_PROFILE7_TO_81 ->
+                if (profile == 7) DolbyVisionTrackAction.CONVERT_TO_81 else DolbyVisionTrackAction.PASS_THROUGH
+            DolbyVisionHandling.AUTO -> when {
+                displayDolbyVision == false -> DolbyVisionTrackAction.STRIP_TO_BASE_LAYER
+                profile == 8 -> DolbyVisionTrackAction.PASS_THROUGH
+                7 in decoderProfiles -> DolbyVisionTrackAction.PASS_THROUGH
+                8 in decoderProfiles -> DolbyVisionTrackAction.CONVERT_TO_MEL
+                else -> DolbyVisionTrackAction.STRIP_TO_BASE_LAYER
+            }
+        }
+    }
+
+    /** True when a profile 7 remux plays as Dolby Vision: natively or converted (SHR-PROD-12). */
+    fun playsProfile7AsDolbyVision(
+        handling: DolbyVisionHandling,
+        decoderProfiles: Set<Int>,
+        displayDolbyVision: Boolean?,
+    ): Boolean = when (trackAction(handling, 7, decoderProfiles, displayDolbyVision)) {
+        DolbyVisionTrackAction.CONVERT_TO_MEL, DolbyVisionTrackAction.CONVERT_TO_81 -> 8 in decoderProfiles || 7 in decoderProfiles
+        DolbyVisionTrackAction.PASS_THROUGH -> 7 in decoderProfiles
+        DolbyVisionTrackAction.STRIP_TO_BASE_LAYER -> false
+    }
 
     /**
      * Resolution order (plan §2): user override → native 5/8 when display and

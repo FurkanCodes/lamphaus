@@ -34,23 +34,25 @@ internal object PlaybackEngineOptions {
 
     const val DOWNMIX_DESCRIPTION = "Fold surround sound to two speakers when audio is decoded on this device"
 
-    // Auto already rewrites profile 7 as 8.1 where that is what makes Dolby
-    // Vision play; the stored conversion value plays the same, so it is not
-    // offered separately.
+    // Nuvio's Dolby Vision handling choices (Phase 5), in its order.
     val dolbyVisionModes = listOf(
         DolbyVisionHandling.AUTO,
-        DolbyVisionHandling.NATIVE_ONLY,
+        DolbyVisionHandling.CONVERT_PROFILE7_TO_81,
         DolbyVisionHandling.HDR10_BASE_LAYER,
+        DolbyVisionHandling.DISABLED,
+        DolbyVisionHandling.NATIVE_ONLY,
     )
 
     fun dolbyVisionLabel(mode: DolbyVisionHandling): String = when (mode) {
-        DolbyVisionHandling.AUTO, DolbyVisionHandling.CONVERT_PROFILE7_TO_81 -> "Auto"
-        DolbyVisionHandling.NATIVE_ONLY -> "Dolby Vision only"
-        DolbyVisionHandling.HDR10_BASE_LAYER, DolbyVisionHandling.DISABLED -> "HDR10"
+        DolbyVisionHandling.AUTO -> "Auto"
+        DolbyVisionHandling.CONVERT_PROFILE7_TO_81 -> "Convert to DV8.1"
+        DolbyVisionHandling.HDR10_BASE_LAYER -> "HDR10 base layer"
+        DolbyVisionHandling.DISABLED -> "Strip Dolby Vision"
+        DolbyVisionHandling.NATIVE_ONLY -> "Off (native)"
     }
 
     const val DOLBY_VISION_DESCRIPTION =
-        "Auto plays profile 7 remuxes as Dolby Vision when this device decodes profile 8, and HDR10 when it can't"
+        "Auto picks for this display and decoder: profile 7 remuxes play as Dolby Vision where they can, HDR10 where they can't"
 
     val decoderPriorities = listOf(DecoderPriority.AUTO, DecoderPriority.SOFTWARE_FIRST)
 

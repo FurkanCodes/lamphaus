@@ -109,15 +109,42 @@ class DolbyVisionPolicyTest {
     }
 
     @Test
-    fun `profile 7 is rewritten only for a decoder that takes 8 but not 7`() {
-        assertEquals(true, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, setOf(5, 8)))
-        assertEquals(true, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.CONVERT_PROFILE7_TO_81, setOf(8)))
-        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, setOf(5, 7, 8)))
-        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, setOf(5)))
-        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.AUTO, emptySet()))
-        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.NATIVE_ONLY, setOf(8)))
-        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.HDR10_BASE_LAYER, setOf(8)))
-        assertEquals(false, DolbyVisionPolicy.convertsProfile7(DolbyVisionHandling.DISABLED, setOf(8)))
+    fun `auto converts profile 7 for a decoder that takes 8 but not 7, as Nuvio does`() {
+        fun auto(profile: Int?, decoders: Set<Int>, display: Boolean?) =
+            DolbyVisionPolicy.trackAction(DolbyVisionHandling.AUTO, profile, decoders, display)
+        assertEquals(DolbyVisionTrackAction.CONVERT_TO_MEL, auto(7, setOf(5, 8), display = true))
+        assertEquals(DolbyVisionTrackAction.CONVERT_TO_MEL, auto(7, setOf(5, 8), display = null))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, auto(7, setOf(5, 7, 8), display = true))
+        assertEquals(DolbyVisionTrackAction.STRIP_TO_BASE_LAYER, auto(7, setOf(5), display = true))
+        assertEquals(DolbyVisionTrackAction.STRIP_TO_BASE_LAYER, auto(7, emptySet(), display = true))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, auto(8, setOf(5, 8), display = true))
+        // A display known to lack Dolby Vision plays the HDR10 base layer of 7 and 8.
+        assertEquals(DolbyVisionTrackAction.STRIP_TO_BASE_LAYER, auto(7, setOf(5, 8), display = false))
+        assertEquals(DolbyVisionTrackAction.STRIP_TO_BASE_LAYER, auto(8, setOf(5, 8), display = false))
+        // Profile 5 has no base layer; unknown profiles are left alone.
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, auto(5, setOf(5), display = false))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, auto(null, setOf(8), display = false))
+    }
+
+    @Test
+    fun `explicit Dolby Vision settings override auto`() {
+        fun action(handling: DolbyVisionHandling, profile: Int) =
+            DolbyVisionPolicy.trackAction(handling, profile, setOf(5, 7, 8), displayDolbyVision = true)
+        assertEquals(DolbyVisionTrackAction.CONVERT_TO_81, action(DolbyVisionHandling.CONVERT_PROFILE7_TO_81, 7))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, action(DolbyVisionHandling.CONVERT_PROFILE7_TO_81, 8))
+        assertEquals(DolbyVisionTrackAction.STRIP_TO_BASE_LAYER, action(DolbyVisionHandling.HDR10_BASE_LAYER, 7))
+        assertEquals(DolbyVisionTrackAction.STRIP_TO_BASE_LAYER, action(DolbyVisionHandling.DISABLED, 8))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, action(DolbyVisionHandling.DISABLED, 5))
+        assertEquals(DolbyVisionTrackAction.PASS_THROUGH, action(DolbyVisionHandling.NATIVE_ONLY, 7))
+    }
+
+    @Test
+    fun `SHR-PROD-12 a remux plays as Dolby Vision natively or converted`() {
+        assertEquals(true, DolbyVisionPolicy.playsProfile7AsDolbyVision(DolbyVisionHandling.AUTO, setOf(5, 8), true))
+        assertEquals(true, DolbyVisionPolicy.playsProfile7AsDolbyVision(DolbyVisionHandling.AUTO, setOf(7), true))
+        assertEquals(false, DolbyVisionPolicy.playsProfile7AsDolbyVision(DolbyVisionHandling.AUTO, setOf(5), true))
+        assertEquals(false, DolbyVisionPolicy.playsProfile7AsDolbyVision(DolbyVisionHandling.HDR10_BASE_LAYER, setOf(8), true))
+        assertEquals(false, DolbyVisionPolicy.playsProfile7AsDolbyVision(DolbyVisionHandling.AUTO, setOf(8), false))
     }
 }
 

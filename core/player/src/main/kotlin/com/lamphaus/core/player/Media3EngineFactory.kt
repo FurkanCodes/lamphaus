@@ -207,6 +207,7 @@ object Media3EngineFactory {
         val extractorsFactory = DolbyVisionProfile7ExtractorsFactory.forDevice(
             DefaultExtractorsFactory().withAssMkvSupport(assParsers, assHandler),
             config.dolbyVisionHandling,
+            PlaybackCapabilityProbe.displayDolbyVision(context),
         )
         return ExoPlayer.Builder(context, renderersFactory.withAssSupport(assHandler))
             .setTrackSelector(trackSelector)

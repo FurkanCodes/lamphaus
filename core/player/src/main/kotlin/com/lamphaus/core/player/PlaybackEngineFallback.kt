@@ -35,6 +35,8 @@ object PlaybackEngineFallback {
 
                     val failureKind = EngineHandoff.failureKindFrom(error.errorCode)
                     if (!PlaybackEnginePolicy.shouldFallbackToMpv(failureKind, PlaybackEngineKind.MEDIA3)) return
+                    // A converted Dolby Vision stream first retries as its HDR10 base layer in Media3.
+                    if (DolbyVisionSession.converting && !DolbyVisionSession.forceBaseLayer) return
                     if (!MpvLibrary.isAvailable()) return
 
                     val handoff = EngineHandoff.snapshot(player)

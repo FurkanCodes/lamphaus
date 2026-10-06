@@ -42,6 +42,24 @@ internal class DolbyVisionRpu private constructor(
         return true
     }
 
+    /**
+     * libdovi conversion mode 1 ("to MEL"), what Nuvio's Auto uses for profile
+     * 7: the residual becomes a minimal enhancement layer (zero offsets and
+     * slopes over the 10-bit base layer) while the mapping and display
+     * management stay as authored. Returns false, changing nothing, for other
+     * profiles or an RPU without residual parameters.
+     */
+    fun convertToMel(): Boolean {
+        if (profile != 7) return false
+        val mapping = mapping ?: return false
+        val nlq = mapping.nlq ?: return false
+        header.elSpatialResamplingFilter = true
+        header.disableResidual = false
+        mapping.nlqPredPivots = intArrayOf(0, MAX_10_BIT)
+        mapping.nlq = List(nlq.size) { NlqParams.MINIMAL }
+        return true
+    }
+
     /** The unescaped RPU payload: the 0x19 prefix through the CRC and the 0x80 end byte. */
     fun write(): ByteArray {
         val writer = RpuBitWriter()
@@ -64,6 +82,7 @@ internal class DolbyVisionRpu private constructor(
 
     companion object {
         const val RPU_PREFIX = 0x19
+        private const val MAX_10_BIT = 1023
         const val FINAL_BYTE = 0x80
         private const val CRC_AND_FINAL_BITS = 40
 
@@ -331,6 +350,11 @@ internal class NlqParams(
     val isMinimal: Boolean
         get() = offset == 0L && vdrInMaxInt == 1L && vdrInMax == 0L &&
             slopeInt == 0L && slope == 0L && thresholdInt == 0L && threshold == 0L
+
+    companion object {
+        /** libdovi's MEL parameters for one component. */
+        val MINIMAL = NlqParams(offset = 0, vdrInMaxInt = 1, vdrInMax = 0, slopeInt = 0, slope = 0, thresholdInt = 0, threshold = 0)
+    }
 }
 
 internal class RpuMapping(

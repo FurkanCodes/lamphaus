@@ -1,29 +1,35 @@
 package com.lamphaus.core.player.dolbyvision
 
 /**
- * Turns a Dolby Vision profile 7 access unit into profile 8.1, the way
- * dovi_tool's `convert --discard -m 2` does: the enhancement layer is
- * dropped, every RPU is converted, and the HDR10 base layer passes through
- * byte for byte. Profile 7 UHD Blu-ray remuxes keep both layers in one track
- * (the enhancement layer wrapped in NAL units of type 63), which most Dolby
- * Vision decoders refuse; profile 8.1 they play.
+ * Rewrites a Dolby Vision access unit the way Nuvio's libdovi pipeline does.
+ * Converting (profile 7 → 8.1 signalling) drops the enhancement layer and
+ * converts every RPU, with libdovi mode 1 ([Mode.TO_MEL], Nuvio's Auto) or
+ * mode 2 ([Mode.TO_81], its "Convert to DV8.1", falling back to mode 1).
+ * Stripping ([Mode.STRIP]) drops RPUs and the enhancement layer, leaving the
+ * HDR10 base layer for the HEVC decoder. Base-layer NAL units always pass
+ * through byte for byte.
  *
  * Works on Annex-B data, as Media3's MP4 and Matroska extractors hand video
  * samples to their track outputs. One instance per track; not thread safe.
  */
 internal class Profile7AccessUnitRewriter {
 
+    enum class Mode { TO_MEL, TO_81, STRIP }
+
     var output = ByteArray(INITIAL_CAPACITY)
         private set
 
-    /** RPUs that could not be converted and were left out; the frame keeps its base layer. */
-    var droppedRpus = 0L
+    /**
+     * RPUs that could not be converted; they travel on as they came, their
+     * NAL header moved to layer 0, as Nuvio forwards them.
+     */
+    var unconvertedRpus = 0L
         private set
 
     private var scratch = ByteArray(RPU_SCRATCH_CAPACITY)
 
     /** Rewrites `data[from, to)` into [output] and returns the rewritten length. */
-    fun rewrite(data: ByteArray, from: Int, to: Int): Int {
+    fun rewrite(data: ByteArray, from: Int, to: Int, mode: Mode = Mode.TO_81): Int {
         ensureCapacity(to - from)
         var length = 0
         var startCode = findStartCode(data, from, to)
@@ -38,22 +44,23 @@ internal class Profile7AccessUnitRewriter {
             // trailing_zero_8bits and the next 4-byte start code's zero_byte
             // are not part of the NAL unit, which never ends in 0x00.
             while (nalEnd > nalStart && data[nalEnd - 1].toInt() == 0) nalEnd--
-            length = writeNal(data, nalStart, nalEnd, length)
+            length = writeNal(data, nalStart, nalEnd, length, mode)
             startCode = next
         }
         return length
     }
 
-    private fun writeNal(data: ByteArray, start: Int, end: Int, position: Int): Int {
+    private fun writeNal(data: ByteArray, start: Int, end: Int, position: Int, mode: Mode): Int {
         if (end - start < 2) return position
         val type = nalType(data, start)
         val layerId = ((data[start].toInt() and 0x01) shl 5) or ((data[start + 1].toInt() and 0xF8) ushr 3)
         return when {
+            type == NAL_TYPE_RPU && mode == Mode.STRIP -> position
             type == NAL_TYPE_RPU -> {
-                val rpu = convertRpu(data, start, end)
+                val rpu = convertRpu(data, start, end, mode)
                 if (rpu == null) {
-                    droppedRpus++
-                    position
+                    unconvertedRpus++
+                    appendLayerZero(data, start, end, position)
                 } else {
                     appendNal(rpu, 0, rpu.size, position)
                 }
@@ -71,23 +78,37 @@ internal class Profile7AccessUnitRewriter {
         return position + START_CODE.size + end - start
     }
 
+    /** Appends a NAL unit with its nuh_layer_id cleared, temporal id kept. */
+    private fun appendLayerZero(source: ByteArray, start: Int, end: Int, position: Int): Int {
+        val next = appendNal(source, start, end, position)
+        val header = position + START_CODE.size
+        output[header] = (output[header].toInt() and 0xFE).toByte()
+        output[header + 1] = (output[header + 1].toInt() and 0x07).toByte()
+        return next
+    }
+
     /**
      * The converted RPU NAL unit (header included, escaped), the original one
      * when it is already profile 8, or null when it cannot be converted.
-     * Corrupt metadata must never stop playback, so every failure is a drop.
+     * Mode 2 falls back to mode 1 for an RPU it cannot rewrite.
      */
-    private fun convertRpu(data: ByteArray, start: Int, end: Int): ByteArray? {
+    private fun convertRpu(data: ByteArray, start: Int, end: Int, mode: Mode): ByteArray? {
         if (scratch.size < end - start) scratch = ByteArray(end - start)
         val payloadLength = unescape(data, start + 2, end, scratch)
-        return try {
+        fun converted(convert: DolbyVisionRpu.() -> Boolean): ByteArray? = try {
             val rpu = DolbyVisionRpu.parse(scratch, payloadLength)
             when {
-                rpu.convertToProfile81() -> escapeRpu(rpu.write())
+                rpu.convert() -> escapeRpu(rpu.write())
                 rpu.profile == 8 -> RPU_NAL_HEADER + data.copyOfRange(start + 2, end)
                 else -> null
             }
         } catch (_: Exception) {
             null
+        }
+        return when (mode) {
+            Mode.TO_81 -> converted { convertToProfile81() } ?: converted { convertToMel() }
+            Mode.TO_MEL -> converted { convertToMel() }
+            Mode.STRIP -> null
         }
     }
 
@@ -177,6 +198,13 @@ internal class Profile7AccessUnitRewriter {
 
 /** Codec strings for a profile 7 stream once it is rewritten as 8.1. */
 internal object DolbyVisionCodecs {
+
+    /** The profile in a codecs string such as `dvhe.07.06`, or null. */
+    fun profileOf(codecs: String?): Int? = codecs?.split('.')?.getOrNull(1)?.toIntOrNull()
+
+    /** True for HEVC-based Dolby Vision (`dvhe`, `dvh1`), the only kind the rewriter parses. */
+    fun isHevc(codecs: String?): Boolean =
+        codecs?.substringBefore('.')?.lowercase()?.let { it == "dvhe" || it == "dvh1" } == true
 
     /** `dvhe.07.06` → `dvhe.08.06`; null for anything that is not HEVC profile 7. */
     fun profile7AsProfile8(codecs: String?): String? {

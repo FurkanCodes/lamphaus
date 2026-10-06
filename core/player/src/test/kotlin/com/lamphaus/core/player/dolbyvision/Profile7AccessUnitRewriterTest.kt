@@ -55,11 +55,41 @@ class Profile7AccessUnitRewriterTest {
     }
 
     @Test
-    fun `an unreadable RPU is dropped and counted`() {
+    fun `an unreadable RPU travels on at layer 0 and is counted`() {
         val rewriter = Profile7AccessUnitRewriter()
-        val broken = byteArrayOf(0x7C, 0x01, 0x19, 0x08, 0x09, 0x12, 0x34, 0x56, 0x78, 0x80.toByte())
-        assertArrayEquals(nal(slice), rewrite(nal(slice, broken), rewriter))
-        assertEquals(1L, rewriter.droppedRpus)
+        // Layer id 1 in the header, as Nuvio normalises before forwarding.
+        val broken = byteArrayOf(0x7C, 0x09, 0x19, 0x08, 0x09, 0x12, 0x34, 0x56, 0x78, 0x80.toByte())
+        val forwarded = byteArrayOf(0x7C, 0x01) + broken.copyOfRange(2, broken.size)
+        assertArrayEquals(nal(slice, forwarded), rewrite(nal(slice, broken), rewriter))
+        assertEquals(1L, rewriter.unconvertedRpus)
+    }
+
+    @Test
+    fun `mode 1 turns a full enhancement layer RPU into a minimal one, mapping kept`() {
+        val rewriter = Profile7AccessUnitRewriter()
+        val accessUnit = nal(vps, slice, enhancementLayer, rpuNal(Layer.FEL))
+        val length = rewriter.rewrite(accessUnit, 0, accessUnit.size, Profile7AccessUnitRewriter.Mode.TO_MEL)
+        val out = rewriter.output.copyOf(length)
+        val expectedPrefix = nal(vps, slice)
+        assertArrayEquals(expectedPrefix, out.copyOf(expectedPrefix.size))
+        val rpuNal = out.copyOfRange(expectedPrefix.size + 4, out.size)
+        val payload = ByteArray(rpuNal.size)
+        val payloadLength = Profile7AccessUnitRewriter.unescape(rpuNal, 2, rpuNal.size, payload)
+        val rpu = DolbyVisionRpu.parse(payload, payloadLength)
+        assertEquals(7, rpu.profile)
+        assertFalse(rpu.header.disableResidual)
+        assertTrue(rpu.header.elSpatialResamplingFilter)
+        assertTrue(rpu.mapping!!.nlq!!.all { it.isMinimal })
+        assertFalse(rpu.mapping!!.isFullEnhancementLayer)
+        assertEquals(0L, rewriter.unconvertedRpus)
+    }
+
+    @Test
+    fun `strip drops RPUs and the enhancement layer, keeping the base layer`() {
+        val rewriter = Profile7AccessUnitRewriter()
+        val accessUnit = nal(vps, slice, enhancementLayer, layerOneSlice, rpuNal(Layer.MEL))
+        val length = rewriter.rewrite(accessUnit, 0, accessUnit.size, Profile7AccessUnitRewriter.Mode.STRIP)
+        assertArrayEquals(nal(vps, slice), rewriter.output.copyOf(length))
     }
 
     @Test

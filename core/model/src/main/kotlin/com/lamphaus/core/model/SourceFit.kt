@@ -125,9 +125,12 @@ object SourceFitPolicy {
         if (traits.dolbyVision) {
             val handling = config.dolbyVisionHandling
             val profiles = capabilities.dolbyVisionDecoderProfiles
-            // Remuxes are profile 7: played as is, or rewritten as 8.1.
+            // Remuxes are profile 7: played as is, rewritten as 8.1, or stripped to HDR10.
             val decoderTakesIt = profiles.isNotEmpty() &&
-                (!traits.remux || PROFILE_7 in profiles || DolbyVisionPolicy.convertsProfile7(handling, profiles))
+                (
+                    !traits.remux ||
+                        DolbyVisionPolicy.playsProfile7AsDolbyVision(handling, profiles, capabilities.supportsDolbyVision)
+                    )
             val native = capabilities.supportsDolbyVision && decoderTakesIt &&
                 handling != DolbyVisionHandling.HDR10_BASE_LAYER && handling != DolbyVisionHandling.DISABLED
             if (!native) notes += if (displayHdr) SourceFitNote.DOLBY_VISION_AS_HDR10 else SourceFitNote.HDR_AS_SDR
@@ -160,7 +163,6 @@ object SourceFitPolicy {
         AudioRoutePolicy.routeSupports(capabilities, format) ||
             (format == EncodedAudioFormat.EAC3_JOC && capabilities.supportsEac3Passthrough)
 
-    private const val PROFILE_7 = 7
     private val PASSTHROUGH_FORMATS = EncodedAudioFormat.entries - EncodedAudioFormat.NONE
     private val PREMIUM_AUDIO = setOf(EncodedAudioFormat.TRUEHD, EncodedAudioFormat.DTS_HD, EncodedAudioFormat.EAC3_JOC)
 }

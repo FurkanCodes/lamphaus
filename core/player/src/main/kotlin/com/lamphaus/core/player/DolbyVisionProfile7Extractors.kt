@@ -20,10 +20,31 @@ import androidx.media3.extractor.SniffFailure
 import androidx.media3.extractor.TrackOutput
 import androidx.media3.extractor.text.SubtitleParser
 import com.lamphaus.core.model.DolbyVisionHandling
+import com.lamphaus.core.model.DolbyVisionTrackAction
 import com.lamphaus.core.player.dolbyvision.DolbyVisionCodecs
 import com.lamphaus.core.player.dolbyvision.Profile7AccessUnitRewriter
 import java.io.EOFException
 import com.lamphaus.core.model.DolbyVisionPolicy as DolbyVisionModelPolicy
+
+/**
+ * Per-playback Dolby Vision state shared by the extractors and recovery: a
+ * converted stream that fails to decode is reloaded as its HDR10 base layer
+ * (Nuvio's fallback), and the override lasts until the next playback.
+ */
+object DolbyVisionSession {
+    /** Strip profile 7 and 8 to the base layer, whatever the setting says. */
+    @Volatile
+    var forceBaseLayer = false
+
+    /** A track of the current playback is being converted to 8.1 signalling. */
+    @Volatile
+    var converting = false
+
+    fun reset() {
+        forceBaseLayer = false
+        converting = false
+    }
+}
 
 /**
  * Dolby Vision profiles (5, 7, 8, …) the device's decoders accept, read once:
@@ -47,19 +68,24 @@ internal object DolbyVisionDecoders {
 }
 
 /**
- * Plays Dolby Vision profile 7 (UHD Blu-ray remuxes, both layers in one
- * track) as profile 8.1, as Nuvio does, on devices whose decoder takes 8 but
- * not 7: the track is announced as `dvhe.08`, the enhancement layer is
- * dropped, and each RPU is converted ([Profile7AccessUnitRewriter]). The
- * picture is the same HDR10 base layer with Dolby Vision's dynamic metadata,
- * instead of plain HDR10.
+ * Applies Nuvio's Dolby Vision handling to each video track
+ * ([DolbyVisionModelPolicy.trackAction]): profile 7 (UHD Blu-ray remuxes, both
+ * layers in one track) is converted to 8.1 signalling — announced as
+ * `dvhe.08`, the enhancement layer dropped, each RPU converted
+ * ([Profile7AccessUnitRewriter]) — or a profile 7/8 track is stripped to its
+ * HDR10 base layer and announced as HEVC.
  *
- * A track is only rewritten once its first sample shows in-band RPUs, so
+ * A track is only converted once its first sample shows in-band RPUs, so
  * dual-track profile 7 (an enhancement layer in its own track) and every
  * other format pass through untouched.
  */
 @UnstableApi
-internal class DolbyVisionProfile7ExtractorsFactory(private val delegate: ExtractorsFactory) : ExtractorsFactory {
+internal class DolbyVisionProfile7ExtractorsFactory(
+    private val delegate: ExtractorsFactory,
+    private val actionFor: (profile: Int?) -> DolbyVisionTrackAction = { profile ->
+        if (profile == 7) DolbyVisionTrackAction.CONVERT_TO_81 else DolbyVisionTrackAction.PASS_THROUGH
+    },
+) : ExtractorsFactory {
 
     @Deprecated("Media3's legacy subtitle path; forwarded so the wrapped factory keeps its configuration.")
     @OptIn(ExperimentalApi::class)
@@ -88,21 +114,35 @@ internal class DolbyVisionProfile7ExtractorsFactory(private val delegate: Extrac
         wrap(delegate.createExtractors(uri, responseHeaders))
 
     private fun wrap(extractors: Array<Extractor>): Array<Extractor> =
-        Array(extractors.size) { Profile7ConvertingExtractor(extractors[it]) }
+        Array(extractors.size) { Profile7ConvertingExtractor(extractors[it], actionFor) }
 
     companion object {
-        /** [factory], converting profile 7 when [handling] and this device's decoders call for it. */
-        fun forDevice(factory: ExtractorsFactory, handling: DolbyVisionHandling): ExtractorsFactory =
-            if (DolbyVisionModelPolicy.convertsProfile7(handling, DolbyVisionDecoders.profiles)) {
-                DolbyVisionProfile7ExtractorsFactory(factory)
-            } else {
-                factory
+        /**
+         * [factory] with this device's Dolby Vision handling: the setting,
+         * its decoders' profiles, and whether the display takes Dolby Vision.
+         */
+        fun forDevice(
+            factory: ExtractorsFactory,
+            handling: DolbyVisionHandling,
+            displayDolbyVision: Boolean?,
+        ): ExtractorsFactory {
+            if (handling == DolbyVisionHandling.NATIVE_ONLY) return factory
+            return DolbyVisionProfile7ExtractorsFactory(factory) { profile ->
+                if (DolbyVisionSession.forceBaseLayer && (profile == 7 || profile == 8)) {
+                    DolbyVisionTrackAction.STRIP_TO_BASE_LAYER
+                } else {
+                    DolbyVisionModelPolicy.trackAction(handling, profile, DolbyVisionDecoders.profiles, displayDolbyVision)
+                }
             }
+        }
     }
 }
 
 @UnstableApi
-private class Profile7ConvertingExtractor(private val delegate: Extractor) : Extractor {
+private class Profile7ConvertingExtractor(
+    private val delegate: Extractor,
+    private val actionFor: (Int?) -> DolbyVisionTrackAction,
+) : Extractor {
     private var output: Profile7ConvertingExtractorOutput? = null
 
     override fun sniff(input: ExtractorInput): Boolean = delegate.sniff(input)
@@ -110,7 +150,7 @@ private class Profile7ConvertingExtractor(private val delegate: Extractor) : Ext
     override fun getSniffFailureDetails(): List<SniffFailure> = delegate.sniffFailureDetails
 
     override fun init(output: ExtractorOutput) {
-        val converting = Profile7ConvertingExtractorOutput(output)
+        val converting = Profile7ConvertingExtractorOutput(output, actionFor)
         this.output = converting
         delegate.init(converting)
     }
@@ -129,12 +169,15 @@ private class Profile7ConvertingExtractor(private val delegate: Extractor) : Ext
 }
 
 @UnstableApi
-private class Profile7ConvertingExtractorOutput(private val delegate: ExtractorOutput) : ExtractorOutput {
+private class Profile7ConvertingExtractorOutput(
+    private val delegate: ExtractorOutput,
+    private val actionFor: (Int?) -> DolbyVisionTrackAction,
+) : ExtractorOutput {
     private val videoTracks = HashMap<Int, Profile7ConvertingTrackOutput>()
 
     override fun track(id: Int, type: Int): TrackOutput {
         if (type != C.TRACK_TYPE_VIDEO) return delegate.track(id, type)
-        return videoTracks.getOrPut(id) { Profile7ConvertingTrackOutput(delegate.track(id, type)) }
+        return videoTracks.getOrPut(id) { Profile7ConvertingTrackOutput(delegate.track(id, type), actionFor) }
     }
 
     override fun endTracks() = delegate.endTracks()
@@ -145,16 +188,20 @@ private class Profile7ConvertingExtractorOutput(private val delegate: ExtractorO
 }
 
 /**
- * Forwards everything untouched until the track's format is Dolby Vision
- * profile 7. From then on it holds the format and each sample's bytes until
- * the sample is complete, so the first sample can decide whether the track is
- * rewritten and every later one can be rewritten whole.
+ * Forwards everything untouched until the track's format is a Dolby Vision
+ * profile the policy converts or strips. From then on it holds each sample's
+ * bytes until the sample is complete, so the first sample can decide whether
+ * a profile 7 track is converted and every later one can be rewritten whole.
  */
 @UnstableApi
-private class Profile7ConvertingTrackOutput(private val delegate: TrackOutput) : TrackOutput {
-    private enum class Mode { PASS_THROUGH, UNDECIDED, CONVERTING }
+private class Profile7ConvertingTrackOutput(
+    private val delegate: TrackOutput,
+    private val actionFor: (Int?) -> DolbyVisionTrackAction,
+) : TrackOutput {
+    private enum class Mode { PASS_THROUGH, UNDECIDED, CONVERTING, STRIPPING }
 
     private var mode = Mode.PASS_THROUGH
+    private var rewriteMode = Profile7AccessUnitRewriter.Mode.TO_81
     private var heldFormat: Format? = null
     private var pending = ByteArray(0)
     private var pendingLength = 0
@@ -168,11 +215,18 @@ private class Profile7ConvertingTrackOutput(private val delegate: TrackOutput) :
     override fun durationUs(durationUs: Long) = delegate.durationUs(durationUs)
 
     override fun format(format: Format) {
+        val dolbyVision = format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION &&
+            DolbyVisionCodecs.isHevc(format.codecs)
+        val action = if (dolbyVision) actionFor(DolbyVisionCodecs.profileOf(format.codecs)) else null
         val profile8Codecs = DolbyVisionCodecs.profile7AsProfile8(format.codecs)
-            .takeIf { format.sampleMimeType == MimeTypes.VIDEO_DOLBY_VISION }
         when {
-            profile8Codecs == null -> {
-                // Not (or no longer) profile 7: anything held goes out as it came.
+            action == DolbyVisionTrackAction.STRIP_TO_BASE_LAYER -> {
+                if (mode == Mode.UNDECIDED) heldFormat = null
+                mode = Mode.STRIPPING
+                delegate.format(format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).setCodecs(null).build())
+            }
+            profile8Codecs == null || action == null || action == DolbyVisionTrackAction.PASS_THROUGH -> {
+                // Not (or no longer) converted: anything held goes out as it came.
                 flushPending()
                 heldFormat = null
                 mode = Mode.PASS_THROUGH
@@ -180,6 +234,11 @@ private class Profile7ConvertingTrackOutput(private val delegate: TrackOutput) :
             }
             mode == Mode.CONVERTING -> delegate.format(format.buildUpon().setCodecs(profile8Codecs).build())
             else -> {
+                rewriteMode = if (action == DolbyVisionTrackAction.CONVERT_TO_MEL) {
+                    Profile7AccessUnitRewriter.Mode.TO_MEL
+                } else {
+                    Profile7AccessUnitRewriter.Mode.TO_81
+                }
                 heldFormat = format
                 mode = Mode.UNDECIDED
             }
@@ -213,8 +272,13 @@ private class Profile7ConvertingTrackOutput(private val delegate: TrackOutput) :
         val start = end - size
         val access = if (start < 0 || cryptoData != null || pendingEncrypted) null else accessUnit(flags, start, end)
         if (mode == Mode.UNDECIDED) decide(access)
-        if (mode == Mode.CONVERTING && access != null) {
-            val length = rewriter.rewrite(pending, access.first, access.last + 1)
+        if ((mode == Mode.CONVERTING || mode == Mode.STRIPPING) && access != null) {
+            val length = rewriter.rewrite(
+                pending,
+                access.first,
+                access.last + 1,
+                if (mode == Mode.STRIPPING) Profile7AccessUnitRewriter.Mode.STRIP else rewriteMode,
+            )
             var written = length
             if (flags and C.BUFFER_FLAG_HAS_SUPPLEMENTAL_DATA != 0) {
                 // [main size][main][supplemental], as SampleDataQueue reads it back.
@@ -249,6 +313,7 @@ private class Profile7ConvertingTrackOutput(private val delegate: TrackOutput) :
         heldFormat = null
         if (access != null && Profile7AccessUnitRewriter.containsRpu(pending, access.first, access.last + 1)) {
             mode = Mode.CONVERTING
+            DolbyVisionSession.converting = true
             delegate.format(format.buildUpon().setCodecs(DolbyVisionCodecs.profile7AsProfile8(format.codecs)).build())
         } else {
             mode = Mode.PASS_THROUGH

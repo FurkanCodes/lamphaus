@@ -13,6 +13,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.SeekMap
 import androidx.media3.extractor.TrackOutput
+import com.lamphaus.core.model.DolbyVisionTrackAction
 import com.lamphaus.core.player.dolbyvision.Profile7AccessUnitRewriter
 import com.lamphaus.core.player.dolbyvision.TestRpus
 import com.lamphaus.core.player.dolbyvision.TestRpus.Layer
@@ -20,6 +21,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.After
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -95,7 +97,7 @@ class DolbyVisionProfile7ExtractorsTest {
             track.sampleMetadata(0, C.BUFFER_FLAG_KEY_FRAME, annexB(slice, profile7Rpu).size, 0, null)
             write(track, annexB(slice, enhancementLayer))
         }
-        val wrapped = DolbyVisionProfile7ExtractorsFactory { arrayOf<Extractor>(extractor) }.createExtractors().single()
+        val wrapped = DolbyVisionProfile7ExtractorsFactory(ExtractorsFactory { arrayOf<Extractor>(extractor) }).createExtractors().single()
         wrapped.init(output)
         wrapped.read(emptyInput(), PositionHolder())
         wrapped.seek(0, 0)
@@ -109,10 +111,48 @@ class DolbyVisionProfile7ExtractorsTest {
     }
 
     @Test
+    fun `a stripped track plays its base layer as HEVC`() {
+        val profile8 = profile7Format.buildUpon().setCodecs("dvhe.08.06").build()
+        val run = extract(profile8, listOf(annexB(slice, profile81Rpu))) { DolbyVisionTrackAction.STRIP_TO_BASE_LAYER }
+        assertEquals(MimeTypes.VIDEO_H265, run.video.formats.single().sampleMimeType)
+        assertEquals(null, run.video.formats.single().codecs)
+        assertArrayEquals(annexB(slice), run.video.samples.single().data)
+    }
+
+    @Test
+    fun `stripping profile 7 drops its enhancement layer too`() {
+        val run = extract(profile7Format, listOf(annexB(slice, enhancementLayer, profile7Rpu))) {
+            DolbyVisionTrackAction.STRIP_TO_BASE_LAYER
+        }
+        assertEquals(MimeTypes.VIDEO_H265, run.video.formats.single().sampleMimeType)
+        assertArrayEquals(annexB(slice), run.video.samples.single().data)
+    }
+
+    @Test
+    fun `a pass-through decision leaves profile 7 untouched`() {
+        val sample = annexB(slice, enhancementLayer, profile7Rpu)
+        val run = extract(profile7Format, listOf(sample)) { DolbyVisionTrackAction.PASS_THROUGH }
+        assertEquals(listOf("dvhe.07.06"), run.video.formats.map { it.codecs })
+        assertArrayEquals(sample, run.video.samples.single().data)
+    }
+
+    @Test
+    fun `auto converts with mode 1, keeping a profile 7 MEL RPU`() {
+        val run = extract(profile7Format, listOf(annexB(slice, enhancementLayer, profile7Rpu))) {
+            DolbyVisionTrackAction.CONVERT_TO_MEL
+        }
+        assertEquals(listOf("dvhe.08.06"), run.video.formats.map { it.codecs })
+        val data = run.video.samples.single().data
+        assertArrayEquals(annexB(slice), data.copyOf(annexB(slice).size))
+        // A MEL source converted with mode 1 keeps its RPU as is (already minimal).
+        assertTrue(Profile7AccessUnitRewriter.containsRpu(data, 0, data.size))
+    }
+
+    @Test
     fun `audio tracks are not wrapped`() {
         val output = RecordingExtractorOutput()
         val extractor = ScriptedExtractor { }
-        DolbyVisionProfile7ExtractorsFactory { arrayOf<Extractor>(extractor) }.createExtractors().single().init(output)
+        DolbyVisionProfile7ExtractorsFactory(ExtractorsFactory { arrayOf<Extractor>(extractor) }).createExtractors().single().init(output)
         assertSame(output.audio, checkNotNull(extractor.output).track(2, C.TRACK_TYPE_AUDIO))
     }
 
@@ -120,7 +160,12 @@ class DolbyVisionProfile7ExtractorsTest {
         byteArrayOf((size ushr 24).toByte(), (size ushr 16).toByte(), (size ushr 8).toByte(), size.toByte())
 
     /** Writes [samples] as MatroskaExtractor does: start code and payload in separate calls, some via a DataReader. */
-    private fun extract(format: Format, samples: List<ByteArray>, supplemental: ByteArray? = null): RecordingExtractorOutput {
+    private fun extract(
+        format: Format,
+        samples: List<ByteArray>,
+        supplemental: ByteArray? = null,
+        actionFor: ((Int?) -> DolbyVisionTrackAction)? = null,
+    ): RecordingExtractorOutput {
         val output = RecordingExtractorOutput()
         val extractor = ScriptedExtractor { track ->
             track.format(format)
@@ -139,7 +184,13 @@ class DolbyVisionProfile7ExtractorsTest {
                 track.sampleMetadata(index * 41_708L, flags, size, 0, null)
             }
         }
-        val wrapped = DolbyVisionProfile7ExtractorsFactory { arrayOf<Extractor>(extractor) }.createExtractors().single()
+        val delegate = ExtractorsFactory { arrayOf<Extractor>(extractor) }
+        val factory = if (actionFor == null) {
+            DolbyVisionProfile7ExtractorsFactory(delegate)
+        } else {
+            DolbyVisionProfile7ExtractorsFactory(delegate, actionFor)
+        }
+        val wrapped = factory.createExtractors().single()
         wrapped.init(output)
         wrapped.read(emptyInput(), PositionHolder())
         return output
