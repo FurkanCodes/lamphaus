@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -44,12 +45,16 @@ data class StreamBadgeImport(
 /**
  * Owns the imported stream-badge rules (SHR-ARC-04, SHR-ARC-05). The rules are
  * downloaded once on import and kept on the device, so the source list never
- * waits on the badge host.
+ * waits on the badge host. The account syncs only the file's address; every
+ * device downloads it here.
  */
 class StreamBadgeRepository(private val context: Context) {
     val rules: Flow<StreamBadgeImport?> = context.badgeStore.data.map { values ->
         values[RULES]?.let { runCatching { json.decodeFromString<StreamBadgeImport>(it) }.getOrNull() }
     }
+
+    /** The address of the stored import, or null when none is stored. */
+    suspend fun sourceUrl(): String? = rules.first()?.sourceUrl
 
     /** Downloads, validates, and stores the badge file at [url], replacing any previous import. */
     suspend fun import(url: String): Result<StreamBadgeImport> = withContext(Dispatchers.IO) {

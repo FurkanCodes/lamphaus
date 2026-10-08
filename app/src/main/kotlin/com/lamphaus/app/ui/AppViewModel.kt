@@ -20,6 +20,7 @@ import com.lamphaus.core.data.cloud.IntegrationInvalidCredentialException
 import com.lamphaus.core.model.AddonSubtitleLookup
 import com.lamphaus.core.model.IntegrationStatus
 import com.lamphaus.core.data.preferences.SyncedSettings
+import com.lamphaus.core.data.preferences.SyncedStreamBadges
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.ArtworkAsset
@@ -335,6 +336,7 @@ class AppViewModel(
                         // Everything re-arrives from the cloud on next sign-in.
                         container.libraryRepository.clearLocalAccountData()
                         container.preferences.clearSyncedSettings()
+                        container.streamBadgeRepository.remove()
                         container.preferences.clearPersonalHistory()
                         container.viewingLogRepository.clear()
                         // Provider metadata is scoped to the previous account's
@@ -457,7 +459,11 @@ class AppViewModel(
         if (state.value.streamBadgesImporting) return@launch
         mutableState.update { it.copy(streamBadgesImporting = true) }
         container.streamBadgeRepository.import(url)
-            .onSuccess { showMessage("Imported ${it.enabledFilterCount} stream badges.") }
+            .onSuccess {
+                container.preferences.touchSyncedSettings()
+                pushSyncedSettings()
+                showMessage("Imported ${it.enabledFilterCount} stream badges.")
+            }
             // Validation messages are ours; network errors stay generic.
             .onFailure { showMessage((it as? IllegalArgumentException)?.message ?: "Could not download that badge file.") }
         mutableState.update { it.copy(streamBadgesImporting = false) }
@@ -465,6 +471,8 @@ class AppViewModel(
 
     fun removeStreamBadges() = viewModelScope.launch {
         container.streamBadgeRepository.remove()
+        container.preferences.touchSyncedSettings()
+        pushSyncedSettings()
     }
 
     fun setProfileAvatar(profileId: String, avatarKey: String) = viewModelScope.launch {
@@ -2894,39 +2902,60 @@ class AppViewModel(
         container.cloudSyncGateway.settings(userId).collect { remote ->
             val local = container.preferences.current()
             when {
-                remote == null -> container.cloudSyncGateway.saveSettings(
-                    userId = userId,
-                    settings = SyncedSettings(
-                        theme = local.theme,
-                        dynamicColor = local.dynamicColor,
-                        kenBurnsEnabled = local.kenBurnsEnabled,
-                        diagnostics = local.diagnostics,
-                        spoilerProtection = local.spoilerProtection,
-                        updatedAtEpochMillis = local.updatedAtEpochMillis,
-                    ),
-                ).onFailure { error -> CloudLog.w("settings.seed failed — staying local", error) }
+                remote == null -> container.cloudSyncGateway.saveSettings(userId, localSyncedSettings())
+                    .onFailure { error -> CloudLog.w("settings.seed failed — staying local", error) }
 
-                remote.updatedAtEpochMillis > local.updatedAtEpochMillis ->
+                remote.updatedAtEpochMillis > local.updatedAtEpochMillis -> {
                     container.preferences.applyRemoteSettings(remote)
+                    applyRemoteStreamBadges(remote.streamBadges)
+                }
+
+                // This device already adopted the row: a badge download that failed then retries.
+                remote.updatedAtEpochMillis == local.updatedAtEpochMillis ->
+                    applyRemoteStreamBadges(remote.streamBadges)
+            }
+            // A row from a version that did not sync badges: this device's import fills it in.
+            if (remote != null && remote.streamBadges == null && container.streamBadgeRepository.sourceUrl() != null) {
+                container.preferences.touchSyncedSettings()
+                pushSyncedSettings()
             }
         }
+    }
+
+    /** Adopts the account's badge file; each device downloads it, and a failure keeps the current badges. */
+    private suspend fun applyRemoteStreamBadges(remote: SyncedStreamBadges?) {
+        if (remote == null) return
+        val repository = container.streamBadgeRepository
+        val wanted = remote.sourceUrl
+        if (wanted == repository.sourceUrl()) return
+        if (wanted == null) {
+            repository.remove()
+        } else {
+            repository.import(wanted).onFailure {
+                // The badge address stays out of logs; only the failure kind is recorded.
+                CloudLog.w("streamBadges.apply failed (${it::class.simpleName}) — keeping this device's badges")
+            }
+        }
+    }
+
+    private suspend fun localSyncedSettings(): SyncedSettings {
+        val local = container.preferences.current()
+        return SyncedSettings(
+            theme = local.theme,
+            dynamicColor = local.dynamicColor,
+            kenBurnsEnabled = local.kenBurnsEnabled,
+            diagnostics = local.diagnostics,
+            spoilerProtection = local.spoilerProtection,
+            streamBadges = SyncedStreamBadges(container.streamBadgeRepository.sourceUrl()),
+            updatedAtEpochMillis = local.updatedAtEpochMillis,
+        )
     }
 
     /** Mirrors a local settings change into the account row. */
     private fun pushSyncedSettings() = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
-        val local = container.preferences.current()
-        container.cloudSyncGateway.saveSettings(
-            userId = userId,
-            settings = SyncedSettings(
-                theme = local.theme,
-                dynamicColor = local.dynamicColor,
-                kenBurnsEnabled = local.kenBurnsEnabled,
-                diagnostics = local.diagnostics,
-                spoilerProtection = local.spoilerProtection,
-                updatedAtEpochMillis = local.updatedAtEpochMillis,
-            ),
-        ).onFailure { error -> CloudLog.w("settings.push failed — converges next session", error) }
+        container.cloudSyncGateway.saveSettings(userId, localSyncedSettings())
+            .onFailure { error -> CloudLog.w("settings.push failed — converges next session", error) }
     }
 
     private fun startCloudSync(userId: String) {

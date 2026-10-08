@@ -20,7 +20,7 @@
     <string name="manage_profiles">Manage profiles</string>
     <string name="choose_avatar">Choose avatar</string>
     <string name="stream_badges">Stream badges</string>
-    <string name="stream_badges_description">Import a Nuvio-compatible badges.json to show image badges on source cards.</string>
+    <string name="stream_badges_description">Import a Nuvio-compatible badges.json to show image badges on source cards on every device signed in to this account.</string>
     <string name="stream_badges_address">Badge file address</string>
     <string name="stream_badges_placeholder">https://raw.githubusercontent.com/…/badges.json</string>
     <string name="stream_badges_import">Import badges</string>

@@ -105,8 +105,17 @@ data class SyncedSettings(
     val kenBurnsEnabled: Boolean = true,
     val diagnostics: DiagnosticsConsent = DiagnosticsConsent(),
     val spoilerProtection: SpoilerProtectionSettings = SpoilerProtectionSettings(),
+    /** Null when the row was written by a version that does not sync stream badges. */
+    val streamBadges: SyncedStreamBadges? = null,
     val updatedAtEpochMillis: Long = 0,
 )
+
+/**
+ * The account's imported stream-badge file, by address only: each device
+ * downloads and validates the file itself. A null [sourceUrl] means none.
+ */
+@Serializable
+data class SyncedStreamBadges(val sourceUrl: String? = null)
 
 /** Bookkeeping for one profile's new-episode check; null [checkedAtEpochMillis] means never run. */
 data class NewEpisodeCheckState(
@@ -226,6 +235,11 @@ class UserPreferences(private val context: Context) {
             it[DYNAMIC_COLOR] = enabled
             it[SETTINGS_UPDATED] = System.currentTimeMillis()
         }
+    }
+
+    /** Marks an account-synced change made outside this store, such as a stream-badge import. */
+    suspend fun touchSyncedSettings() {
+        context.dataStore.edit { it[SETTINGS_UPDATED] = System.currentTimeMillis() }
     }
 
     suspend fun setKenBurnsEnabled(enabled: Boolean) {

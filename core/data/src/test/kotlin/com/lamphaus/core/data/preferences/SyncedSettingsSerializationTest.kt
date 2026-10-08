@@ -61,4 +61,14 @@ class SyncedSettingsSerializationTest {
         assertEquals(ThemePreference.LIGHT, decoded.theme)
         assertEquals(true, decoded.dynamicColor)
     }
+
+    @Test
+    fun `stream badges distinguish none from a version that does not sync them`() {
+        val none = SyncedSettings(streamBadges = SyncedStreamBadges(sourceUrl = null))
+        val imported = SyncedSettings(streamBadges = SyncedStreamBadges("https://example.test/badges.json"))
+
+        assertEquals(none, json.decodeFromString<SyncedSettings>(json.encodeToString(none)))
+        assertEquals(imported, json.decodeFromString<SyncedSettings>(json.encodeToString(imported)))
+        assertEquals(null, json.decodeFromString<SyncedSettings>("""{"theme":"LIGHT"}""").streamBadges)
+    }
 }
