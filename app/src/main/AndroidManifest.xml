@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets the opted-in new-episode check run while the app is closed (SHR-PROD-16). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
   <!-- Google TV home: Continue watching (Watch Next) entries this app publishes (TV-HOME-01). -->
@@ -153,6 +155,14 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.lamphaus.app.update.SESSION_CALLBACK" />
+            </intent-filter>
+        </receiver>
+        <!-- Reopens the app after the in-app updater replaced it. -->
+        <receiver
+            android:name=".update.UpdateRelaunchReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
     </application>

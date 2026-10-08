@@ -1,10 +1,13 @@
 package com.lamphaus.app.mobile
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,20 +40,47 @@ import com.lamphaus.app.R
 /**
  * Turns new-episode alerts on (SHR-PROD-16). The explanation has already
  * been shown by the caller; only then is the system permission requested
- * (MOB-NOT-02, MOB-PERM-01). [onResult] receives whether alerts are on.
+ * (MOB-NOT-02, MOB-PERM-01), followed by Android's request to let the check
+ * run while Lamphaus is closed. [onResult] receives whether alerts are on.
  */
 @Composable
 internal fun rememberEnableNewEpisodeAlerts(onResult: (Boolean) -> Unit): () -> Unit {
     val context = LocalContext.current
     val currentOnResult by rememberUpdatedState(onResult)
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    val turnedOn: (Boolean) -> Unit = { granted ->
         currentOnResult(granted)
+        if (granted && backgroundChecksRestricted(context)) requestUnrestrictedBackground(context)
     }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission(), turnedOn)
     return {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || notificationPermissionGranted(context)) {
-            currentOnResult(true)
+            turnedOn(true)
         } else {
             launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
+/**
+ * Whether battery optimization can hold the check back while Lamphaus is
+ * closed: Android then runs it late, often only once the app is opened.
+ */
+internal fun backgroundChecksRestricted(context: Context): Boolean =
+    context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == false
+
+/**
+ * Asks Android to let the check run while Lamphaus is closed, a system-owned
+ * dependency of the alerts (MOB-SET-05). Falls back to the system's list.
+ */
+@SuppressLint("BatteryLife") // The new-episode check is the opted-in background work this exemption serves.
+internal fun requestUnrestrictedBackground(context: Context) {
+    val request = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (runCatching { context.startActivity(request) }.isFailure) {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
         }
     }
 }

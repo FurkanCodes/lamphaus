@@ -294,6 +294,12 @@ class UpdateCoordinator(
         return InstallGate.STARTED
     }
 
+    /** Whether the version the in-app updater chose is now installed, before launch confirms it. */
+    fun installedSelectedUpdate(): Boolean {
+        val selected = prefs.selectedVersionCode
+        return selected > 0 && installer.installedVersionCode() >= selected
+    }
+
     /** Confirm self-update success from the installed package on next launch. */
     fun confirmInstalledVersion(): Boolean {
         val selected = prefs.selectedVersionCode

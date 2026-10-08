@@ -956,14 +956,17 @@ private fun SettingsBrowsingPage(state: AppUiState, viewModel: AppViewModel) {
  * Settings → Notifications (MOB-SET-04). New-episode alerts are off by
  * default (MOB-SET-02); turning them on asks for the system permission
  * only now (MOB-PERM-01). When the system blocks Lamphaus, the row says so
- * and links to the app's notification settings (MOB-SET-05).
+ * and links to the app's notification settings; while battery optimization
+ * holds the check back, a row asks Android to let it run (MOB-SET-05).
  */
 @Composable
 private fun SettingsNotificationsPage(state: AppUiState, viewModel: AppViewModel) {
     val context = LocalContext.current
     var allowed by remember { mutableStateOf(notificationsAllowed(context)) }
+    var restricted by remember { mutableStateOf(backgroundChecksRestricted(context)) }
     LifecycleResumeEffect(Unit) {
         allowed = notificationsAllowed(context)
+        restricted = backgroundChecksRestricted(context)
         onPauseOrDispose {}
     }
     val enable = rememberEnableNewEpisodeAlerts { granted ->
@@ -986,6 +989,17 @@ private fun SettingsNotificationsPage(state: AppUiState, viewModel: AppViewModel
                         trailingContent = {
                             TextButton(onClick = { openAppNotificationSettings(context) }) {
                                 Text(stringResource(R.string.open_settings))
+                            }
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                } else if (state.engagement.newEpisodeAlerts && restricted) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.new_episodes_background_restricted)) },
+                        supportingContent = { Text(stringResource(R.string.new_episodes_background_restricted_description)) },
+                        trailingContent = {
+                            TextButton(onClick = { requestUnrestrictedBackground(context) }) {
+                                Text(stringResource(R.string.allow))
                             }
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),

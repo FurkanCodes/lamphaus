@@ -695,6 +695,9 @@
     <string name="notifications_blocked">Notifications are off for Lamphaus</string>
     <string name="notifications_blocked_description">Turn them on in system settings to get new-episode alerts.</string>
     <string name="open_settings">Open settings</string>
+    <string name="new_episodes_background_restricted">Alerts may arrive late</string>
+    <string name="new_episodes_background_restricted_description">Battery optimization holds back the check while Lamphaus is closed.</string>
+    <string name="allow">Allow</string>
     <string name="new_episodes_prompt_title">Know when new episodes arrive</string>
     <string name="new_episodes_prompt_body">Get a notification when a series you follow has a new episode. You can change this anytime in Settings.</string>
     <string name="not_now">Not now</string>
