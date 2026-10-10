@@ -204,7 +204,6 @@ import com.lamphaus.app.ui.homeSectionsOfType
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
 import com.lamphaus.app.ui.isRenderableHomeCatalogSection
 import com.lamphaus.app.ui.menuActions
-import com.lamphaus.app.ui.RatingBadge
 import com.lamphaus.app.ui.RatingBadgeChip
 import com.lamphaus.app.ui.metadataImdbScore
 import com.lamphaus.app.ui.SEEKR_INTEGRATION
@@ -1807,7 +1806,7 @@ private fun TvHero(
     }
 }
 @Composable
-private fun TvMetadataLine(
+internal fun TvMetadataLine(
     presentation: MediaMetadataPresentation,
     includeGenres: Boolean,
     modifier: Modifier = Modifier,
@@ -1822,12 +1821,13 @@ private fun TvMetadataLine(
         if (includeGenres && presentation.genres.isNotEmpty()) add(presentation.genres.joinToString(", "))
     }
     if (values.isEmpty() && ratings.isEmpty()) return
+    val metadataColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.76f)
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (values.isNotEmpty()) {
             Text(
                 text = values.joinToString("  •  "),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.76f),
+                color = metadataColor,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1837,10 +1837,35 @@ private fun TvMetadataLine(
                 TvRatingBadgeStrip(ratings = ratings, onSelect = onSelectRating)
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ratings.forEach { score -> RatingBadge(score) }
+                    ratings.forEach { score -> TvRatingBadge(score, valueColor = metadataColor) }
                 }
             }
         }
+    }
+}
+
+/**
+ * A rating that is shown, not selected: the shared brand chip with its value
+ * in TV type and ink. The mobile `RatingBadge` reads the mobile theme, which
+ * TV never provides, so its value would fall back to the light scheme's dark
+ * ink on the dark canvas (TV-CLR-01).
+ */
+@Composable
+private fun TvRatingBadge(score: RatingSourceScore, valueColor: Color) {
+    val valueText = ratingValueText(score)
+    val description = stringResource(R.string.rating_badge_description, score.displayName, valueText)
+    Row(
+        modifier = Modifier.clearAndSetSemantics { contentDescription = description },
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RatingBadgeChip(score)
+        Text(
+            text = valueText,
+            style = MaterialTheme.typography.labelMedium,
+            color = valueColor,
+            maxLines = 1,
+        )
     }
 }
 
@@ -2614,7 +2639,7 @@ private fun TvSourceMediaSummary(
         }
         imdbScore?.let { score ->
             Spacer(Modifier.height(10.dp))
-            RatingBadge(score, valueColor = MaterialTheme.colorScheme.onSurfaceVariant)
+            TvRatingBadge(score, valueColor = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
