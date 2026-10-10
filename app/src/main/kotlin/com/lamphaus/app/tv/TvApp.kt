@@ -885,6 +885,8 @@ private fun TvSignedIn(
     // With background artwork off, nothing is loaded or drawn behind the
     // browsing screens, and focus uses the standard accent (QA-08).
     val backgroundArtwork = state.backgroundArtworkEnabled
+    // TV-MOT-01: device-local, and off whenever animations are removed.
+    val pageTransitions = state.tvPageTransitions && !rememberReducedMotion()
     // TV-CNT-05: Showcase draws the focused title's backdrop over the whole
     // page, so the dim background artwork would only be painted over.
     val showcasePage = state.tvHomeLayout == TvHomeLayout.SHOWCASE && destination in TvHomeDestinations
@@ -932,6 +934,7 @@ private fun TvSignedIn(
             if (pendingMediaKey == null) focusDestination = destination
         }
         TvDetailScreen(
+            modifier = Modifier.tvPageEntrance(state.selectedDetail.preview.stableKey, pageTransitions),
             detail = state.selectedDetail,
             enrichment = state.detailEnrichment,
             enrichmentFailed = state.detailEnrichmentFailed,
@@ -1057,6 +1060,7 @@ private fun TvSignedIn(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .tvPageEntrance(destination, pageTransitions)
                 .padding(
                     start = if (sideRail) TvRailTokens.contentStartOffset else 0.dp,
                     top = if (sideRail) TvRailTokens.contentTopPadding else TvLayoutTokens.contentTopPadding,
@@ -2746,6 +2750,7 @@ private fun TvDetailScreen(
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
     onRetryEnrichment: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     if (detail == null) return
     val artworkResolver = LocalArtworkResolver.current
@@ -2799,7 +2804,7 @@ private fun TvDetailScreen(
             selectedSeason = nextUpSeason ?: seasonNumbers.firstOrNull()
         }
     }
-    Box(Modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize()) {
         TvBakedBackdrop(media = detail.preview, style = TvBackdropStyle.DETAIL, modifier = Modifier.fillMaxSize())
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -4245,6 +4250,15 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
                 description = stringResource(R.string.black_background_description),
                 checked = state.tvBlackBackground,
                 onCheckedChange = viewModel::setTvBlackBackground,
+            )
+        }
+        item {
+            // TV-MOT-01: off gives instant pages, exactly as before.
+            TvSettingsToggleRow(
+                title = stringResource(R.string.page_transitions),
+                description = stringResource(R.string.page_transitions_description),
+                checked = state.tvPageTransitions,
+                onCheckedChange = viewModel::setTvPageTransitions,
             )
         }
         item {

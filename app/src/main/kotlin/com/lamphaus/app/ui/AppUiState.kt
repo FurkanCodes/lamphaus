@@ -371,6 +371,8 @@ data class AppUiState(
     val tvNavigationStyle: TvNavigationStyle = TvNavigationStyle.SIDE_RAIL,
     /** Device-local TV choice: black background and panels instead of the dark grey scheme. */
     val tvBlackBackground: Boolean = false,
+    /** Device-local TV choice: pages fade in when they open (TV-MOT-01). */
+    val tvPageTransitions: Boolean = true,
     /** Device-local trailer choice; null means the platform default (mobile on, TV off). */
     val trailers: Boolean? = null,
     /** Device-local: not-yet-released titles are left out of Home and Discover rows. */
@@ -447,6 +449,7 @@ data class AppUiState(
         tvHomeLayout = tvHomeLayout,
         tvNavigationStyle = tvNavigationStyle,
         tvBlackBackground = tvBlackBackground,
+        tvPageTransitions = tvPageTransitions,
         trailers = trailers,
         hideUnreleased = hideUnreleased,
         sourceFit = sourceFit,

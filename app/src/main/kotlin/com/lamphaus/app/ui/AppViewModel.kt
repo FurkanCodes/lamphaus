@@ -208,6 +208,7 @@ class AppViewModel(
                     tvHomeLayout = settings.tvHomeLayout,
                     tvNavigationStyle = settings.tvNavigationStyle,
                     tvBlackBackground = settings.tvBlackBackground,
+                    tvPageTransitions = settings.tvPageTransitions,
                     trailers = settings.trailers,
                     hideUnreleased = settings.hideUnreleased,
                     sourceFit = settings.sourceFit,
@@ -285,6 +286,7 @@ class AppViewModel(
                         tvHomeLayout = TvHomeLayout.fromName(snapshot.tvHomeLayout),
                         tvNavigationStyle = TvNavigationStyle.fromName(snapshot.tvNavigationStyle),
                         tvBlackBackground = snapshot.tvBlackBackground,
+                        tvPageTransitions = snapshot.tvPageTransitions,
                         trailers = snapshot.trailers,
                         hideUnreleased = snapshot.hideUnreleased,
                         sourceFit = snapshot.sourceFit,
@@ -2091,6 +2093,10 @@ class AppViewModel(
         container.preferences.setTvBlackBackground(enabled)
     }
 
+    fun setTvPageTransitions(enabled: Boolean) = viewModelScope.launch {
+        container.preferences.setTvPageTransitions(enabled)
+    }
+
     /** Device-local TV opt-in for the idle ambient (TV-AMB-01). */
     fun setTvIdleAmbient(enabled: Boolean) = viewModelScope.launch {
         container.preferences.setTvIdleAmbient(enabled)
@@ -3087,6 +3093,7 @@ class AppViewModel(
         val tvHomeLayout: String?,
         val tvNavigationStyle: String?,
         val tvBlackBackground: Boolean,
+        val tvPageTransitions: Boolean,
         val trailers: Boolean?,
         val hideUnreleased: Boolean,
         val sourceFit: Boolean,

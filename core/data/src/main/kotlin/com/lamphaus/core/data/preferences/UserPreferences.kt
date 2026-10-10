@@ -53,6 +53,8 @@ data class UserSettings(
     val tvNavigationStyle: String? = null,
     /** Device-local TV choice: black background and panels instead of the dark grey scheme. */
     val tvBlackBackground: Boolean = false,
+    /** Device-local TV choice: pages fade in when they open (TV-MOT-01). On by default. */
+    val tvPageTransitions: Boolean = true,
     /**
      * Device-local trailer choice. Null means the platform default: the
      * mobile Trailer button is on, TV Spotlight previews are opt-in.
@@ -136,6 +138,7 @@ class UserPreferences(private val context: Context) {
             tvHomeLayout = values[TV_HOME_LAYOUT],
             tvNavigationStyle = values[TV_NAVIGATION_STYLE],
             tvBlackBackground = values[TV_BLACK_BACKGROUND] ?: false,
+            tvPageTransitions = values[TV_PAGE_TRANSITIONS] ?: true,
             trailers = values[TRAILERS],
             hideUnreleased = values[HIDE_UNRELEASED] ?: false,
             sourceFit = values[SOURCE_FIT] ?: true,
@@ -303,6 +306,13 @@ class UserPreferences(private val context: Context) {
     suspend fun setTvBlackBackground(enabled: Boolean) {
         context.dataStore.edit {
             it[TV_BLACK_BACKGROUND] = enabled
+        }
+    }
+
+    /** Device-local; deliberately does not touch the synced-settings timestamp. */
+    suspend fun setTvPageTransitions(enabled: Boolean) {
+        context.dataStore.edit {
+            it[TV_PAGE_TRANSITIONS] = enabled
         }
     }
 
@@ -585,6 +595,7 @@ class UserPreferences(private val context: Context) {
         val TV_HOME_LAYOUT = stringPreferencesKey("tv_home_layout")
         val TV_NAVIGATION_STYLE = stringPreferencesKey("tv_navigation_style")
         val TV_BLACK_BACKGROUND = booleanPreferencesKey("tv_black_background")
+        val TV_PAGE_TRANSITIONS = booleanPreferencesKey("tv_page_transitions")
         val TRAILERS = booleanPreferencesKey("trailers")
         val HIDE_UNRELEASED = booleanPreferencesKey("hide_unreleased")
         val SOURCE_FIT = booleanPreferencesKey("source_fit")

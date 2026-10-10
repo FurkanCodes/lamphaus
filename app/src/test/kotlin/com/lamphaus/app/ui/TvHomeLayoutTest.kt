@@ -45,6 +45,13 @@ class TvHomeLayoutTest {
     }
 
     @Test
+    fun `TV-MOT-01 page transitions are on until turned off and survive leaving an account`() {
+        assertEquals(true, AppUiState().tvPageTransitions)
+
+        assertEquals(false, AppUiState(tvPageTransitions = false).clearAccountData().tvPageTransitions)
+    }
+
+    @Test
     fun `TV-CLR-01 the black background is off until chosen and survives leaving an account`() {
         assertEquals(false, AppUiState().tvBlackBackground)
 

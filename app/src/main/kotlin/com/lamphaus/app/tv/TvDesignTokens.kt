@@ -168,6 +168,9 @@ internal object TvMotionTokens {
      */
     const val settingsPaneSettleMillis = 160L
     const val focusedArtworkScale = 1.02f
+    /** Page transitions: a new page fades in while rising into place (TV-MOT-01). */
+    const val pageEntranceMillis = 180
+    val pageEntranceRise = 8.dp
     /** The side rail opens on a soft spring and closes on a quicker ease (TV-MOT-01). */
     const val railCloseDurationMillis = 180
     /** The ambient screensaver's slow slide crossfade (TV-AMB-01). */

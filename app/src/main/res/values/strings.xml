@@ -175,6 +175,8 @@
     <string name="home_layout_preview_description">Animated preview of the %1$s layout</string>
     <string name="black_background">Black background</string>
     <string name="black_background_description">Pure black behind every screen instead of dark grey. Background artwork still shows when it is on.</string>
+    <string name="page_transitions">Page transitions</string>
+    <string name="page_transitions_description">Pages fade in as they open on this TV. Turn off for instant pages.</string>
     <string name="navigation_style">Navigation</string>
     <string name="navigation_style_side_rail">Side rail</string>
     <string name="navigation_style_top_bar">Top bar</string>

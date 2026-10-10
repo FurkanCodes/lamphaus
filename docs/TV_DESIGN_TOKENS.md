@@ -42,6 +42,7 @@ The production source of truth is `TvDesignTokens.kt` plus `TvTheme.kt`. Values 
 | Delayed hero update | 240ms |
 | Hero transition | 220ms crossfade with 1–1.25% horizontal drift |
 | Showcase backdrop and details | follow focus after 240ms, 220ms crossfade |
+| Page transition | incoming page fades in over 180ms while rising 8dp; Settings → Appearance → Page transitions, on by default |
 | Layout picker preview | a step every 1.1s, eased over 280ms; still with remove animations |
 | Library confirmation | 110ms out + 110ms return |
 | Side rail | opens on a spring (damping 0.82), labels staggered 5% of the opening apart; closes in 180ms; beam slides on Select |
