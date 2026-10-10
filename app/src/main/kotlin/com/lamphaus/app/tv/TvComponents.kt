@@ -135,6 +135,9 @@ internal enum class TvDestination(
     }
 }
 
+/** The pages drawn with the chosen Home layout (TV-CNT-01). */
+internal val TvHomeDestinations = setOf(TvDestination.HOME, TvDestination.MOVIES, TvDestination.SERIES)
+
 @OptIn(ExperimentalComposeUiApi::class)
 internal fun Modifier.tvContentFocusBoundary(
     topNavigationRequester: FocusRequester,

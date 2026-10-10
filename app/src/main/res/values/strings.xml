@@ -163,6 +163,16 @@
     <string name="home_layout_spotlight">Spotlight</string>
     <string name="home_layout_classic_description">A large featured title at the top, with poster rows below.</string>
     <string name="home_layout_spotlight_description">No featured banner. The selected title widens in its row, and its details appear underneath.</string>
+    <string name="home_layout_showcase">Showcase</string>
+    <string name="home_layout_marquee">Marquee</string>
+    <string name="home_layout_showcase_description">The selected title fills the top of the screen with its details. Its row stays below, and the title widens in place.</string>
+    <string name="home_layout_marquee_description">A large featured title at the top, then rows where the selected title widens and its details appear underneath.</string>
+    <string name="home_layout_classic_summary">Featured banner, poster rows</string>
+    <string name="home_layout_spotlight_summary">No banner, widening cards</string>
+    <string name="home_layout_showcase_summary">Big preview above a single row</string>
+    <string name="home_layout_marquee_summary">Featured banner, widening rows</string>
+    <string name="home_layout_picker_subtitle">Applies to Home, Movies and Series on this TV.</string>
+    <string name="home_layout_preview_description">Animated preview of the %1$s layout</string>
     <string name="black_background">Black background</string>
     <string name="black_background_description">Pure black behind every screen instead of dark grey. Background artwork still shows when it is on.</string>
     <string name="navigation_style">Navigation</string>
@@ -171,7 +181,7 @@
     <string name="navigation_style_side_rail_description">A slim rail on the left. Press Left or Back to open it from anywhere.</string>
     <string name="navigation_style_top_bar_description">Tabs across the top of every page.</string>
     <string name="trailer_previews">Trailer previews</string>
-    <string name="trailer_previews_description">In Spotlight Home, plays a muted trailer in the selected title after a few seconds on this TV.</string>
+    <string name="trailer_previews_description">In Spotlight, Showcase and Marquee, plays a muted trailer in the selected title after a few seconds on this TV.</string>
     <string name="trailer">Trailer</string>
     <string name="trailers">Trailers</string>
     <string name="trailer_button">Trailer button</string>

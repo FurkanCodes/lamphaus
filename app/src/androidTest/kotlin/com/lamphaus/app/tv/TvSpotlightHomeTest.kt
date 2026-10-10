@@ -80,10 +80,24 @@ class TvSpotlightHomeTest {
         assertEquals("m0", opened?.id)
     }
 
+    @Test
+    fun TV_CNT_05_showcaseRowsWidenWithTheirTitleButWithoutTheDetailsSlot() {
+        val entry = setRow(detailsSlot = false)
+
+        compose.runOnIdle { entry.requestFocus() }
+        compose.waitForIdle()
+
+        card(0).assertIsFocused()
+        card(0).assertWidthIsEqualTo(TvLayoutTokens.spotlightExpandedWidth)
+        // Without a logo image the still names the title in text, as in Spotlight.
+        compose.onNodeWithText("Title 1", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Synopsis 1").assertDoesNotExist()
+    }
+
     private fun card(index: Int) =
         compose.onNode(hasContentDescription("Title ${index + 1},", substring = true))
 
-    private fun setRow(onMedia: (MediaPreview) -> Unit = {}): FocusRequester {
+    private fun setRow(onMedia: (MediaPreview) -> Unit = {}, detailsSlot: Boolean = true): FocusRequester {
         val entry = FocusRequester()
         val section = CatalogSection(
             id = "row",
@@ -123,6 +137,7 @@ class TvSpotlightHomeTest {
                         restoreMediaKey = null,
                         onFocusRestored = {},
                         firstItemFocusRequester = entry,
+                        detailsSlot = detailsSlot,
                     )
                 }
             }

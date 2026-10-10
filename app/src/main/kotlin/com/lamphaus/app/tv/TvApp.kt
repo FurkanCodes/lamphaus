@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.size
@@ -885,11 +886,15 @@ private fun TvSignedIn(
     // With background artwork off, nothing is loaded or drawn behind the
     // browsing screens, and focus uses the standard accent (QA-08).
     val backgroundArtwork = state.backgroundArtworkEnabled
+    // TV-CNT-05: Showcase draws the focused title's backdrop over the whole
+    // page, so the dim background artwork would only be painted over.
+    val showcasePage = state.tvHomeLayout == TvHomeLayout.SHOWCASE && destination in TvHomeDestinations
     val ambient = rememberTvContentAmbient {
         when (destination) {
             TvDestination.HOME,
             TvDestination.MOVIES,
             TvDestination.SERIES,
+            -> lastFocusedMedia.takeIf { backgroundArtwork && !showcasePage }
             TvDestination.DISCOVER,
             TvDestination.LIBRARY,
             TvDestination.SEARCH,
@@ -1012,7 +1017,8 @@ private fun TvSignedIn(
             initialFocusRequester = contentFocus.getValue(destination),
             restoreMediaKey = pendingMediaKey,
             onFocusRestored = { pendingMediaKey = null },
-            spotlight = state.tvHomeLayout == TvHomeLayout.SPOTLIGHT,
+            layout = state.tvHomeLayout,
+            sideRail = sideRail,
             catalogType = catalogType,
         )
     }
@@ -1035,9 +1041,9 @@ private fun TvSignedIn(
         )
     }
 
-    // TV-CNT-04: opt-in, Spotlight only; unset means off.
+    // TV-CNT-04: opt-in, in the layouts whose focused card widens; unset means off.
     val trailerPreviews = rememberTvTrailerPreviews(
-        enabled = state.trailers == true && state.tvHomeLayout == TvHomeLayout.SPOTLIGHT,
+        enabled = state.trailers == true && state.tvHomeLayout.widensCards,
         resolve = { media, maxHeight -> viewModel.trailerSource(media, maxHeight) },
         forget = viewModel::forgetTrailerSource,
     )
@@ -1046,7 +1052,7 @@ private fun TvSignedIn(
         LocalTvTrailerPreviews provides trailerPreviews,
     ) {
         Box(Modifier.fillMaxSize()) {
-            if (backgroundArtwork && destination != TvDestination.SETTINGS) {
+            if (backgroundArtwork && destination != TvDestination.SETTINGS && !showcasePage) {
                 TvContentAmbientBackground(ambient = ambient)
             }
         Box(
@@ -1226,9 +1232,14 @@ private fun TvHome(
     initialFocusRequester: FocusRequester,
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
-    spotlight: Boolean = false,
+    layout: TvHomeLayout = TvHomeLayout.CLASSIC,
+    sideRail: Boolean = true,
     catalogType: String? = null,
 ) {
+    // Spotlight, Showcase and Marquee pin rows and widen the focused poster;
+    // Classic and Marquee lead with the hero (TV-CNT-01).
+    val spotlight = layout.widensCards
+    val showcase = layout == TvHomeLayout.SHOWCASE
     var focusedCandidate by remember { mutableStateOf<MediaPreview?>(null) }
     var contentHasFocus by remember { mutableStateOf(false) }
     // The carousel is a signature part of the Home screen, so it must never
@@ -1310,155 +1321,206 @@ private fun TvHome(
     val homeLoading = state.initialContentLoading ||
         state.homeCatalogBatch.loadingMore ||
         sections.any(CatalogSection::initialLoading)
-    SpotlightColumnScrolling(enabled = spotlight) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .onFocusChanged { contentHasFocus = it.hasFocus },
-            contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
-            verticalArrangement = Arrangement.spacedBy(
-                if (spotlight) SpotlightRowSpacing else TvLayoutTokens.rowSpacing,
-            ),
-        ) {
-            if (spotlight) {
-                // TV-CNT-03: no hero. While nothing has loaded yet, a placeholder
-                // row keeps a focus target under the navigation (TV-CNT-02).
-                if (heroItems.isEmpty() && continueWatching.isEmpty() && homeLoading) {
-                    item("spotlight-loading") {
-                        TvSpotlightLoadingRow(Modifier.focusRequester(initialFocusRequester))
+    // The hero, or its loading skeleton, takes Home's entry focus when shown.
+    val heroHoldsEntry = layout.hasHero && (featured != null || homeLoading)
+    // TV-CNT-05: rows report focus here; only the backdrop and details read
+    // the settled title, so a focus move never recomposes the page (QA-08).
+    val showcaseFocus = remember { mutableStateOf<MediaPreview?>(null) }
+    val showcaseFallback = continueWatching.firstOrNull()?.first ?: heroItems.firstOrNull()
+    val showcaseMedia = if (showcase) {
+        rememberSettledShowcaseMedia { showcaseFocus.value ?: showcaseFallback }
+    } else {
+        null
+    }
+    val rowFocused: (MediaPreview) -> Unit = when (layout) {
+        TvHomeLayout.SHOWCASE -> { media -> showcaseFocus.value = media; onFocused(media) }
+        // Marquee's hero keeps its carousel title; it is off screen while rows have focus.
+        else -> onFocused
+    }
+    val pageTop = if (sideRail) TvRailTokens.contentTopPadding else TvLayoutTokens.contentTopPadding
+    Box(Modifier.fillMaxSize()) {
+        if (showcaseMedia != null) {
+            TvShowcaseBackdrop(
+                media = showcaseMedia,
+                startInset = if (sideRail) TvRailTokens.contentStartOffset else 0.dp,
+                topInset = pageTop,
+            )
+            TvShowcaseDetails(
+                media = showcaseMedia,
+                modifier = Modifier
+                    .offset(
+                        x = TvLayoutTokens.screenHorizontalPadding,
+                        y = (if (sideRail) TvShowcaseTokens.detailsTopWithRail else TvShowcaseTokens.detailsTopWithTopBar) - pageTop,
+                    ),
+            )
+        }
+        SpotlightColumnScrolling(enabled = spotlight) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (showcase) {
+                            Modifier.padding(
+                                top = (if (sideRail) TvShowcaseTokens.rowsTopWithRail else TvShowcaseTokens.rowsTopWithTopBar) - pageTop,
+                            )
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .onFocusChanged { contentHasFocus = it.hasFocus },
+                contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
+                verticalArrangement = Arrangement.spacedBy(
+                    when {
+                        showcase -> TvShowcaseTokens.rowSpacing
+                        spotlight -> SpotlightRowSpacing
+                        else -> TvLayoutTokens.rowSpacing
+                    },
+                ),
+            ) {
+                if (!layout.hasHero) {
+                    // TV-CNT-03: no hero. While nothing has loaded yet, a placeholder
+                    // row keeps a focus target under the navigation (TV-CNT-02).
+                    if (heroItems.isEmpty() && continueWatching.isEmpty() && homeLoading) {
+                        item("spotlight-loading") {
+                            TvSpotlightLoadingRow(Modifier.focusRequester(initialFocusRequester))
+                        }
+                    }
+                } else if (featured != null) {
+                    val media = featured
+                    item("hero") {
+                        TvHero(
+                            kenBurnsEnabled = state.kenBurnsEnabled,
+                            rowsHaveFocus = contentHasFocus,
+                            media = media,
+                            onMedia = onHeroMedia,
+                            onFocused = { focusedCandidate = media; onFocused(media) },
+                            carouselItems = heroItems,
+                            onPrevious = { moveCarousel(-1) },
+                            onNext = { moveCarousel(1) },
+                            modifier = Modifier
+                                .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
+                                .mediaFocusRestore(heroRestoreKey(media), restoreMediaKey, onFocusRestored)
+                                .focusRequester(initialFocusRequester),
+                        )
+                    }
+                } else if (homeLoading) {
+                    // Keep the hero slot present (and focusable) while the first
+                    // catalog window loads, so D-pad Down from the top navigation
+                    // always has a focus target inside the content area.
+                    item("hero") {
+                        TvHeroLoadingSkeleton(
+                            modifier = Modifier
+                                .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
+                                .focusRequester(initialFocusRequester),
+                        )
                     }
                 }
-            } else if (featured != null) {
-                val media = featured
-                item("hero") {
-                    TvHero(
-                        kenBurnsEnabled = state.kenBurnsEnabled,
-                        rowsHaveFocus = contentHasFocus,
-                        media = media,
-                        onMedia = onHeroMedia,
-                        onFocused = { focusedCandidate = media; onFocused(media) },
-                        carouselItems = heroItems,
-                        onPrevious = { moveCarousel(-1) },
-                        onNext = { moveCarousel(1) },
-                        modifier = Modifier
-                            .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
-                            .mediaFocusRestore(heroRestoreKey(media), restoreMediaKey, onFocusRestored)
-                            .focusRequester(initialFocusRequester),
-                    )
+                if (continueWatching.isNotEmpty() && spotlight) {
+                    item("continue-watching") {
+                        TvSpotlightContinueWatchingRow(
+                            items = continueWatching,
+                            upNextByKey = upNextByKey,
+                            contentHasFocus = contentHasFocus,
+                            onMedia = onMedia,
+                            onFocused = rowFocused,
+                            restoreMediaKey = restoreMediaKey,
+                            onFocusRestored = onFocusRestored,
+                            firstItemFocusRequester = initialFocusRequester.takeUnless { heroHoldsEntry },
+                            detailsSlot = !showcase,
+                        )
+                    }
+                } else if (continueWatching.isNotEmpty()) {
+                    item("continue-watching") {
+                        TvContinueWatchingRow(
+                            items = continueWatching,
+                            upNextByKey = upNextByKey,
+                            onMedia = onMedia,
+                            onFocused = { focusedCandidate = it; onFocused(it) },
+                            restoreMediaKey = restoreMediaKey,
+                            onFocusRestored = onFocusRestored,
+                        )
+                    }
                 }
-            } else if (homeLoading) {
-                // Keep the hero slot present (and focusable) while the first
-                // catalog window loads, so D-pad Down from the top navigation
-                // always has a focus target inside the content area.
-                item("hero") {
-                    TvHeroLoadingSkeleton(
-                        modifier = Modifier
-                            .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
-                            .focusRequester(initialFocusRequester),
-                    )
+                if (
+                    !state.initialContentLoading &&
+                    !state.homeCatalogBatch.loadingMore &&
+                    !state.homeCatalogBatch.loadMoreFailed &&
+                    !state.homeCatalogBatch.hasMore &&
+                    sections.isEmpty()
+                ) {
+                    item("empty") {
+                        Column(
+                            modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            TvEmptyMark()
+                            Text(
+                                stringResource(
+                                    when (catalogType) {
+                                        null -> R.string.install_first_addon
+                                        "series" -> R.string.no_series_catalogs
+                                        else -> R.string.no_movie_catalogs
+                                    },
+                                ),
+                                style = MaterialTheme.typography.headlineSmall,
+                            )
+                            Text(
+                                stringResource(R.string.install_addon_explanation),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            TvAction(
+                                label = stringResource(R.string.install_addon),
+                                icon = Icons.Outlined.Add,
+                                modifier = Modifier.focusRequester(initialFocusRequester),
+                                onClick = onAddSource,
+                            )
+                        }
+                    }
                 }
-            }
-            if (continueWatching.isNotEmpty() && spotlight) {
-                item("continue-watching") {
-                    TvSpotlightContinueWatchingRow(
-                        items = continueWatching,
-                        upNextByKey = upNextByKey,
-                        contentHasFocus = contentHasFocus,
-                        onMedia = onMedia,
-                        onFocused = onFocused,
-                        restoreMediaKey = restoreMediaKey,
-                        onFocusRestored = onFocusRestored,
-                        firstItemFocusRequester = initialFocusRequester,
-                    )
-                }
-            } else if (continueWatching.isNotEmpty()) {
-                item("continue-watching") {
-                    TvContinueWatchingRow(
-                        items = continueWatching,
-                        upNextByKey = upNextByKey,
+                items(visibleHomeSections, key = CatalogSection::id) { section ->
+                    if (spotlight) {
+                        val leadsHome = !heroHoldsEntry &&
+                            continueWatching.isEmpty() &&
+                            section.id == visibleHomeSections.first().id
+                        TvSpotlightRow(
+                            section = section,
+                            contentHasFocus = contentHasFocus,
+                            onMedia = onMedia,
+                            onFocused = rowFocused,
+                            onLoadMore = { onLoadMore(section.id) },
+                            onRetry = { onRetry(section.id) },
+                            restoreMediaKey = restoreMediaKey,
+                            onFocusRestored = onFocusRestored,
+                            firstItemFocusRequester = initialFocusRequester.takeIf { leadsHome },
+                            detailsSlot = !showcase,
+                        )
+                        return@items
+                    }
+                    TvCatalogRow(
+                        section = section,
                         onMedia = onMedia,
                         onFocused = { focusedCandidate = it; onFocused(it) },
-                        restoreMediaKey = restoreMediaKey,
-                        onFocusRestored = onFocusRestored,
-                    )
-                }
-            }
-            if (
-                !state.initialContentLoading &&
-                !state.homeCatalogBatch.loadingMore &&
-                !state.homeCatalogBatch.loadMoreFailed &&
-                !state.homeCatalogBatch.hasMore &&
-                sections.isEmpty()
-            ) {
-                item("empty") {
-                    Column(
-                        modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        TvEmptyMark()
-                        Text(
-                            stringResource(
-                                when (catalogType) {
-                                    null -> R.string.install_first_addon
-                                    "series" -> R.string.no_series_catalogs
-                                    else -> R.string.no_movie_catalogs
-                                },
-                            ),
-                            style = MaterialTheme.typography.headlineSmall,
-                        )
-                        Text(
-                            stringResource(R.string.install_addon_explanation),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        TvAction(
-                            label = stringResource(R.string.install_addon),
-                            icon = Icons.Outlined.Add,
-                            modifier = Modifier.focusRequester(initialFocusRequester),
-                            onClick = onAddSource,
-                        )
-                    }
-                }
-            }
-            items(visibleHomeSections, key = CatalogSection::id) { section ->
-                if (spotlight) {
-                    val leadsHome = continueWatching.isEmpty() && section.id == visibleHomeSections.first().id
-                    TvSpotlightRow(
-                        section = section,
-                        contentHasFocus = contentHasFocus,
-                        onMedia = onMedia,
-                        onFocused = onFocused,
                         onLoadMore = { onLoadMore(section.id) },
                         onRetry = { onRetry(section.id) },
                         restoreMediaKey = restoreMediaKey,
                         onFocusRestored = onFocusRestored,
-                        firstItemFocusRequester = initialFocusRequester.takeIf { leadsHome },
-                    )
-                    return@items
-                }
-                TvCatalogRow(
-                    section = section,
-                    onMedia = onMedia,
-                    onFocused = { focusedCandidate = it; onFocused(it) },
-                    onLoadMore = { onLoadMore(section.id) },
-                    onRetry = { onRetry(section.id) },
-                    restoreMediaKey = restoreMediaKey,
-                    onFocusRestored = onFocusRestored,
-                )
-            }
-            when {
-                state.homeCatalogBatch.loadMoreFailed -> item("home-catalog-retry") {
-                    TvAction(
-                        label = stringResource(R.string.retry),
-                        icon = Icons.Outlined.Refresh,
-                        modifier = Modifier.focusRequester(initialFocusRequester),
-                        onClick = onRetryHome,
                     )
                 }
-                state.homeCatalogBatch.loadingMore && state.sections.none(CatalogSection::initialLoading) -> {
-                    item("home-catalog-loading") {
-                        TvHomeCatalogLoadingSkeleton()
+                when {
+                    state.homeCatalogBatch.loadMoreFailed -> item("home-catalog-retry") {
+                        TvAction(
+                            label = stringResource(R.string.retry),
+                            icon = Icons.Outlined.Refresh,
+                            modifier = Modifier.focusRequester(initialFocusRequester),
+                            onClick = onRetryHome,
+                        )
+                    }
+                    state.homeCatalogBatch.loadingMore && state.sections.none(CatalogSection::initialLoading) -> {
+                        item("home-catalog-loading") {
+                            TvHomeCatalogLoadingSkeleton()
+                        }
                     }
                 }
             }
@@ -4117,6 +4179,17 @@ private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
 
 @Composable
 private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
+    var layoutPickerOpen by rememberSaveable { mutableStateOf(false) }
+    if (layoutPickerOpen) {
+        TvHomeLayoutPicker(
+            current = state.tvHomeLayout,
+            onSelect = { layout ->
+                viewModel.setTvHomeLayout(layout)
+                layoutPickerOpen = false
+            },
+            onDismiss = { layoutPickerOpen = false },
+        )
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -4150,16 +4223,12 @@ private fun TvAppearanceSettings(state: AppUiState, viewModel: AppViewModel) {
             )
         }
         item {
-            val spotlight = state.tvHomeLayout == TvHomeLayout.SPOTLIGHT
+            // TV-CNT-07: opens the picker with a live preview of each layout.
             TvSettingsChoiceRow(
                 title = stringResource(R.string.home_layout),
-                description = stringResource(
-                    if (spotlight) R.string.home_layout_spotlight_description else R.string.home_layout_classic_description,
-                ),
-                value = stringResource(if (spotlight) R.string.home_layout_spotlight else R.string.home_layout_classic),
-                onClick = {
-                    viewModel.setTvHomeLayout(if (spotlight) TvHomeLayout.CLASSIC else TvHomeLayout.SPOTLIGHT)
-                },
+                description = stringResource(state.tvHomeLayout.descriptionRes()),
+                value = stringResource(state.tvHomeLayout.labelRes()),
+                onClick = { layoutPickerOpen = true },
             )
         }
         item {

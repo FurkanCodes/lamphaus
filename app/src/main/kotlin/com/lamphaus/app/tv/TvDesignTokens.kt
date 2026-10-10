@@ -34,6 +34,34 @@ internal object TvLayoutTokens {
 }
 
 /**
+ * Showcase Home (TV-CNT-05), measured from the top of the screen so the
+ * focused row sits in the same place under either navigation placement.
+ */
+internal object TvShowcaseTokens {
+    val detailsTopWithRail = 44.dp
+    val detailsTopWithTopBar = 80.dp
+    val rowsTopWithRail = 218.dp
+    val rowsTopWithTopBar = 236.dp
+    val detailsWidth = 460.dp
+    val logoWidth = 300.dp
+    val logoHeight = 64.dp
+    val rowSpacing = 24.dp
+}
+
+/** The Home layout picker (TV-CNT-07): a list beside a live 16:9 preview. */
+internal object TvLayoutPickerTokens {
+    val dialogWidth = 768.dp
+    val listWidth = 248.dp
+    val optionMinHeight = 64.dp
+    val previewWidth = 424.dp
+    val previewHeight = 239.dp
+    val paneSpacing = 32.dp
+    /** Each preview step: focus rests, then moves to its next target. */
+    const val previewStepMillis = 1_100L
+    const val previewMoveMillis = 280
+}
+
+/**
  * Side-rail navigation (TV-NAV-01, TV-LAY-01). The rail sits [start] from the
  * screen edge, inside the usual safe margin, so pages give up only
  * [contentStartOffset] of width.

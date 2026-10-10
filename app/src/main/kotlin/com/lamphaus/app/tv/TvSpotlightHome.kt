@@ -229,7 +229,7 @@ internal fun spotlightMetaParts(
 }
 
 @Composable
-private fun MediaPreview.spotlightMetaText(): String {
+internal fun MediaPreview.spotlightMetaText(): String {
     val typeLabel = when (type) {
         MediaType.MOVIE -> stringResource(R.string.media_type_movie)
         MediaType.SERIES -> stringResource(R.string.media_type_series)
@@ -251,6 +251,8 @@ internal fun TvSpotlightRow(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
+    /** Showcase (TV-CNT-05) describes the title above the row instead. */
+    detailsSlot: Boolean = true,
 ) {
     var focusedMedia by remember { mutableStateOf<MediaPreview?>(null) }
     val prefetchStill = rememberStillPrefetcher()
@@ -261,6 +263,7 @@ internal fun TvSpotlightRow(
         error = section.errorMessage,
         contentHasFocus = contentHasFocus,
         focusedMedia = focusedMedia,
+        detailsSlot = detailsSlot,
     ) {
         if (section.initialLoading && section.items.isEmpty()) {
             TvSpotlightCardsSkeleton()
@@ -330,6 +333,7 @@ internal fun TvSpotlightContinueWatchingRow(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
     firstItemFocusRequester: FocusRequester? = null,
+    detailsSlot: Boolean = true,
 ) {
     var focusedMedia by remember { mutableStateOf<MediaPreview?>(null) }
     val row = rememberTvRowFocus()
@@ -339,6 +343,7 @@ internal fun TvSpotlightContinueWatchingRow(
         error = null,
         contentHasFocus = contentHasFocus,
         focusedMedia = focusedMedia,
+        detailsSlot = detailsSlot,
     ) {
         SpotlightRowScrolling {
             LazyRow(
@@ -359,7 +364,7 @@ internal fun TvSpotlightContinueWatchingRow(
                         modifier = Modifier
                             .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
                             .tvRowItem(row, index)
-                                .homeEntry(index, firstItemFocusRequester),
+                            .homeEntry(index, firstItemFocusRequester),
                     )
                 }
             }
@@ -422,6 +427,7 @@ private fun TvSpotlightRowFrame(
     error: String?,
     contentHasFocus: Boolean,
     focusedMedia: MediaPreview?,
+    detailsSlot: Boolean = true,
     cards: @Composable () -> Unit,
 ) {
     var rowHasFocus by remember { mutableStateOf(false) }
@@ -475,16 +481,18 @@ private fun TvSpotlightRowFrame(
         }
         Spacer(Modifier.height(8.dp))
         cards()
-        Spacer(Modifier.height(SpotlightDetailsGap))
-        Box(
-            modifier = Modifier
-                .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
-                .widthIn(max = SpotlightDetailsMaxWidth)
-                .fillMaxWidth()
-                .height(SpotlightDetailsHeight),
-        ) {
-            if (rowHasFocus && focusedMedia != null) {
-                TvSpotlightDetails(focusedMedia)
+        if (detailsSlot) {
+            Spacer(Modifier.height(SpotlightDetailsGap))
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = TvLayoutTokens.screenHorizontalPadding)
+                    .widthIn(max = SpotlightDetailsMaxWidth)
+                    .fillMaxWidth()
+                    .height(SpotlightDetailsHeight),
+            ) {
+                if (rowHasFocus && focusedMedia != null) {
+                    TvSpotlightDetails(focusedMedia)
+                }
             }
         }
     }

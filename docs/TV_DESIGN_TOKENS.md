@@ -14,6 +14,10 @@ The production source of truth is `TvDesignTokens.kt` plus `TvTheme.kt`. Values 
 | Poster | 153×231dp |
 | Landscape fallback | 256×144dp |
 | Hero | 844×320dp at reference width |
+| Spotlight focused card | 411×231dp |
+| Showcase details | 460dp wide, 300×64dp logo box; 44dp from the top with the side rail, 80dp with the top bar |
+| Showcase focused row header | 218dp from the top with the side rail, 236dp with the top bar; rows 24dp apart |
+| Home layout picker | 768dp dialog, 248dp list, 424×239dp preview, 32dp between them |
 | Settings menu | 268dp |
 | Settings content | 452dp |
 | Side rail item | 40×40dp, 8dp apart, 20dp icon |
@@ -37,6 +41,8 @@ The production source of truth is `TvDesignTokens.kt` plus `TvTheme.kt`. Values 
 | Focus response | 160ms |
 | Delayed hero update | 240ms |
 | Hero transition | 220ms crossfade with 1–1.25% horizontal drift |
+| Showcase backdrop and details | follow focus after 240ms, 220ms crossfade |
+| Layout picker preview | a step every 1.1s, eased over 280ms; still with remove animations |
 | Library confirmation | 110ms out + 110ms return |
 | Side rail | opens on a spring (damping 0.82), labels staggered 5% of the opening apart; closes in 180ms; beam slides on Select |
 | Boot sequence | every launch: 1.9s intro, then a 620ms reveal from the lamp once Home is usable and frames are smooth; hold ≤3.5s; any key skips; off with remove animations (`TvBootTokens`) |

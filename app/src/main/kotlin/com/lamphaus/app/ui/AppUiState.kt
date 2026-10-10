@@ -180,13 +180,24 @@ data class HomeCatalogBatchState(
     val pendingRowCount: Int = 0,
 )
 
-/** TV Home layouts (TV-CNT-01, TV-CNT-03). */
-enum class TvHomeLayout {
+/** TV Home layouts (TV-CNT-01, TV-CNT-03, TV-CNT-05, TV-CNT-06). */
+enum class TvHomeLayout(
+    /** A featured hero leads the page. */
+    val hasHero: Boolean,
+    /** Rows pin to the top and the focused poster widens into its still. */
+    val widensCards: Boolean,
+) {
     /** A featured hero followed by poster rows. */
-    CLASSIC,
+    CLASSIC(hasHero = true, widensCards = false),
 
     /** No hero; the focused title widens in its row and its details appear below it. The default. */
-    SPOTLIGHT,
+    SPOTLIGHT(hasHero = false, widensCards = true),
+
+    /** The focused title's backdrop and details fill the top; its row stays below and widens it. */
+    SHOWCASE(hasHero = false, widensCards = true),
+
+    /** The Classic hero, then Spotlight rows. */
+    MARQUEE(hasHero = true, widensCards = true),
     ;
 
     companion object {

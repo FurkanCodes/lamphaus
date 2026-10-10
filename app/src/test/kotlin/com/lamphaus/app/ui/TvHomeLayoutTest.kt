@@ -9,7 +9,17 @@ class TvHomeLayoutTest {
         assertEquals(TvHomeLayout.SPOTLIGHT, TvHomeLayout.fromName(null))
         assertEquals(TvHomeLayout.SPOTLIGHT, TvHomeLayout.fromName("GRID"))
         assertEquals(TvHomeLayout.CLASSIC, TvHomeLayout.fromName("CLASSIC"))
+        assertEquals(TvHomeLayout.SHOWCASE, TvHomeLayout.fromName("SHOWCASE"))
+        assertEquals(TvHomeLayout.MARQUEE, TvHomeLayout.fromName("MARQUEE"))
         assertEquals(TvHomeLayout.SPOTLIGHT, AppUiState().tvHomeLayout)
+    }
+
+    @Test
+    fun `TV-CNT-05 TV-CNT-06 the new layouts combine the hero and the widening card`() {
+        assertEquals(true to false, TvHomeLayout.CLASSIC.hasHero to TvHomeLayout.CLASSIC.widensCards)
+        assertEquals(false to true, TvHomeLayout.SPOTLIGHT.hasHero to TvHomeLayout.SPOTLIGHT.widensCards)
+        assertEquals(false to true, TvHomeLayout.SHOWCASE.hasHero to TvHomeLayout.SHOWCASE.widensCards)
+        assertEquals(true to true, TvHomeLayout.MARQUEE.hasHero to TvHomeLayout.MARQUEE.widensCards)
     }
 
     @Test
