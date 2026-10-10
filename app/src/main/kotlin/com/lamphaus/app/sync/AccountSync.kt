@@ -163,7 +163,9 @@ class AccountSync(
         lastSucceededAt = elapsedMillis()
         CloudLog.d(
             "sync.pull ${reason.name.lowercase()} full=${changes.full} profiles=${changes.profiles.size} " +
-                "library=${changes.library.size} progress=${changes.progress.size} removed=${changes.deletions.size}",
+                "library=${changes.library.size} progress=${changes.progress.size} " +
+                "artwork=${changes.artworkOverrides.size}${if (changes.artworkOverridesComplete) " (all)" else ""} " +
+                "removed=${changes.deletions.size}",
         )
         return Outcome(changes.profileCount).also { lastOutcome = userId to it }
     }

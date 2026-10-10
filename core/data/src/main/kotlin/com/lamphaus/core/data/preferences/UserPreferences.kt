@@ -237,6 +237,15 @@ class UserPreferences(private val context: Context) {
         context.dataStore.edit { it[SYNC_CURSOR] = "$userId$SYNC_CURSOR_SEPARATOR$cursor" }
     }
 
+    /** The account whose profiles, library, and history this device holds (SHR-PROD-06). */
+    suspend fun localDataOwner(): String? = context.dataStore.data.first()[LOCAL_DATA_OWNER]
+
+    suspend fun setLocalDataOwner(userId: String?) {
+        context.dataStore.edit { values ->
+            if (userId == null) values.remove(LOCAL_DATA_OWNER) else values[LOCAL_DATA_OWNER] = userId
+        }
+    }
+
     suspend fun setTheme(theme: ThemePreference) {
         context.dataStore.edit {
             it[THEME] = theme.name
@@ -565,6 +574,7 @@ class UserPreferences(private val context: Context) {
         val ACTIVE_PROFILE = stringPreferencesKey("active_profile")
         val PAIRING_DEVICE_ID = stringPreferencesKey("pairing_device_id")
         val SYNC_CURSOR = stringPreferencesKey("sync_cursor")
+        val LOCAL_DATA_OWNER = stringPreferencesKey("local_data_owner")
         const val SYNC_CURSOR_SEPARATOR = '|'
         val THEME = stringPreferencesKey("theme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")

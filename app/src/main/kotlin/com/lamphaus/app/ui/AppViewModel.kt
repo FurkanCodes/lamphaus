@@ -222,7 +222,15 @@ class AppViewModel(
                     playbackSettings = settings.playback,
                     devicePlaybackConfig = settings.devicePlayback,
                 )
-            }.collectLatest { snapshot ->
+            }.collectLatest { latest ->
+                // Another account's leftovers are cleared before this one syncs;
+                // the cleared rows re-emit, so this pass carries on without them.
+                val account = latest.account
+                val snapshot = if (account is AccountState.SignedIn && claimLocalData(account.userId, latest.providers)) {
+                    latest.copy(profiles = emptyList(), providers = emptyList())
+                } else {
+                    latest
+                }
                 val activeId = snapshot.activeProfileId?.takeIf { id -> snapshot.profiles.any { it.id == id } }
                     ?: snapshot.profiles.firstOrNull()?.id
                 var leftAnAccount = false
@@ -330,27 +338,17 @@ class AppViewModel(
                         screenSyncJob = null
                     }
                     if (leftAnAccount) {
-                        // Waits for a running pull, then forgets the account's
-                        // cursor-bound state and this installation's push token.
-                        container.accountSync.forgetAccount()
-                        // Leaving an account must leave nothing behind. Room rows
-                        // used to survive sign-out/unpair, so the next sign-in
-                        // showed stale local profiles UNION the account's real
-                        // cloud ones ("why do I see more than 2 profiles?") — and
-                        // synced settings would leak into a successor account too.
-                        // Everything re-arrives from the cloud on next sign-in.
-                        container.libraryRepository.clearLocalAccountData()
-                        container.preferences.clearSyncedSettings()
-                        container.streamBadgeRepository.remove()
-                        container.preferences.clearPersonalHistory()
-                        container.viewingLogRepository.clear()
-                        // Provider metadata is scoped to the previous account's
-                        // configuration/auth; drop it with the rows (PERF-04).
-                        snapshot.providers.forEach { container.providerClient.invalidateProvider(it.manifestUrl) }
-                        // The device binding belongs to the previous account.
-                        // Keeping it would re-bind this TV's row to the next
-                        // account's session and fail permanently (P1-6).
-                        container.preferences.setPairingDeviceId(null)
+                        withContext(NonCancellable) {
+                            // Waits for a running pull, then forgets the account's
+                            // cursor-bound state and this installation's push token.
+                            container.accountSync.forgetAccount()
+                            forgetLocalAccountData(snapshot.providers)
+                            // The device binding belongs to the previous account.
+                            // Keeping it would re-bind this TV's row to the next
+                            // account's session and fail permanently (P1-6).
+                            container.preferences.setPairingDeviceId(null)
+                            container.preferences.setLocalDataOwner(null)
+                        }
                     }
                 }
                 refreshCatalogs()
@@ -2057,6 +2055,7 @@ class AppViewModel(
             container.viewingLogRepository.clear()
             container.preferences.setActiveProfile(null)
             container.preferences.setPairingDeviceId(null)
+            container.preferences.setLocalDataOwner(null)
             devicesLoadedOnce = false
             mutableState.update(AppUiState::clearAccountData)
             showMessage("Your account and all cloud data were deleted.")
@@ -2958,6 +2957,43 @@ class AppViewModel(
             }
             startScreenSync(userId, pullNow = false)
         }
+    }
+
+    /**
+     * Leaving an account must leave nothing behind. Room rows used to survive
+     * sign-out/unpair, so the next sign-in showed stale local profiles UNION the
+     * account's real cloud ones ("why do I see more than 2 profiles?") — and
+     * synced settings would leak into a successor account too. Everything
+     * re-arrives from the cloud on the next sign-in.
+     */
+    private suspend fun forgetLocalAccountData(providers: List<ProviderSubscription>) {
+        container.libraryRepository.clearLocalAccountData()
+        container.preferences.clearSyncedSettings()
+        container.streamBadgeRepository.remove()
+        container.preferences.clearPersonalHistory()
+        container.viewingLogRepository.clear()
+        // Provider metadata is scoped to the previous account's
+        // configuration/auth; drop it with the rows (PERF-04).
+        providers.forEach { container.providerClient.invalidateProvider(it.manifestUrl) }
+    }
+
+    /**
+     * Makes sure the device's own data belongs to [userId] before it syncs;
+     * true when another account's data was cleared (SHR-PROD-06). Runs to
+     * completion even when a newer account state arrives, so a clear is never
+     * left half done. The TV's pairing binding is the new account's and stays.
+     */
+    private suspend fun claimLocalData(userId: String, providers: List<ProviderSubscription>): Boolean {
+        val claim = localDataClaim(container.preferences.localDataOwner(), userId)
+        if (claim == LocalDataClaim.KEEP) return false
+        withContext(NonCancellable) {
+            if (claim == LocalDataClaim.WIPE) {
+                CloudLog.i("account.local data belonged to another account — cleared before sync")
+                forgetLocalAccountData(providers)
+            }
+            container.preferences.setLocalDataOwner(userId)
+        }
+        return claim == LocalDataClaim.WIPE
     }
 
     /** An account without profiles gets this device's, or its first one. */
