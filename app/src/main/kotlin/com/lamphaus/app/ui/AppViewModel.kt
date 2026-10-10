@@ -8,8 +8,6 @@ import androidx.lifecycle.viewModelScope
 import com.lamphaus.app.BuildConfig
 import com.lamphaus.app.AppContainer
 import com.lamphaus.app.FixtureProviderClient
-import com.lamphaus.core.data.repository.reconcileLibrary
-import com.lamphaus.core.data.repository.reconcileProgress
 import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.cloud.CloudLog
@@ -19,8 +17,8 @@ import com.lamphaus.core.data.cloud.ArtworkKeysNotConfiguredException
 import com.lamphaus.core.data.cloud.IntegrationInvalidCredentialException
 import com.lamphaus.core.model.AddonSubtitleLookup
 import com.lamphaus.core.model.IntegrationStatus
+import com.lamphaus.app.sync.AccountSync
 import com.lamphaus.core.data.preferences.SyncedSettings
-import com.lamphaus.core.data.preferences.SyncedStreamBadges
 import com.lamphaus.core.data.preferences.ThemePreference
 import com.lamphaus.core.model.SpoilerProtectionSettings
 import com.lamphaus.core.model.ArtworkAsset
@@ -98,7 +96,6 @@ import kotlinx.coroutines.isActive
 
 private const val CONTENT_RESOLVE_TIMEOUT_MILLIS = 15_000L
 private const val SEARCH_MANIFEST_TIMEOUT_MILLIS = 4_000L
-private const val CLOUD_SYNC_LOG_TAG = "Lamphaus.Sync"
 private val DEVICE_BINDING_BACKOFF_MILLIS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L)
 private const val ARTWORK_KEYS_NOT_CONFIGURED_MESSAGE =
     "Artwork keys aren't configured. Add a provider key in Settings > Integrations."
@@ -156,6 +153,9 @@ class AppViewModel(
 
     private var cloudSyncJob: Job? = null
     private var cloudSyncUserId: String? = null
+    /** Sync work that runs only while a screen shows (push-to-pull sync). */
+    private var screenSyncJob: Job? = null
+    private var screenStarted = false
     private var builtInAddonsJob: Job? = null
     private var searchJob: Job? = null
     private var browseJob: Job? = null
@@ -320,14 +320,19 @@ class AppViewModel(
                     refreshJob = null
                     catalogRefreshGate.reset()
                     if (cloudSyncUserId != null) {
-                        // Sign-out / deletion must retire the collectors bound to
-                        // the previous user's realtime channels — before any
-                        // local wipe, or surviving collectors would resurrect rows.
+                        // Sign-out / deletion must retire the previous user's sync
+                        // work before any local wipe, or a late pull would
+                        // resurrect rows.
                         cloudSyncJob?.cancel()
                         cloudSyncJob = null
                         cloudSyncUserId = null
+                        screenSyncJob?.cancel()
+                        screenSyncJob = null
                     }
                     if (leftAnAccount) {
+                        // Waits for a running pull, then forgets the account's
+                        // cursor-bound state and this installation's push token.
+                        container.accountSync.forgetAccount()
                         // Leaving an account must leave nothing behind. Room rows
                         // used to survive sign-out/unpair, so the next sign-in
                         // showed stale local profiles UNION the account's real
@@ -378,8 +383,8 @@ class AppViewModel(
             }
                 .distinctUntilChanged()
                 .flatMapLatest { binding ->
-                    binding?.let { (userId, profileId) ->
-                        container.cloudSyncGateway.artworkOverrides(userId, profileId)
+                    binding?.let { (_, profileId) ->
+                        container.accountSync.artworkOverrides(profileId)
                     } ?: flowOf(emptyList())
                 }
                 .collectLatest { overrides ->
@@ -1595,6 +1600,7 @@ class AppViewModel(
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
         container.cloudSyncGateway.saveArtworkOverride(userId, override)
             .onSuccess {
+                container.accountSync.rememberArtworkOverride(override)
                 mutableState.update { current ->
                     current.copy(
                         artworkOverrides = (current.artworkOverrides.filterNot { it.mediaKey == override.mediaKey } + override),
@@ -2893,92 +2899,26 @@ class AppViewModel(
             provider.sortOrder >= 0 && provider.id != DEVELOPMENT_SOURCE_ID
         }
 
-    /**
-     * Settings follow the account. Inbound rows win only when newer than the
-     * last local mutation (LWW); an absent row gets seeded from local values.
-     * Applies never re-push, so realtime echoes cannot loop.
-     */
-    private suspend fun syncSettings(userId: String) {
-        container.cloudSyncGateway.settings(userId).collect { remote ->
-            val local = container.preferences.current()
-            when {
-                remote == null -> container.cloudSyncGateway.saveSettings(userId, localSyncedSettings())
-                    .onFailure { error -> CloudLog.w("settings.seed failed — staying local", error) }
-
-                remote.updatedAtEpochMillis > local.updatedAtEpochMillis -> {
-                    container.preferences.applyRemoteSettings(remote)
-                    applyRemoteStreamBadges(remote.streamBadges)
-                }
-
-                // This device already adopted the row: a badge download that failed then retries.
-                remote.updatedAtEpochMillis == local.updatedAtEpochMillis ->
-                    applyRemoteStreamBadges(remote.streamBadges)
-            }
-            // A row from a version that did not sync badges: this device's import fills it in.
-            if (remote != null && remote.streamBadges == null && container.streamBadgeRepository.sourceUrl() != null) {
-                container.preferences.touchSyncedSettings()
-                pushSyncedSettings()
-            }
-        }
-    }
-
-    /** Adopts the account's badge file; each device downloads it, and a failure keeps the current badges. */
-    private suspend fun applyRemoteStreamBadges(remote: SyncedStreamBadges?) {
-        if (remote == null) return
-        val repository = container.streamBadgeRepository
-        val wanted = remote.sourceUrl
-        if (wanted == repository.sourceUrl()) return
-        if (wanted == null) {
-            repository.remove()
-        } else {
-            repository.import(wanted).onFailure {
-                // The badge address stays out of logs; only the failure kind is recorded.
-                CloudLog.w("streamBadges.apply failed (${it::class.simpleName}) — keeping this device's badges")
-            }
-        }
-    }
-
-    private suspend fun localSyncedSettings(): SyncedSettings {
-        val local = container.preferences.current()
-        return SyncedSettings(
-            theme = local.theme,
-            dynamicColor = local.dynamicColor,
-            kenBurnsEnabled = local.kenBurnsEnabled,
-            diagnostics = local.diagnostics,
-            spoilerProtection = local.spoilerProtection,
-            streamBadges = SyncedStreamBadges(container.streamBadgeRepository.sourceUrl()),
-            updatedAtEpochMillis = local.updatedAtEpochMillis,
-        )
-    }
-
     /** Mirrors a local settings change into the account row. */
     private fun pushSyncedSettings() = viewModelScope.launch {
         val userId = (state.value.account as? AccountState.SignedIn)?.userId ?: return@launch
-        container.cloudSyncGateway.saveSettings(userId, localSyncedSettings())
-            .onFailure { error -> CloudLog.w("settings.push failed — converges next session", error) }
+        container.accountSync.pushSettings(userId)
     }
 
     private fun startCloudSync(userId: String) {
         if (!BuildConfig.CLOUD_CONFIGURED) return
-        // A live job belongs to exactly one user. After sign-out → sign-in
-        // (or a deleted account's successor) a surviving job would still be
-        // bound to the old uid's channels and silently swallow the new
-        // user's sync — including empty-cloud seeding — leaving profiles
-        // unwritten. Restart whenever the identity changes.
-        if (cloudSyncJob?.isActive == true && cloudSyncUserId == userId) return
+        // One sync session per signed-in identity. Its startup work finishes
+        // (later pulls come from screens and signals), so a finished job
+        // must not restart it: every account-state emission would rerun it,
+        // and re-saving add-ons emits again. After sign-out → sign-in (or a
+        // deleted account's successor) the identity differs, so a new
+        // session starts for the new user, including empty-cloud seeding.
+        if (cloudSyncUserId == userId) return
         cloudSyncJob?.cancel()
         cloudSyncUserId = userId
         cloudSyncJob = viewModelScope.launch {
             launch {
-                container.cloudSyncGateway.profiles(userId).collect { cloudProfiles ->
-                    cloudProfiles.forEach { container.libraryRepository.saveProfile(it, null) }
-                }
-            }
-            launch {
                 syncProviders(userId)
-            }
-            launch {
-                syncSettings(userId)
             }
             // Which of the viewer's own keys are saved decides key-backed UI
             // such as tappable cast. Quiet: Settings reports failures itself.
@@ -2995,79 +2935,100 @@ class AppViewModel(
                     }
                 }
             }
-            // One cloud probe decides how the account boots on this device:
-            // non-empty → the collector above adopts those rows and nothing is
-            // minted locally; empty → seed from local data, or — when this
-            // device has nothing either — create the account's first profile.
-            // (Creation used to run before this probe on every clean sign-in,
-            // so a freshly paired TV minted a duplicate "Home" alongside the
-            // account's real profiles.)
             launch {
-                val cloudProfiles = container.cloudSyncGateway.profiles(userId).first()
-                if (cloudProfiles.isNotEmpty()) return@launch
-                // Legacy local installs may hold placeholder ids (e.g. "primary")
-                // that cannot exist in Postgres; keep them out of cloud sync.
-                val localProfiles = container.libraryRepository.profiles().first()
-                    .filter { isCloudBackedId(it.id) }
-                if (localProfiles.isEmpty()) {
-                    createInitialProfile()
-                    return@launch
+                // The first pull decides how the account boots on this device,
+                // so it retries until it lands (a failure is never an empty
+                // account): non-empty → its rows are adopted and nothing is
+                // minted locally; empty → seed from local data, or — when this
+                // device has nothing either — create the account's first
+                // profile. (Creation used to run before this probe on every
+                // clean sign-in, so a freshly paired TV minted a duplicate
+                // "Home" alongside the account's real profiles.)
+                var attempt = 0
+                var outcome: AccountSync.Outcome? = null
+                while (outcome == null) {
+                    outcome = container.accountSync.pull(userId, AccountSync.Reason.SIGN_IN)
+                    if (outcome == null) delay(((++attempt).coerceAtMost(30)) * 1_000L)
                 }
-                localProfiles.forEach { profile ->
-                    container.cloudSyncGateway.saveProfile(userId, profile)
-                }
-                localProfiles.forEach { profile ->
-                    container.libraryRepository.library(profile.id).first()
-                        .forEach { container.cloudSyncGateway.saveLibrary(userId, it) }
-                    container.libraryRepository.progress(profile.id).first()
-                        .forEach { container.cloudSyncGateway.saveProgress(userId, it) }
-                }
+                if (outcome.profileCount == 0) seedEmptyAccount(userId)
+                // Where other devices' changes reach this one: a push, or the
+                // live signal while on screen. Registered every session, so an
+                // installation in use never ages out of the account.
+                container.accountSync.registerSignals(userId)
             }
-            launch {
-                watchProfileChannels(userId)
-            }
+            startScreenSync(userId, pullNow = false)
         }
     }
 
+    /** An account without profiles gets this device's, or its first one. */
+    private suspend fun seedEmptyAccount(userId: String) {
+        // Legacy local installs may hold placeholder ids (e.g. "primary")
+        // that cannot exist in Postgres; keep them out of cloud sync.
+        val localProfiles = container.libraryRepository.profiles().first()
+            .filter { isCloudBackedId(it.id) }
+        if (localProfiles.isEmpty()) {
+            createInitialProfile()
+            return
+        }
+        localProfiles.forEach { profile ->
+            container.cloudSyncGateway.saveProfile(userId, profile)
+        }
+        localProfiles.forEach { profile ->
+            container.libraryRepository.library(profile.id).first()
+                .forEach { container.cloudSyncGateway.saveLibrary(userId, it) }
+            container.libraryRepository.progress(profile.id).first()
+                .forEach { container.cloudSyncGateway.saveProgress(userId, it) }
+        }
+    }
+
+    /** A screen started: catch up, and listen for changes while it shows. */
+    fun onScreenStarted() {
+        screenStarted = true
+        cloudSyncUserId?.let { startScreenSync(it, pullNow = true) }
+    }
+
+    /** No screen shows: playback, another app, or the screen is off. */
+    fun onScreenStopped() {
+        screenStarted = false
+        screenSyncJob?.cancel()
+        screenSyncJob = null
+    }
+
+    /** Catches up after something covered the page, such as the TV ambient. */
+    fun refreshCloudSync() {
+        val userId = cloudSyncUserId ?: return
+        viewModelScope.launch { container.accountSync.pull(userId, AccountSync.Reason.SCREEN) }
+    }
 
     /**
-     * Live library+progress channels for every cloud-backed profile. Follows
-     * profile creation/removal mid-session — capturing the list once at
-     * sign-in left late-created profiles deaf to other devices until relaunch.
+     * While a screen shows: catch up when the network returns, and — on a
+     * device without push — listen for the account's live signal. Nothing
+     * holds a connection while the app is in the background or playing.
      */
-    private fun CoroutineScope.watchProfileChannels(userId: String): Job = launch {
-        val channels = mutableMapOf<String, Job>()
-        container.libraryRepository.profiles()
-            .map { profiles -> profiles.map(Profile::id).filter(::isCloudBackedId).sorted() }
-            .distinctUntilChanged()
-            .collect { profileIds ->
-                profileIds.forEach { id -> channels.getOrPut(id) { launchProfileChannels(userId, id) } }
-                channels.keys.toList().forEach { id ->
-                    if (id !in profileIds) channels.remove(id)?.cancel()
+    private fun startScreenSync(userId: String, pullNow: Boolean) {
+        screenSyncJob?.cancel()
+        screenSyncJob = null
+        if (!screenStarted) return
+        screenSyncJob = viewModelScope.launch {
+            if (pullNow) launch { container.accountSync.pull(userId, AccountSync.Reason.SCREEN) }
+            launch {
+                container.networkReturns.collect {
+                    container.accountSync.pull(userId, AccountSync.Reason.NETWORK)
                 }
             }
-    }
-
-    private fun CoroutineScope.launchProfileChannels(userId: String, profileId: String): Job = launch {
-        launch {
-            container.cloudSyncGateway.library(userId, profileId)
-                .retryWhen { throwable, attempt ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(CLOUD_SYNC_LOG_TAG, "Library sync round failed; keeping local rows", throwable)
-                    delay(((attempt + 1).coerceAtMost(30)) * 1_000L)
-                    true
+            launch {
+                container.accountSync.signalMode.collectLatest { mode ->
+                    if (mode != AccountSync.SignalMode.LIVE) return@collectLatest
+                    container.accountSync.liveSignals(userId)
+                        .retryWhen { throwable, attempt ->
+                            if (throwable is CancellationException) throw throwable
+                            CloudLog.w("sync.live signal lost; reconnecting", throwable)
+                            delay(((attempt + 1).coerceAtMost(30)) * 1_000L)
+                            true
+                        }
+                        .collect { container.accountSync.pull(userId, AccountSync.Reason.SIGNAL) }
                 }
-                .collect { entries -> container.libraryRepository.reconcileLibrary(profileId, entries) }
-        }
-        launch {
-            container.cloudSyncGateway.progress(userId, profileId)
-                .retryWhen { throwable, attempt ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(CLOUD_SYNC_LOG_TAG, "Progress sync round failed; keeping local rows", throwable)
-                    delay(((attempt + 1).coerceAtMost(30)) * 1_000L)
-                    true
-                }
-                .collect { progress -> container.libraryRepository.reconcileProgress(profileId, progress) }
+            }
         }
     }
 

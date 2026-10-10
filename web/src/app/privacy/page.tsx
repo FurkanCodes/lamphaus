@@ -23,6 +23,12 @@ export default function PrivacyPage() {
             and a Google account identifier. That's the whole list. If you pair
             a television, we also remember that device so it can stay signed in.
           </p>
+          <p className="mt-3">
+            To tell your other devices that something changed, each signed-in
+            device registers with Google's push service (Firebase Cloud
+            Messaging). The message only says "sync" — never what you watched,
+            saved or changed — and the device then fetches the change from us.
+          </p>
         </section>
         <section>
           <h2>Why we collect it</h2>
@@ -43,7 +49,7 @@ export default function PrivacyPage() {
           <h2>Deleting your data</h2>
           <p>
             Deleting your account removes your profile, library, progress,
-            settings and paired devices from our systems. Unpairing a single TV
+            settings, paired devices and push registrations from our systems. Unpairing a single TV
             revokes only that device.
           </p>
         </section>

@@ -10,6 +10,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -27,6 +29,9 @@ import com.lamphaus.app.isTelevision
 import com.lamphaus.app.mobile.MobileActivity
 import com.lamphaus.app.player.PlayerActivity
 import com.lamphaus.app.player.launchPendingPlayback
+import com.lamphaus.app.sync.SyncWhileShown
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.isSafeExternalUri
 
@@ -92,6 +97,14 @@ class TvActivity : ComponentActivity() {
                     )
                     val state by viewModel.state.collectAsStateWithLifecycle()
                     TvIdleAmbient(state, ambientHost, rememberReducedMotion())
+                    SyncWhileShown(onStarted = viewModel::onScreenStarted, onStopped = viewModel::onScreenStopped)
+                    // Whatever changed elsewhere while the ambient covered the page.
+                    LaunchedEffect(ambientHost) {
+                        snapshotFlow { ambientHost.showing }
+                            .drop(1)
+                            .filter { showing -> !showing }
+                            .collect { viewModel.refreshCloudSync() }
+                    }
                 }
             }
         }

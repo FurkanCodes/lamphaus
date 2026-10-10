@@ -22,11 +22,21 @@ import com.lamphaus.core.data.cloud.LocalCloudSyncGateway
 import com.lamphaus.core.data.cloud.CloudSyncGateway
 import com.lamphaus.core.data.cloud.PairingGateway
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
+import io.ktor.client.plugins.defaultRequest
+import io.ktor.client.request.header
+import com.lamphaus.app.sync.AccountSync
+import com.lamphaus.app.sync.FirebaseSyncPush
+import com.lamphaus.app.sync.PreferenceSettingsSync
+import com.lamphaus.app.sync.PreferenceSyncCursors
+import com.lamphaus.app.sync.networkReturns
+import com.lamphaus.core.data.cloud.AccountState
+import kotlinx.coroutines.flow.Flow
 import com.lamphaus.core.data.local.LamphausDatabase
 import com.lamphaus.core.data.preferences.UserPreferences
 import com.lamphaus.core.data.playback.IntroDbSkipRepository
@@ -92,6 +102,22 @@ class AppContainer(context: Context) {
             context.contentResolver,
             Settings.Secure.ANDROID_ID,
         )?.takeIf { it.length >= 8 }
+
+    /**
+     * This installation's identity for sync signals: a one-way hash of
+     * ANDROID_ID, sent with every cloud request so the account skips
+     * signalling the device that made a change (push-to-pull sync). A device
+     * without ANDROID_ID gets one per process; it then also receives its own
+     * signals, which cost one empty pull.
+     */
+    val syncInstallationId: String = pairingDeviceKey
+        ?.let { key ->
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest("lamphaus-sync:$key".toByteArray())
+                .joinToString("") { "%02x".format(it) }
+                .take(32)
+        }
+        ?: java.util.UUID.randomUUID().toString().replace("-", "")
 
     val preferences = UserPreferences(context)
     val streamBadgeRepository = com.lamphaus.core.data.repository.StreamBadgeRepository(context)
@@ -166,6 +192,12 @@ class AppContainer(context: Context) {
             install(Postgrest)
             install(Realtime)
             install(Functions)
+            // The library's documented hook for custom Ktor configuration,
+            // marked internal only because it reaches the raw HTTP client.
+            @OptIn(SupabaseInternal::class)
+            httpConfig {
+                defaultRequest { header(SYNC_INSTALLATION_HEADER, syncInstallationId) }
+            }
         }
     } else {
         null
@@ -197,6 +229,21 @@ class AppContainer(context: Context) {
         localArtwork = LocalArtworkClient(),
     )
     val cloudSyncGateway: CloudSyncGateway = artworkStorageModeGateway
+
+    /** Push-to-pull account sync; application-scoped so a push can sync with no screen open. */
+    val accountSync = AccountSync(
+        gateway = cloudSyncGateway,
+        libraryRepository = libraryRepository,
+        cursors = PreferenceSyncCursors(preferences),
+        settings = PreferenceSettingsSync(cloudSyncGateway, preferences, streamBadgeRepository),
+        pushTokens = FirebaseSyncPush(context),
+        installationId = syncInstallationId,
+        television = context.isTelevision(),
+        signedInUserId = { (accountGateway.state.value as? AccountState.SignedIn)?.userId },
+    )
+
+    /** Emits when the network returns after a loss; collected only while a screen shows. */
+    val networkReturns: Flow<Unit> = networkReturns(context)
 
     /**
      * Shared JSON instance for enrichment payloads: lenient so provider-shaped
@@ -249,6 +296,11 @@ class AppContainer(context: Context) {
     val updateCoordinator = com.lamphaus.app.update.UpdateCoordinator(
         context, updateRepository, updatePreferences, updateDownloader, updateInstaller,
     )
+    private companion object {
+        /** Read by the database's sync triggers (supabase/migrations/20261010120000_push_to_pull_sync.sql). */
+        const val SYNC_INSTALLATION_HEADER = "x-lamphaus-installation"
+    }
+
     fun openDevelopmentSession() {
         check(BuildConfig.DEBUG) { "Development sessions are disabled in this build." }
         localAccount.openDevelopmentSession()

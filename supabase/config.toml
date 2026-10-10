@@ -395,3 +395,10 @@ verify_jwt = false
 
 [functions.claim-pairing-session]
 verify_jwt = true
+
+# ── Edge Functions — push-to-pull sync ──────────────────────────────────
+# pg_cron calls this without credentials every 30 minutes. It is idempotent,
+# answers without contacting Google while the stored token is fresh, and
+# never returns the token (see supabase/functions/refresh-push-access).
+[functions.refresh-push-access]
+verify_jwt = false

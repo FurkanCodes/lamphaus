@@ -14,12 +14,30 @@ import com.lamphaus.core.model.WatchProgress
 import kotlinx.coroutines.flow.Flow
 
 interface CloudSyncGateway {
-    fun profiles(userId: String): Flow<List<Profile>>
-    fun library(userId: String, profileId: String): Flow<List<LibraryEntry>>
-    fun progress(userId: String, profileId: String): Flow<List<WatchProgress>>
+    /**
+     * Everything the account changed after [since] (push-to-pull sync). A
+     * [since] of 0, or one the cloud can no longer answer incrementally,
+     * returns the whole account with [CloudChanges.full] set.
+     * [allArtworkOverrides] asks for every override even in an incremental pull.
+     */
+    suspend fun pullChanges(userId: String, since: Long, allArtworkOverrides: Boolean): Result<CloudChanges>
 
-    /** Emits the account's settings row, or null while the account has none. */
-    fun settings(userId: String): Flow<SyncedSettings?>
+    /**
+     * Tells the cloud where to signal this installation after another device
+     * changes the account: a Firebase Cloud Messaging [pushToken], or null for
+     * a device that listens to [changeSignals] while on screen instead.
+     */
+    suspend fun registerSyncEndpoint(
+        installationId: String,
+        pushToken: String?,
+        television: Boolean,
+    ): Result<Unit>
+
+    /**
+     * Emits whenever another device changes the account, while collected.
+     * Only devices without push collect it, and only while on screen.
+     */
+    fun changeSignals(userId: String): Flow<Unit>
 
     suspend fun saveProfile(userId: String, profile: Profile): Result<Unit>
     suspend fun saveLibrary(userId: String, entry: LibraryEntry): Result<Unit>
@@ -35,8 +53,6 @@ interface CloudSyncGateway {
     // API keys travel through encrypted server-side storage and are never
     // returned to the client; only provider configuration presence is exposed.
 
-    /** Live profile-scoped artwork overrides keyed by media key upstream. */
-    fun artworkOverrides(userId: String, profileId: String): Flow<List<ArtworkOverride>>
     suspend fun saveArtworkOverride(userId: String, override: ArtworkOverride): Result<Unit>
     suspend fun deleteArtworkOverride(userId: String, profileId: String, mediaKey: String): Result<Unit>
 

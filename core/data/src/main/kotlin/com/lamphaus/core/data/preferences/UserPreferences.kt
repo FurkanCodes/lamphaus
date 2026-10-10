@@ -223,6 +223,20 @@ class UserPreferences(private val context: Context) {
         }
     }
 
+    /**
+     * The account change number this device last pulled (push-to-pull sync),
+     * or 0 when it has none for [userId] and must download the whole account.
+     */
+    suspend fun syncCursor(userId: String): Long {
+        val stored = context.dataStore.data.first()[SYNC_CURSOR] ?: return 0
+        val owner = stored.substringBefore(SYNC_CURSOR_SEPARATOR)
+        return if (owner == userId) stored.substringAfter(SYNC_CURSOR_SEPARATOR).toLongOrNull() ?: 0 else 0
+    }
+
+    suspend fun setSyncCursor(userId: String, cursor: Long) {
+        context.dataStore.edit { it[SYNC_CURSOR] = "$userId$SYNC_CURSOR_SEPARATOR$cursor" }
+    }
+
     suspend fun setTheme(theme: ThemePreference) {
         context.dataStore.edit {
             it[THEME] = theme.name
@@ -526,6 +540,7 @@ class UserPreferences(private val context: Context) {
             it.remove(SPOILER_BLUR_EPISODE_ARTWORK)
             it.remove(SPOILER_BLUR_EPISODE_SYNOPSIS)
             it.remove(SETTINGS_UPDATED)
+            it.remove(SYNC_CURSOR)
         }
     }
 
@@ -549,6 +564,8 @@ class UserPreferences(private val context: Context) {
         val TV_IDLE_AMBIENT_MINUTES = intPreferencesKey("tv_idle_ambient_minutes")
         val ACTIVE_PROFILE = stringPreferencesKey("active_profile")
         val PAIRING_DEVICE_ID = stringPreferencesKey("pairing_device_id")
+        val SYNC_CURSOR = stringPreferencesKey("sync_cursor")
+        const val SYNC_CURSOR_SEPARATOR = '|'
         val THEME = stringPreferencesKey("theme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val KEN_BURNS_ENABLED = booleanPreferencesKey("ken_burns_enabled")

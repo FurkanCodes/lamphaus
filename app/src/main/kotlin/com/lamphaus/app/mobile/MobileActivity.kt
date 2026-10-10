@@ -8,6 +8,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import com.lamphaus.app.sync.SyncWhileShown
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -93,6 +94,7 @@ class MobileActivity : ComponentActivity() {
                 onExternalPlay = ::openExternalPlayback,
                 updateViewModel = updateViewModel,
             )
+            SyncWhileShown(onStarted = viewModel::onScreenStarted, onStopped = viewModel::onScreenStopped)
         }
     }
 

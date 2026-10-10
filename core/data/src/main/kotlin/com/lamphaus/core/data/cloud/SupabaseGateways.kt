@@ -17,7 +17,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -25,6 +27,9 @@ import kotlinx.serialization.json.jsonPrimitive
  * Supabase-backed account state. Mirrors GoTrue session status into [AccountState]
  * and persists sessions across launches through the platform session manager.
  */
+/** Restoring a parked session includes one token refresh. */
+private const val BACKGROUND_SESSION_TIMEOUT_MILLIS = 8_000L
+
 class SupabaseAccountGateway(
     private val supabase: SupabaseClient,
     private val sessionRecovery: SupabaseSessionRecovery,
@@ -104,6 +109,20 @@ class SupabaseAccountGateway(
     }
     override suspend fun signOut() {
         runCatching { supabase.auth.signOut() }
+    }
+
+    override suspend fun restoreSessionForBackgroundWork(): String? {
+        // On leaving the screen the SDK stops refreshing and parks the session
+        // (Initializing) until the next start. A push in between loads the
+        // stored one; the collector above then refreshes it as on any restore.
+        if (supabase.auth.sessionStatus.value is SessionStatus.Initializing) {
+            runCatching { supabase.auth.loadFromStorage(autoRefresh = false) }
+                .onFailure { CloudLog.w("auth.background restore failed", it) }
+        }
+        val settled = withTimeoutOrNull(BACKGROUND_SESSION_TIMEOUT_MILLIS) {
+            state.first { it !is AccountState.Loading }
+        }
+        return (settled as? AccountState.SignedIn)?.userId
     }
 
     private fun UserSession.toAccountState(): AccountState {

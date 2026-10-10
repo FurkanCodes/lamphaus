@@ -19,22 +19,23 @@ import com.lamphaus.core.model.ProfileKind
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.WatchProgress
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.annotations.SupabaseExperimental
 import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
-import io.github.jan.supabase.postgrest.query.filter.FilterOperation
-import io.github.jan.supabase.postgrest.query.filter.FilterOperator
-import io.github.jan.supabase.realtime.selectAsFlow
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.realtime.broadcastFlow
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.realtime
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.EncodeDefault
@@ -55,48 +56,68 @@ internal fun <T> Flow<T>.withSessionRecovery(recovery: SupabaseSessionRecovery):
 }
 
 /**
- * Cloud sync over Supabase Postgrest + Realtime.
+ * Cloud sync over Supabase Postgrest (push-to-pull sync).
  *
- * Reads use [selectAsFlow]: an initial fetch followed by live re-emission on
- * every postgres change, with channel lifecycle handled by the SDK. Writes are
- * last-writer-wins upserts keyed by [updated_at_epoch_millis] columns while Room
+ * Reads are one RPC, pull_sync_changes, returning only what the account
+ * changed after the device's cursor; another device's change arrives as an
+ * empty push or Realtime signal that prompts the next pull. Writes are
+ * last-writer-wins upserts keyed by [updated_at_epoch_millis] columns.
  * Provider configuration travels through catalog-aware Edge Functions because
  * provider_configs has deny-all RLS and never exposes encrypted keys directly.
  */
-@OptIn(SupabaseExperimental::class)
 class SupabaseCloudSyncGateway(
     private val supabase: SupabaseClient,
     private val sessionRecovery: SupabaseSessionRecovery,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : CloudSyncGateway {
 
-    override fun profiles(userId: String): Flow<List<Profile>> =
-        supabase.from(TABLE_PROFILES)
-            .selectAsFlow(ProfileRow::id, filter = FilterOperation("user_id", FilterOperator.EQ, userId))
-            .withSessionRecovery(sessionRecovery)
-            .map { rows -> rows.map { it.toModel() } }
-            .recoverWithEmpty()
-    // Library and progress deliberately do NOT degrade to empty emissions:
-    // realtime consumers reconcile deletions against these rows, and an empty
-    // list from a network failure must never look like an authoritative wipe.
-    // Consumers retry flow errors without reconciling a failed round.
-    override fun library(userId: String, profileId: String): Flow<List<LibraryEntry>> =
-        supabase.from(TABLE_LIBRARY)
-            .selectAsFlow(
-                listOf(LibraryEntryRow::profileId, LibraryEntryRow::mediaKey),
-                filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
-            )
-            .withSessionRecovery(sessionRecovery)
-            .map { rows -> rows.map { it.toModel(json) } }
+    override suspend fun pullChanges(userId: String, since: Long, allArtworkOverrides: Boolean): Result<CloudChanges> =
+        runCatching {
+            sessionRecovery.withAuthRetry {
+                val body = supabase.postgrest.rpc(
+                    FUNCTION_PULL_SYNC_CHANGES,
+                    buildJsonObject {
+                        put("p_since", since)
+                        put("p_all_overrides", allArtworkOverrides)
+                    },
+                ).data
+                decodeCloudChanges(json, body)
+            }
+        }
 
-    override fun progress(userId: String, profileId: String): Flow<List<WatchProgress>> =
-        supabase.from(TABLE_PROGRESS)
-            .selectAsFlow(
-                listOf(WatchProgressRow::profileId, WatchProgressRow::videoId),
-                filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
+    override suspend fun registerSyncEndpoint(
+        installationId: String,
+        pushToken: String?,
+        television: Boolean,
+    ): Result<Unit> = CloudLog.tracedResult("sync.endpoint", if (pushToken == null) "live" else "push") {
+        sessionRecovery.withAuthRetry {
+            supabase.postgrest.rpc(
+                FUNCTION_REGISTER_SYNC_ENDPOINT,
+                buildJsonObject {
+                    put("p_installation_id", installationId)
+                    put("p_token", pushToken)
+                    put("p_platform", if (television) PLATFORM_TV else PLATFORM_PHONE)
+                },
             )
-            .withSessionRecovery(sessionRecovery)
-            .map { rows -> rows.map { it.toModel(json) } }
+        }
+        Unit
+    }
+
+    /**
+     * The account's private Realtime topic. The channel exists only while
+     * collected, and the socket closes once no channel is left.
+     */
+    override fun changeSignals(userId: String): Flow<Unit> = flow {
+        val channel = supabase.channel("$SIGNAL_TOPIC_PREFIX$userId") { isPrivate = true }
+        try {
+            val signals = channel.broadcastFlow<JsonObject>(SIGNAL_EVENT)
+            channel.subscribe()
+            emitAll(signals.map { })
+        } finally {
+            withContext(NonCancellable) { runCatching { supabase.realtime.removeChannel(channel) } }
+        }
+    }
+
     override suspend fun saveProfile(userId: String, profile: Profile): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
             supabase.from(TABLE_PROFILES)
@@ -146,13 +167,6 @@ class SupabaseCloudSyncGateway(
             }
         }
     }
-    override fun settings(userId: String): Flow<SyncedSettings?> =
-        supabase.from(TABLE_USER_SETTINGS)
-            .selectAsFlow(UserSettingsRow::userId, filter = FilterOperation("user_id", FilterOperator.EQ, userId))
-            .withSessionRecovery(sessionRecovery)
-            .map { rows -> rows.firstOrNull()?.toModel(json) }
-            .recoverWithNull()
-
     override suspend fun saveSettings(userId: String, settings: SyncedSettings): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
             supabase.from(TABLE_USER_SETTINGS)
@@ -263,16 +277,6 @@ class SupabaseCloudSyncGateway(
     }
 
     // ── Artwork (BYOK metadata provider) ─────────────────────────────────
-    override fun artworkOverrides(userId: String, profileId: String): Flow<List<ArtworkOverride>> =
-        supabase.from(TABLE_ARTWORK_OVERRIDES)
-            .selectAsFlow(
-                listOf(ArtworkOverrideRow::profileId, ArtworkOverrideRow::mediaKey),
-                filter = FilterOperation("profile_id", FilterOperator.EQ, profileId),
-            )
-            .withSessionRecovery(sessionRecovery)
-            .map { rows -> rows.map { it.toModel() } }
-            .recoverWithEmpty()
-
     override suspend fun saveArtworkOverride(userId: String, override: ArtworkOverride): Result<Unit> = runCatching {
         sessionRecovery.withAuthRetry {
             supabase.from(TABLE_ARTWORK_OVERRIDES)
@@ -401,6 +405,30 @@ class SupabaseCloudSyncGateway(
         }
         return body
     }
+
+    // ── pull wire format (contract with pull_sync_changes) ─────────────────
+
+    @Serializable
+    private data class PullResponse(
+        @SerialName("cursor") val cursor: Long,
+        @SerialName("full") val full: Boolean,
+        @SerialName("profile_count") val profileCount: Int = 0,
+        @SerialName("has_settings") val hasSettings: Boolean = false,
+        @SerialName("profiles") val profiles: List<ProfileRow> = emptyList(),
+        @SerialName("library") val library: List<LibraryEntryRow> = emptyList(),
+        @SerialName("progress") val progress: List<WatchProgressRow> = emptyList(),
+        @SerialName("settings") val settings: UserSettingsRow? = null,
+        @SerialName("overrides_complete") val overridesComplete: Boolean = false,
+        @SerialName("overrides") val overrides: List<ArtworkOverrideRow> = emptyList(),
+        @SerialName("deleted") val deleted: List<DeletionRow> = emptyList(),
+    )
+
+    @Serializable
+    private data class DeletionRow(
+        @SerialName("c") val collection: String,
+        @SerialName("p") val profileId: String,
+        @SerialName("k") val key: String,
+    )
 
     // ── row DTOs (snake_case columns ⇄ camelCase models) ─────────────────
 
@@ -580,7 +608,39 @@ class SupabaseCloudSyncGateway(
     }
 
     companion object {
+        /** Decodes a pull_sync_changes response; a null body means the session is not signed in. */
+        internal fun decodeCloudChanges(json: Json, body: String): CloudChanges {
+            val response = json.decodeFromString<PullResponse?>(body)
+                ?: throw IllegalStateException("pull_sync_changes returned no account")
+            return CloudChanges(
+                cursor = response.cursor,
+                full = response.full,
+                profileCount = response.profileCount,
+                hasSettings = response.hasSettings,
+                profiles = response.profiles.map { it.toModel() },
+                library = response.library.map { it.toModel(json) },
+                progress = response.progress.map { it.toModel(json) },
+                // A payload this version cannot read keeps the device's settings (as before).
+                settings = response.settings?.let { row ->
+                    runCatching { row.toModel(json) }
+                        .onFailure { Log.w(TAG, "Synced settings unreadable; keeping local settings", it) }
+                        .getOrNull()
+                },
+                artworkOverrides = response.overrides.map { it.toModel() },
+                artworkOverridesComplete = response.overridesComplete,
+                deletions = response.deleted.mapNotNull { row ->
+                    CloudCollection.fromWire(row.collection)?.let { CloudDeletion(it, row.profileId, row.key) }
+                },
+            )
+        }
+
         private const val TAG = "SupabaseSync"
+        private const val FUNCTION_PULL_SYNC_CHANGES = "pull_sync_changes"
+        private const val FUNCTION_REGISTER_SYNC_ENDPOINT = "register_sync_endpoint"
+        private const val PLATFORM_PHONE = "android"
+        private const val PLATFORM_TV = "android-tv"
+        private const val SIGNAL_TOPIC_PREFIX = "sync:"
+        private const val SIGNAL_EVENT = "sync"
         private const val TABLE_PROFILES = "profiles"
         private const val TABLE_LIBRARY = "library_entries"
         private const val TABLE_PROGRESS = "watch_progress"
@@ -595,22 +655,6 @@ class SupabaseCloudSyncGateway(
         private const val FUNCTION_DELETE_ARTWORK_CONFIG = "delete-artwork-config"
         private const val FUNCTION_ARTWORK_KEY_STATUS = "artwork-key-status"
         private const val FUNCTION_RESOLVE_ARTWORK = "resolve-artwork"
-        /**
-         * Sync failures (network drops, clock skew rejections, schema drift) must
-         * degrade to "no cloud rows this round" instead of crashing the app.
-         * Consumers only upsert received rows, so an empty emission wipes nothing.
-         */
-        private fun <T> Flow<List<T>>.recoverWithEmpty(): Flow<List<T>> = catch { error ->
-            if (error is CancellationException) throw error
-            Log.w(TAG, "Sync refresh failed; keeping local data", error)
-            emit(emptyList())
-        }
-
-        private fun Flow<SyncedSettings?>.recoverWithNull(): Flow<SyncedSettings?> = catch { error ->
-            if (error is CancellationException) throw error
-            Log.w(TAG, "Settings refresh failed; keeping local data", error)
-            emit(null)
-        }
     }
 }
 

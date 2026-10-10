@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.pm.PackageManager
 import androidx.work.Configuration
 import com.google.android.gms.cast.tv.CastReceiverContext
+import com.lamphaus.app.sync.FirebaseSyncPush
 import com.lamphaus.core.data.perf.PerfTrace
 
 class LamphausApplication : Application(), Configuration.Provider {
@@ -17,6 +18,8 @@ class LamphausApplication : Application(), Configuration.Provider {
         ) {
             runCatching { CastReceiverContext.initInstance(this) }
         }
+        // A sync push may be what started this process (push-to-pull sync).
+        FirebaseSyncPush.initialize(this)
         // A periodic metadata-sync worker used to be scheduled here while
         // returning success without syncing anything, which paid WorkManager
         // startup plus a wake-up every six hours for no effect (PERF-12).

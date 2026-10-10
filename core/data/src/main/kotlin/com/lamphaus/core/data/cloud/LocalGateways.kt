@@ -22,6 +22,7 @@ class LocalAccountGateway : AccountGateway {
     override suspend fun completeEmailLink(email: String, link: String) = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun deleteAccount() = Result.failure<Unit>(CloudNotConfiguredException())
     override suspend fun signOut() { mutableState.value = AccountState.SignedOut }
+    override suspend fun restoreSessionForBackgroundWork() = (state.value as? AccountState.SignedIn)?.userId
 }
 
 class LocalPairingGateway : PairingGateway {

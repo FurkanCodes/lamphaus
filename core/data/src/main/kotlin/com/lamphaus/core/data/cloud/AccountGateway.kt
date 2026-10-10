@@ -29,6 +29,14 @@ interface AccountGateway {
     suspend fun completeEmailLink(email: String, link: String): Result<Unit>
     suspend fun deleteAccount(): Result<Unit>
     suspend fun signOut()
+
+    /**
+     * The signed-in user for work that runs without a screen, such as a sync
+     * push. Leaving the screen parks the session until the next screen
+     * starts; this restores it for the work. Null when nobody is signed in
+     * or the session cannot be restored in time.
+     */
+    suspend fun restoreSessionForBackgroundWork(): String?
 }
 
 interface PairingGateway {

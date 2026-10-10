@@ -1,5 +1,7 @@
 package com.lamphaus.core.data.repository
 
+import com.lamphaus.core.data.cloud.CloudCollection
+import com.lamphaus.core.data.cloud.CloudDeletion
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
@@ -52,6 +54,78 @@ class SyncReconciliationTest {
             setOf("cloud-row"),
             repository.cloudSyncKeys(PROFILE_ID, CloudSyncCollection.PROGRESS),
         )
+    }
+
+    @Test
+    fun `SHR-ARC-05 an incremental pull removes marked rows and keeps everything it does not mention`() = runTest {
+        val watchedElsewhere = progress("watched-elsewhere")
+        val repository = FakeLibraryRepository().apply {
+            saveLibrary(entry("kept"))
+            saveLibrary(entry("removed-elsewhere"))
+            saveProgress(watchedElsewhere)
+            replaceCloudSyncKeys(PROFILE_ID, CloudSyncCollection.LIBRARY, setOf("movie:kept", "movie:removed-elsewhere"))
+            replaceCloudSyncKeys(PROFILE_ID, CloudSyncCollection.PROGRESS, setOf("watched-elsewhere"))
+        }
+
+        repository.applyCloudDelta(
+            library = listOf(entry("added-elsewhere")),
+            progress = emptyList(),
+            deletions = listOf(
+                CloudDeletion(CloudCollection.LIBRARY, PROFILE_ID, "movie:removed-elsewhere"),
+                CloudDeletion(CloudCollection.PROGRESS, PROFILE_ID, "watched-elsewhere"),
+            ),
+        )
+
+        assertEquals(setOf("movie:kept", "movie:added-elsewhere"), repository.libraryRows.map { it.mediaKey }.toSet())
+        assertTrue(repository.progressRows.isEmpty())
+        assertEquals(
+            setOf("movie:kept", "movie:added-elsewhere"),
+            repository.cloudSyncKeys(PROFILE_ID, CloudSyncCollection.LIBRARY),
+        )
+        assertTrue(repository.cloudSyncKeys(PROFILE_ID, CloudSyncCollection.PROGRESS).isEmpty())
+    }
+
+    @Test
+    fun `SHR-ARC-05 a row removed and added again elsewhere stays`() = runTest {
+        val repository = FakeLibraryRepository().apply { saveLibrary(entry("again")) }
+
+        repository.applyCloudDelta(
+            library = listOf(entry("again")),
+            progress = listOf(progress("again")),
+            deletions = listOf(
+                CloudDeletion(CloudCollection.LIBRARY, PROFILE_ID, "movie:again"),
+                CloudDeletion(CloudCollection.PROGRESS, PROFILE_ID, "again"),
+            ),
+        )
+
+        assertEquals(listOf("movie:again"), repository.libraryRows.map { it.mediaKey })
+        assertEquals(listOf("again"), repository.progressRows.map { it.videoId })
+        assertEquals(setOf("again"), repository.cloudSyncKeys(PROFILE_ID, CloudSyncCollection.PROGRESS))
+    }
+
+    @Test
+    fun `SHR-ARC-05 an earlier upload of this device's progress never rewinds newer local progress`() = runTest {
+        val newerLocal = progress("playing").copy(positionMillis = 80, updatedAtEpochMillis = 20)
+        val olderUpload = progress("playing").copy(positionMillis = 40, updatedAtEpochMillis = 10)
+        val repository = FakeLibraryRepository().apply { saveProgress(newerLocal) }
+
+        repository.applyCloudDelta(library = emptyList(), progress = listOf(olderUpload), deletions = emptyList())
+
+        assertEquals(80L, repository.progressRows.single().positionMillis)
+        assertEquals(setOf("playing"), repository.cloudSyncKeys(PROFILE_ID, CloudSyncCollection.PROGRESS))
+    }
+
+    @Test
+    fun `SHR-ARC-05 artwork removals leave library and progress alone`() = runTest {
+        val repository = FakeLibraryRepository().apply { saveLibrary(entry("poster")) }
+
+        repository.applyCloudDelta(
+            library = emptyList(),
+            progress = emptyList(),
+            deletions = listOf(CloudDeletion(CloudCollection.ARTWORK_OVERRIDE, PROFILE_ID, "movie:poster")),
+        )
+
+        assertEquals(listOf("movie:poster"), repository.libraryRows.map { it.mediaKey })
     }
 
     private fun entry(id: String): LibraryEntry {

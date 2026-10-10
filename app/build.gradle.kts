@@ -20,6 +20,16 @@ val updateFeedUrl: String =
 val supabaseUrl = providers.gradleProperty("lamphaus.supabaseUrl").orNull.orEmpty()
 val supabasePublishableKey = providers.gradleProperty("lamphaus.supabasePublishableKey").orNull.orEmpty()
 val cloudConfigured = supabaseUrl.isNotBlank() && supabasePublishableKey.isNotBlank()
+// Push-to-pull sync: Firebase Cloud Messaging wakes other devices after a
+// change. Configured like the cloud, from the Firebase app's (non-secret)
+// identifiers; without them devices sync on open and through the live
+// signal while on screen.
+val firebaseProjectId = providers.gradleProperty("lamphaus.firebaseProjectId").orNull.orEmpty()
+val firebaseAppId = providers.gradleProperty("lamphaus.firebaseAppId").orNull.orEmpty()
+val firebaseApiKey = providers.gradleProperty("lamphaus.firebaseApiKey").orNull.orEmpty()
+val firebaseSenderId = providers.gradleProperty("lamphaus.firebaseSenderId").orNull.orEmpty()
+val pushConfigured = cloudConfigured &&
+    listOf(firebaseProjectId, firebaseAppId, firebaseApiKey, firebaseSenderId).all { it.isNotBlank() }
 // PERF-02: keep fixture startup and production-like startup as distinct
 // experiments. The default timing APK keeps cloud/updates off for a
 // deterministic fixture baseline; a separately labeled controlled integration
@@ -47,6 +57,12 @@ android {
     namespace = "com.lamphaus.app"
     compileSdk = 36
 
+    // CloudLog and other android.util calls have no JVM implementation; unit
+    // tests exercise the logic around them, not the log sink.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     defaultConfig {
         applicationId = "com.lamphaus.app"
         minSdk = 26
@@ -58,6 +74,11 @@ android {
         buildConfigField("boolean", "CLOUD_CONFIGURED", cloudConfigured.toString())
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
+        buildConfigField("boolean", "PUSH_CONFIGURED", pushConfigured.toString())
+        buildConfigField("String", "FIREBASE_PROJECT_ID", "\"$firebaseProjectId\"")
+        buildConfigField("String", "FIREBASE_APP_ID", "\"$firebaseAppId\"")
+        buildConfigField("String", "FIREBASE_API_KEY", "\"$firebaseApiKey\"")
+        buildConfigField("String", "FIREBASE_SENDER_ID", "\"$firebaseSenderId\"")
         buildConfigField("String", "CAST_APPLICATION_ID", "\"${providers.gradleProperty("lamphaus.castAppId").orNull.orEmpty()}\"")
         buildConfigField("String", "EMAIL_LINK_DOMAIN", "\"${providers.gradleProperty("lamphaus.emailLinkDomain").orNull ?: "links.lamphaus.app"}\"")
         buildConfigField("String", "WEB_CLIENT_ID", "\"${providers.gradleProperty("lamphaus.webClientId").orNull.orEmpty()}\"")
@@ -209,6 +230,8 @@ dependencies {
     implementation(libs.supabase.postgrest)
     implementation(libs.supabase.realtime)
     implementation(libs.supabase.functions)
+    implementation(libs.firebase.messaging)
+    implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
@@ -256,6 +279,8 @@ androidComponents {
                 buildConfigField("boolean", "UPDATES_ENABLED", benchmarkUpdates.toString())
                 buildConfigField("String", "SUPABASE_URL", "\"${if (benchmarkCloud) supabaseUrl else ""}\"")
                 buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"${if (benchmarkCloud) supabasePublishableKey else ""}\"")
+                // Timing runs never start Firebase or receive sync pushes.
+                buildConfigField("boolean", "PUSH_CONFIGURED", "false")
             }
             extension.sourceSets.getByName(target.name).assets.srcDir("src/benchmark/assets")
         }

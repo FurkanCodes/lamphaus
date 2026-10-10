@@ -4,7 +4,7 @@ The debug app builds without cloud or Cast credentials (`CLOUD_CONFIGURED=false`
 
 ## Backend: Supabase
 
-Project `lamphaus` — ref `uhxfalgfcutwrvlgjgen`, region `eu-central-1`. Firebase has been fully removed.
+Project `lamphaus` — ref `uhxfalgfcutwrvlgjgen`, region `eu-central-1`. Firebase is used only for Cloud Messaging, the sync signal (section 4); Supabase holds every account row.
 
 ### 1. CLI linking
 
@@ -40,7 +40,41 @@ Set via `supabase secrets set`:
 
 `PROVIDER_CONFIG_KEYRING` and `PROVIDER_CONFIG_ACTIVE_KEY_ID` are required by all four provider-config Edge Functions. Never pass any secret as a command-line argument or commit it to source control.
 
-`verify_jwt=true` on all functions except `create-pairing-session` and `exchange-device-grant` (unauthenticated by design — rate-limited, single-use codes server-side).
+`verify_jwt=true` on all functions except `create-pairing-session` and `exchange-device-grant` (unauthenticated by design — rate-limited, single-use codes server-side) and `refresh-push-access` (called by pg_cron without credentials; idempotent and never returns its token).
+
+### 4. Push-to-pull sync (Firebase Cloud Messaging)
+
+**Deploy order:** apply `20261010120000_push_to_pull_sync.sql` (`supabase db push`) before releasing any app version that contains push-to-pull sync. That version calls `pull_sync_changes` and cannot sync without it; older versions keep working after the migration.
+
+Devices hold no realtime connection for sync. Each synced row carries a per-account change number, deletions leave a 90-day marker, and the app downloads only what changed through the `pull_sync_changes` RPC: after sign-in, when a screen starts, when the network returns, and when a signal says another device changed something. The signal is an empty `sync` push through Firebase Cloud Messaging, sent by a database trigger through `pg_net` after the change commits. Devices without Google Play services instead listen to a private Realtime broadcast, only while a screen shows. Without Firebase configured, everything still syncs on open and through that broadcast.
+
+1. In the Firebase console, create a project without Analytics and add an Android app with package `com.lamphaus.app`.
+2. From that app's `google-services.json` (do not commit it), put these non-secret identifiers in `~/.gradle/gradle.properties`:
+
+   | Property | `google-services.json` field |
+   |---|---|
+   | `lamphaus.firebaseProjectId` | `project_info.project_id` |
+   | `lamphaus.firebaseSenderId` | `project_info.project_number` |
+   | `lamphaus.firebaseAppId` | `client[0].client_info.mobilesdk_app_id` |
+   | `lamphaus.firebaseApiKey` | `client[0].api_key[0].current_key` |
+
+3. Project settings → Service accounts → **Generate new private key**. Store it as the `FCM_SERVICE_ACCOUNT` Edge Function secret through an env file so it never appears on a command line, then delete both files:
+
+   ```bash
+   printf "FCM_SERVICE_ACCOUNT='%s'\n" "$(jq -c . service-account.json)" > fcm.env
+   supabase secrets set --env-file fcm.env
+   rm fcm.env service-account.json
+   ```
+
+4. Deploy the token refresher and run it once; afterwards `pg_cron` refreshes the hour-long access token every 30 minutes:
+
+   ```bash
+   supabase functions deploy refresh-push-access
+   curl -sX POST https://uhxfalgfcutwrvlgjgen.supabase.co/functions/v1/refresh-push-access
+   # {"configured":true,"refreshed":true}
+   ```
+
+The push carries only `{"t":"sync"}` — no titles, ids, or account details (SHR-PROD-06) — and is never shown, so it needs no notification permission. App versions from before this change still use Postgres Changes; keep the tables in the `supabase_realtime` publication until they have updated.
 
 ### Provider-config key rotation
 
@@ -128,7 +162,9 @@ Use Play App Signing and inject upload credentials through CI secrets. Supply a 
 | Item | Status |
 |---|---|
 | Google sign-in E2E (mobile) | ✅ verified 2026-08-25 |
-| Realtime sync across two signed-in devices | ✅ verified 2026-08-25 |
+| Realtime sync across two signed-in devices | ✅ verified 2026-08-25 (Postgres Changes, before push-to-pull) |
+| Push-to-pull sync: phone change reaches an open, a backgrounded, and a closed TV | ⬜ needs the Firebase project (section 4) |
+| Push-to-pull sync: device without Play services syncs on screen | ⬜ |
 | TV pairing E2E on real device (QR + web claim) | ✅ verified 2026-08-25 |
 | Revocation kills TV session | ✅ DB-verified · on-device observation pending |
 | Account deletion leaves zero rows | ✅ FK-cascade audit + live test |
