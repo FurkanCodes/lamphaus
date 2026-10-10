@@ -3176,4 +3176,10 @@ private fun sourceIdentity(source: StreamCandidate): String = listOfNotNull(
     source.archiveFiles.firstOrNull()?.url,
 ).joinToString("|")
 
-private fun StateFlow<AppUiState>.mapActiveProfileId() = map { it.activeProfileId }
+/**
+ * The active profile, emitted only when it changes. Without the de-duplication
+ * every UI state update re-ran the per-profile Room queries, cancelling them
+ * before they emitted while Home loaded, so Continue Watching arrived seconds
+ * late (QA-08).
+ */
+private fun StateFlow<AppUiState>.mapActiveProfileId() = map { it.activeProfileId }.distinctUntilChanged()
