@@ -198,6 +198,7 @@ import com.lamphaus.app.ui.shouldBlur
 import com.lamphaus.app.ui.nextUpEpisode
 import com.lamphaus.app.ui.NextUpKind
 import com.lamphaus.app.ui.continueWatchingItemsFromSections
+import com.lamphaus.app.ui.homeFirstScreenReady
 import com.lamphaus.app.ui.firstDistinctMedia
 import com.lamphaus.app.ui.homeSectionsOfType
 import com.lamphaus.app.ui.shouldPrefetchHomeCatalogBatch
@@ -449,8 +450,13 @@ fun TvApp(
                 }
                 TvBootOverlay(
                     state = boot,
+                    // Signed in, the reveal waits for a finished first screen,
+                    // still never past TvBootTokens.maxHoldMillis.
                     contentReady = state.account != AccountState.Loading &&
-                        (state.account !is AccountState.SignedIn || !state.initialContentLoading),
+                        (
+                            state.account !is AccountState.SignedIn ||
+                                homeFirstScreenReady(state.initialContentLoading, state.sections)
+                            ),
                 )
             }
         }

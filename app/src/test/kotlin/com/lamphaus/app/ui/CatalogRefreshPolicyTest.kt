@@ -273,6 +273,26 @@ class CatalogRefreshPolicyTest {
         ),
     )
 
+    @Test
+    fun `TV-MOT-01 the boot waits for the first row's cards, not just its placeholder`() {
+        val loading = section("first", "a").copy(initialLoading = true)
+        val loaded = section("first", "a", items = listOf(media("m1")))
+
+        assertFalse(homeFirstScreenReady(initialContentLoading = true, sections = emptyList()))
+        assertFalse(homeFirstScreenReady(initialContentLoading = false, sections = listOf(loading, loaded.copy(id = "second"))))
+        assertTrue(homeFirstScreenReady(initialContentLoading = false, sections = listOf(loaded, loading.copy(id = "second"))))
+    }
+
+    @Test
+    fun `TV-CNT-02 an empty first row never shows, so the next one decides, and errors or no rows are finished`() {
+        val empty = section("empty", "a")
+        val loading = section("next", "a").copy(initialLoading = true)
+
+        assertFalse(homeFirstScreenReady(initialContentLoading = false, sections = listOf(empty, loading)))
+        assertTrue(homeFirstScreenReady(initialContentLoading = false, sections = listOf(section("failed", "a", error = "Unavailable"))))
+        assertTrue(homeFirstScreenReady(initialContentLoading = false, sections = emptyList()))
+    }
+
     private fun section(id: String, providerId: String, items: List<MediaPreview> = emptyList(), error: String? = null) =
         CatalogSection(
             id = id,

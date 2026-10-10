@@ -171,12 +171,14 @@ internal fun TvBootOverlay(state: TvBootState, contentReady: Boolean, modifier: 
         timeline.animateTo(TvBootTokens.introMillis.toFloat(), tween(TvBootTokens.introMillis, easing = LinearEasing))
         // Hold on the lit mark, breathing gently, until Home is usable.
         val holdStart = withFrameMillis { it }
+        var held = 0L
         while (!ready) {
             val now = withFrameMillis { it }
-            val elapsed = now - holdStart
-            if (elapsed >= TvBootTokens.maxHoldMillis) break
-            breathing = sin(elapsed / 1_400.0 * 2 * PI).toFloat()
+            held = now - holdStart
+            if (held >= TvBootTokens.maxHoldMillis) break
+            breathing = sin(held / 1_400.0 * 2 * PI).toFloat()
         }
+        android.util.Log.d("Lamphaus.Boot", "reveal ${if (ready) "home ready" else "hold cap"} after ${held}ms hold")
         breathing = 0f
         awaitSmoothFrames()
         exit.animateTo(1f, tween(TvBootTokens.exitMillis, easing = FastOutSlowInEasing))

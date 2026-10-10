@@ -76,6 +76,19 @@ internal fun orderedResolvedSections(
 internal fun CatalogSection.isRenderableHomeCatalogSection(): Boolean =
     initialLoading || items.isNotEmpty() || hasMore || errorMessage != null || loadMoreError != null
 
+/**
+ * Whether Home's first screen is finished: the first row the viewer sees has
+ * its cards, or settled as an error, so the TV boot reveals a complete screen
+ * rather than placeholders (TV-MOT-01, TV-CNT-02). Continue Watching comes
+ * from the device and is ready before this. Rows that settle empty never
+ * show, so the next one counts; no rows at all is finished too.
+ */
+internal fun homeFirstScreenReady(initialContentLoading: Boolean, sections: List<CatalogSection>): Boolean {
+    if (initialContentLoading) return false
+    val first = sections.firstOrNull(CatalogSection::isRenderableHomeCatalogSection) ?: return true
+    return !first.initialLoading
+}
+
 
 
 internal data class CatalogProviderFingerprint(
