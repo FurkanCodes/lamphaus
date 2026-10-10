@@ -159,3 +159,25 @@ live outside the repository; the APK password lives in macOS Keychain. Maintain
 verified encrypted offline backups. Losing the APK signing key prevents normal
 updates to existing installations. Never replace it silently or suggest
 uninstalling as the standard recovery path (`REL-06`).
+
+## Android developer verification
+
+`com.lamphaus.app` is registered in the Android Developer Console (full
+distribution, outside Google Play) with the production signing key
+`83:BF:4E:5C:13:02:8D:66:7D:A3:A5:E5:37:A4:06:D6:93:57:7B:7D:48:92:37:FD:B4:5E:B9:B6:81:A9:70:DC`,
+verified on 2026-10-10. Certified Android devices need this to install apps
+from outside Google Play without Google's advanced flow (in select countries
+from 2026-09-30, worldwide in 2027). Releases need nothing more as long as
+they keep this package name and key (`REL-06`).
+
+Adding another key, or registering another package name, repeats the proof of
+ownership once:
+
+1. Paste the console's snippet into `app/src/main/assets/adi-registration.properties`
+   (git-ignored: the snippet is tied to the developer account and never committed).
+2. Run `./scripts/release/build_verification_apk.sh` on the owner's Mac. It
+   signs a release build with the production key, checks the signer and the
+   snippet, and writes `dist/verification/lamphaus-developer-verification.apk`.
+3. Upload that APK at the key's **Verify** step. It is not a release and is
+   never published.
+4. Once the console shows the key verified, delete the snippet and the APK.
