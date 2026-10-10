@@ -240,3 +240,23 @@ export function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 }
+
+/** Android version names by API level; the feed's `minSdk` is an API level. */
+const ANDROID_VERSIONS: Record<number, string> = {
+  26: "8.0",
+  27: "8.1",
+  28: "9",
+  29: "10",
+  30: "11",
+  31: "12",
+  32: "12L",
+  33: "13",
+  34: "14",
+  35: "15",
+  36: "16",
+};
+
+export function formatAndroidVersion(apiLevel: number): string {
+  const name = ANDROID_VERSIONS[apiLevel];
+  return name ? `Android ${name}` : `API ${apiLevel}`;
+}

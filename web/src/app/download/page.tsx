@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   RELEASES_PAGE,
+  formatAndroidVersion,
   formatBytes,
   loadVerifiedFeed,
   renderChangelog,
@@ -102,8 +103,8 @@ function ReleaseCard({ rel }: { rel: FeedRelease }) {
           <dd>{formatBytes(rel.apk.byteLength)}</dd>
         </div>
         <div>
-          <dt className="text-fg-subtle">Minimum Android</dt>
-          <dd>{rel.minSdk}.0</dd>
+          <dt className="text-fg-subtle">Requires</dt>
+          <dd>{formatAndroidVersion(rel.minSdk)}</dd>
         </div>
       </dl>
       <div className="mt-8 flex flex-wrap gap-4">
