@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-09-29T13:12:15Z",
-  "sourceCommit": "e8258aec98091feaf561a6b1e0598b1c2412de03",
+  "generatedAt": "2026-10-10T15:57:53Z",
+  "sourceCommit": "9f3a32b7a03588854cfdcc11c40f7a8faf381831",
   "profileKind": "startup",
-  "profileSha256": "df0005e7129a7ec498dc7b7118146a80327a45c0a27a0aff3b8a9b0410c057e0",
+  "profileSha256": "7df8bfb864cc59748913a57e6bc3e733a8cf0ef98ef21af50712fd0d5d89db86",
   "devices": {
     "mobile": "FocusPhone(AVD) Android 16 emulator (retained 2026-09-18)",
-    "tv": "SEI Robotics Box R 4K Plus (Amlogic sc2, Mali-G31) Android 14, physical device (regenerated for the side rail and Spotlight default: startup, D-pad rails, details and playback)"
+    "tv": "SEI Robotics Box R 4K Plus (Amlogic sc2, Mali-G31) Android 14, physical device (regenerated for Showcase, Marquee and page transitions: startup, D-pad rails, details and playback)"
   },
   "rules": [
     "QA-07",
