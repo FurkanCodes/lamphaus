@@ -25,6 +25,7 @@ import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkLookupStatus
 import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.ArtworkProviderId
+import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.DeviceGrant
@@ -81,6 +82,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
@@ -2877,15 +2879,16 @@ class AppViewModel(
     private fun showMessage(message: String) = mutableState.update { it.copy(message = message) }
 
     /**
-     * Add-ons ride Edge Functions (deny-all table → no realtime): one pull
-     * per session. An empty cloud gets seeded from local installs — mirroring
-     * the profiles seeding rule — while a non-empty cloud is authoritative:
-     * locally-unknown ids mean the add-on was removed on another device.
+     * Add-ons ride Edge Functions (deny-all table → no realtime). An empty
+     * cloud gets seeded from local installs — mirroring the profiles seeding
+     * rule — while a non-empty cloud is authoritative: locally-unknown ids
+     * mean the add-on was removed on another device. False when the list
+     * could not be fetched.
      */
-    private suspend fun syncProviders(userId: String) {
+    private suspend fun syncProviders(userId: String): Boolean {
         val cloudProviders = container.cloudSyncGateway.providers(userId).getOrElse { error ->
             CloudLog.w("providers.pull failed — keeping local add-ons", error)
-            return
+            return false
         }
         if (cloudProviders.isEmpty()) {
             localSyncableProviders().forEach { provider ->
@@ -2893,9 +2896,65 @@ class AppViewModel(
                     CloudLog.w("provider.seed failed (${provider.id})", it)
                 }
             }
-            return
+            return true
         }
         cloudProviders.forEach { container.libraryRepository.saveProvider(it) }
+        return true
+    }
+
+    /**
+     * Add-ons and artwork keys are encrypted behind Edge Functions, so this
+     * device fetches them only when a pull reported that they changed, or
+     * when it never fetched them for this account, never merely because it
+     * launched. A failed fetch stays due until the next launch or change.
+     */
+    private suspend fun keepAccountProvidersCurrent(userId: String) {
+        container.accountSync.providerChanges.collect {
+            val staleAt = container.accountSync.staleProvidersAt(userId) ?: return@collect
+            val fetched = coroutineScope {
+                val providers = async { syncProviders(userId) }
+                // Quiet: Settings reports artwork-key failures itself.
+                val statuses = async {
+                    container.cloudSyncGateway.artworkProviderStatuses(userId)
+                        .onSuccess { showArtworkStatuses(userId, it) }
+                        .isSuccess
+                }
+                providers.await() && statuses.await()
+            }
+            if (fetched) container.accountSync.providersFetched(userId, staleAt)
+        }
+    }
+
+    /**
+     * Which of the viewer's own keys are saved decides key-backed UI such as
+     * tappable cast. It starts from the status this device last saw, and
+     * every change to it is kept for the next launch.
+     */
+    private suspend fun keepArtworkStatuses(userId: String) {
+        container.accountSync.artworkStatuses(userId)?.let { showArtworkStatuses(userId, it, onlyIfNone = true) }
+        state
+            .map { current ->
+                current.artworkProviders.takeIf { (current.account as? AccountState.SignedIn)?.userId == userId }
+            }
+            .distinctUntilChanged()
+            .drop(1)
+            .collect { providers ->
+                if (!providers.isNullOrEmpty()) container.accountSync.rememberArtworkStatuses(userId, providers)
+            }
+    }
+
+    private fun showArtworkStatuses(
+        userId: String,
+        providers: List<ArtworkProviderStatus>,
+        onlyIfNone: Boolean = false,
+    ) = mutableState.update { current ->
+        when {
+            (current.account as? AccountState.SignedIn)?.userId != userId -> current
+            onlyIfNone && current.artworkProviders.isNotEmpty() -> current
+            else -> current.copy(
+                artworkProviders = providers.sortedWith(compareBy({ it.sortOrder }, { it.provider.value })),
+            )
+        }
     }
 
     /** Real installed add-ons only: the built-in catalog and debug sources never sync. */
@@ -2922,24 +2981,7 @@ class AppViewModel(
         cloudSyncJob?.cancel()
         cloudSyncUserId = userId
         cloudSyncJob = viewModelScope.launch {
-            launch {
-                syncProviders(userId)
-            }
-            // Which of the viewer's own keys are saved decides key-backed UI
-            // such as tappable cast. Quiet: Settings reports failures itself.
-            launch {
-                container.cloudSyncGateway.artworkProviderStatuses(userId).onSuccess { providers ->
-                    mutableState.update { current ->
-                        if ((current.account as? AccountState.SignedIn)?.userId != userId) {
-                            current
-                        } else {
-                            current.copy(
-                                artworkProviders = providers.sortedWith(compareBy({ it.sortOrder }, { it.provider.value })),
-                            )
-                        }
-                    }
-                }
-            }
+            launch { keepArtworkStatuses(userId) }
             launch {
                 // The first pull decides how the account boots on this device,
                 // so it retries until it lands (a failure is never an empty
@@ -2955,6 +2997,9 @@ class AppViewModel(
                     outcome = container.accountSync.pull(userId, AccountSync.Reason.SIGN_IN)
                     if (outcome == null) delay(((++attempt).coerceAtMost(30)) * 1_000L)
                 }
+                // After the first pull, which notes whether add-ons or artwork
+                // keys changed, so a fresh sign-in fetches them once.
+                launch { keepAccountProvidersCurrent(userId) }
                 if (outcome.profileCount == 0) seedEmptyAccount(userId)
                 // Where other devices' changes reach this one: a push, or the
                 // live signal while on screen. Registered every session, so an

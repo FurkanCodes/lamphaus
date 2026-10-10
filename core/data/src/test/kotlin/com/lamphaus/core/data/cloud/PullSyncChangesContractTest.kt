@@ -7,7 +7,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Pins the app to pull_sync_changes' response (supabase/migrations/20261010120000_push_to_pull_sync.sql). */
+/**
+ * Pins the app to pull_sync_changes' response (supabase/migrations/20261010120000_push_to_pull_sync.sql,
+ * providers_changed from 20261010180100_provider_change_signal.sql).
+ */
 class PullSyncChangesContractTest {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -35,14 +38,15 @@ class PullSyncChangesContractTest {
             ),
             changes.deletions,
         )
+        assertFalse(changes.providersChanged)
     }
 
     @Test
     fun `SHR-ARC-13 an empty account pull is full and has nothing to seed from`() {
         val changes = SupabaseCloudSyncGateway.decodeCloudChanges(
             json,
-            """{"cursor":0,"full":true,"profile_count":0,"has_settings":false,"profiles":[],"library":[],
-               "progress":[],"settings":null,"overrides_complete":true,"overrides":[],"deleted":[]}""",
+            """{"cursor":0,"full":true,"profile_count":0,"has_settings":false,"providers_changed":true,"profiles":[],
+               "library":[],"progress":[],"settings":null,"overrides_complete":true,"overrides":[],"deleted":[]}""",
         )
 
         assertTrue(changes.full)
@@ -50,6 +54,17 @@ class PullSyncChangesContractTest {
         assertFalse(changes.hasSettings)
         assertNull(changes.settings)
         assertTrue(changes.artworkOverridesComplete)
+        assertTrue(changes.providersChanged)
+    }
+
+    @Test
+    fun `SHR-ARC-13 a server that does not report add-on changes makes the device fetch them`() {
+        val changes = SupabaseCloudSyncGateway.decodeCloudChanges(
+            json,
+            """{"cursor":3,"full":false,"profile_count":1,"has_settings":true}""",
+        )
+
+        assertTrue(changes.providersChanged)
     }
 
     @Test(expected = IllegalStateException::class)
@@ -62,7 +77,7 @@ class PullSyncChangesContractTest {
         const val USER = "11111111-1111-1111-1111-111111111111"
         val INCREMENTAL = """
             {
-              "cursor": 10, "full": false, "profile_count": 1, "has_settings": true,
+              "cursor": 10, "full": false, "profile_count": 1, "has_settings": true, "providers_changed": false,
               "profiles": [{"id": "$PROFILE", "user_id": "$USER", "name": "Home", "avatar_key": "a", "kind": "ADULT",
                             "has_pin": false, "hide_unrated": false, "updated_at_epoch_millis": 3}],
               "library": [{"user_id": "$USER", "profile_id": "$PROFILE", "media_key": "movie:tt2",

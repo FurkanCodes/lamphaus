@@ -11,6 +11,7 @@ import com.lamphaus.core.data.repository.LibraryRepository
 import com.lamphaus.core.model.ArtworkAsset
 import com.lamphaus.core.model.ArtworkOverride
 import com.lamphaus.core.model.ArtworkProviderId
+import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.LibraryEntry
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
@@ -35,6 +36,7 @@ class AccountSyncTest {
     private val gateway = FakeGateway()
     private val library = FakeLibraryRepository()
     private val cursors = FakeCursors()
+    private val providerState = FakeProviderState()
     private val settings = FakeSettings()
     private val pushTokens = FakePushTokens()
     private var signedIn: String? = USER
@@ -43,6 +45,7 @@ class AccountSyncTest {
         gateway = gateway,
         libraryRepository = library,
         cursors = cursors,
+        providerState = providerState,
         settings = settings,
         pushTokens = pushTokens,
         installationId = "installation-1",
@@ -167,6 +170,52 @@ class AccountSyncTest {
     }
 
     @Test
+    fun `SHR-ARC-13 add-ons and artwork keys are fetched after sign-in, then only after a reported change`() = runTest {
+        assertEquals(0L, sync.staleProvidersAt(USER))
+
+        gateway.responses += changes(cursor = 5, full = true, profiles = listOf(profile()))
+        sync.pull(USER, AccountSync.Reason.SIGN_IN)
+        assertEquals(1L, sync.providerChanges.value)
+        assertEquals(5L, sync.staleProvidersAt(USER))
+        sync.providersFetched(USER, 5)
+        assertNull(sync.staleProvidersAt(USER))
+
+        gateway.responses += changes(cursor = 8)
+        sync.pull(USER, AccountSync.Reason.SIGNAL)
+        assertEquals(1L, sync.providerChanges.value)
+        assertNull(sync.staleProvidersAt(USER))
+
+        gateway.responses += changes(cursor = 9, providersChanged = true)
+        sync.pull(USER, AccountSync.Reason.SIGNAL)
+        assertEquals(2L, sync.providerChanges.value)
+        assertEquals(9L, sync.staleProvidersAt(USER))
+    }
+
+    @Test
+    fun `SHR-ARC-13 a change reported while add-ons are fetched keeps them due`() = runTest {
+        library.profileRows += profile()
+        gateway.responses += changes(cursor = 5, providersChanged = true)
+        sync.pull(USER, AccountSync.Reason.SIGNAL)
+        val fetchFor = sync.staleProvidersAt(USER)
+
+        gateway.responses += changes(cursor = 6, providersChanged = true)
+        sync.pull(USER, AccountSync.Reason.SIGNAL)
+        sync.providersFetched(USER, fetchFor!!)
+
+        assertEquals(6L, sync.staleProvidersAt(USER))
+    }
+
+    @Test
+    fun `SHR-ARC-13 a failed pull reports no add-on change`() = runTest {
+        library.profileRows += profile()
+        sync.providersFetched(USER, 3)
+
+        assertNull(sync.pull(USER, AccountSync.Reason.SIGNAL))
+        assertEquals(0L, sync.providerChanges.value)
+        assertNull(sync.staleProvidersAt(USER))
+    }
+
+    @Test
     fun `SHR-PROD-06 devices without push register for the live signal`() = runTest {
         sync.registerSignals(USER)
         assertEquals(AccountSync.SignalMode.LIVE, sync.signalMode.value)
@@ -200,6 +249,7 @@ class AccountSyncTest {
         settings: SyncedSettings? = null,
         overrides: List<ArtworkOverride> = emptyList(),
         deletions: List<CloudDeletion> = emptyList(),
+        providersChanged: Boolean = full,
     ) = CloudChanges(
         cursor = cursor,
         full = full,
@@ -212,6 +262,7 @@ class AccountSyncTest {
         artworkOverrides = overrides,
         artworkOverridesComplete = full,
         deletions = deletions,
+        providersChanged = providersChanged,
     )
 
     private fun profile() = Profile(PROFILE, "Home", "a", ProfileKind.ADULT)
@@ -256,6 +307,24 @@ class AccountSyncTest {
         override suspend fun cursor(userId: String) = values[userId] ?: 0
         override suspend fun setCursor(userId: String, cursor: Long) {
             values[userId] = cursor
+        }
+    }
+
+    private class FakeProviderState : AccountProviderState {
+        val changed = mutableMapOf<String, Long>()
+        val fetched = mutableMapOf<String, Long>()
+        val statuses = mutableMapOf<String, List<ArtworkProviderStatus>>()
+        override suspend fun changedAt(userId: String) = changed[userId]
+        override suspend fun setChangedAt(userId: String, cursor: Long) {
+            changed[userId] = cursor
+        }
+        override suspend fun fetchedAt(userId: String) = fetched[userId]
+        override suspend fun setFetchedAt(userId: String, cursor: Long) {
+            fetched[userId] = cursor
+        }
+        override suspend fun artworkStatuses(userId: String) = statuses[userId]
+        override suspend fun setArtworkStatuses(userId: String, statuses: List<ArtworkProviderStatus>) {
+            this.statuses[userId] = statuses
         }
     }
 

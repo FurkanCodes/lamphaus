@@ -32,6 +32,7 @@ import io.ktor.client.plugins.defaultRequest
 import io.ktor.client.request.header
 import com.lamphaus.app.sync.AccountSync
 import com.lamphaus.app.sync.FirebaseSyncPush
+import com.lamphaus.app.sync.PreferenceAccountProviderState
 import com.lamphaus.app.sync.PreferenceSettingsSync
 import com.lamphaus.app.sync.PreferenceSyncCursors
 import com.lamphaus.app.sync.networkReturns
@@ -235,6 +236,7 @@ class AppContainer(context: Context) {
         gateway = cloudSyncGateway,
         libraryRepository = libraryRepository,
         cursors = PreferenceSyncCursors(preferences),
+        providerState = PreferenceAccountProviderState(preferences),
         settings = PreferenceSettingsSync(cloudSyncGateway, preferences, streamBadgeRepository),
         pushTokens = FirebaseSyncPush(context),
         installationId = syncInstallationId,

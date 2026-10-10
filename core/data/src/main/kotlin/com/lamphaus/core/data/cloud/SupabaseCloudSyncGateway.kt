@@ -421,6 +421,8 @@ class SupabaseCloudSyncGateway(
         @SerialName("overrides_complete") val overridesComplete: Boolean = false,
         @SerialName("overrides") val overrides: List<ArtworkOverrideRow> = emptyList(),
         @SerialName("deleted") val deleted: List<DeletionRow> = emptyList(),
+        // A server without the field cannot say, so the device fetches as before.
+        @SerialName("providers_changed") val providersChanged: Boolean = true,
     )
 
     @Serializable
@@ -631,6 +633,7 @@ class SupabaseCloudSyncGateway(
                 deletions = response.deleted.mapNotNull { row ->
                     CloudCollection.fromWire(row.collection)?.let { CloudDeletion(it, row.profileId, row.key) }
                 },
+                providersChanged = response.providersChanged,
             )
         }
 
