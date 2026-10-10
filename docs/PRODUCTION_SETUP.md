@@ -24,7 +24,7 @@ Schema changes go through versioned SQL migrations only. All 8 tables ship with 
    - the GitHub Pages site origin
    - any custom domain added later
 3. **Publish the OAuth consent screen before public launch** — unverified apps block the web `/pair` flow for arbitrary Google accounts.
-4. Session hardening (time-box, inactivity timeout, single-session) stays OFF by design: TVs rely on long-lived rotating refresh tokens (plan F3).
+4. Session hardening (time-box, inactivity timeout, single-session) stays OFF by design: TVs rely on long-lived rotating refresh tokens (plan F3). Auth never deletes the tokens it rotates out, so the `prune-refresh-tokens` pg_cron job (`20261010180000_prune_revoked_refresh_tokens.sql`) deletes, nightly, revoked tokens older than a day except the direct parent of an active token; no session is ever signed out by it.
 5. Magic-link sign-in is descoped (M7). No SMTP needed at launch — TV pairing mints its one-time tokens programmatically via `admin.generateLink`; no email is ever sent.
 
 ### 3. Edge Function secrets
@@ -47,6 +47,8 @@ Set via `supabase secrets set`:
 **Deploy order:** apply `20261010120000_push_to_pull_sync.sql` (`supabase db push`) before releasing any app version that contains push-to-pull sync. That version calls `pull_sync_changes` and cannot sync without it; older versions keep working after the migration.
 
 Devices hold no realtime connection for sync. Each synced row carries a per-account change number, deletions leave a 90-day marker, and the app downloads only what changed through the `pull_sync_changes` RPC: after sign-in, when a screen starts, when the network returns, and when a signal says another device changed something. The signal is an empty `sync` push through Firebase Cloud Messaging, sent by a database trigger through `pg_net` after the change commits. Devices without Google Play services instead listen to a private Realtime broadcast, only while a screen shows. Without Firebase configured, everything still syncs on open and through that broadcast.
+
+Add-ons and artwork keys (`provider_configs`) come only through Edge Functions (`list-provider-configs`, `artwork-key-status`). Since `20261010180100_provider_change_signal.sql`, a change to them signals the account's other devices and the pull reports `providers_changed`; the app calls those two functions only then, not at every launch. The migration is additive in either order: app versions that ignore the field fetch at every launch as before, and an app on a server without it treats every pull as a change.
 
 1. In the Firebase console, create a project without Analytics and add an Android app with package `com.lamphaus.app`.
 2. From that app's `google-services.json` (do not commit it), put these non-secret identifiers in `~/.gradle/gradle.properties`:

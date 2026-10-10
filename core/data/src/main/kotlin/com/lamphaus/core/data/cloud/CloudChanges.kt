@@ -28,6 +28,11 @@ data class CloudChanges(
     /** True when [artworkOverrides] lists every override the account has. */
     val artworkOverridesComplete: Boolean,
     val deletions: List<CloudDeletion>,
+    /**
+     * True when the account's add-ons or artwork keys changed after the
+     * cursor (always on a full pull): only then does the device fetch them.
+     */
+    val providersChanged: Boolean,
 )
 
 /** A row another device removed; each key lives within one profile. */

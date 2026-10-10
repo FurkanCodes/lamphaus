@@ -1,6 +1,7 @@
 package com.lamphaus.core.data.preferences
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -9,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.DiagnosticsConsent
 import com.lamphaus.core.model.NextEpisodePolicy
 import com.lamphaus.core.model.NextEpisodeThresholdMode
@@ -238,6 +240,43 @@ class UserPreferences(private val context: Context) {
 
     suspend fun setSyncCursor(userId: String, cursor: Long) {
         context.dataStore.edit { it[SYNC_CURSOR] = "$userId$SYNC_CURSOR_SEPARATOR$cursor" }
+    }
+
+    /**
+     * The account change number at which a pull last reported changed
+     * add-ons or artwork keys, or null when none has for [userId].
+     */
+    suspend fun providersChangedAt(userId: String): Long? =
+        ownedValue(PROVIDERS_CHANGED_AT, userId)?.toLongOrNull()
+
+    suspend fun setProvidersChangedAt(userId: String, cursor: Long) =
+        setOwnedValue(PROVIDERS_CHANGED_AT, userId, cursor.toString())
+
+    /** The change number this device last fetched [userId]'s add-ons and artwork keys at, or null. */
+    suspend fun providersFetchedAt(userId: String): Long? =
+        ownedValue(PROVIDERS_FETCHED_AT, userId)?.toLongOrNull()
+
+    suspend fun setProvidersFetchedAt(userId: String, cursor: Long) =
+        setOwnedValue(PROVIDERS_FETCHED_AT, userId, cursor.toString())
+
+    /** The artwork providers and saved-key status this device last saw for [userId], or null. */
+    suspend fun artworkStatuses(userId: String): List<ArtworkProviderStatus>? =
+        ownedValue(ARTWORK_STATUSES, userId)?.let { raw ->
+            runCatching { historyJson.decodeFromString<List<ArtworkProviderStatus>>(raw) }.getOrNull()
+        }
+
+    suspend fun setArtworkStatuses(userId: String, statuses: List<ArtworkProviderStatus>) =
+        setOwnedValue(ARTWORK_STATUSES, userId, historyJson.encodeToString(statuses))
+
+    /** A value stored as "userId|value", so it never answers for another account. */
+    private suspend fun ownedValue(key: Preferences.Key<String>, userId: String): String? {
+        val stored = context.dataStore.data.first()[key] ?: return null
+        return stored.substringAfter(SYNC_CURSOR_SEPARATOR)
+            .takeIf { stored.substringBefore(SYNC_CURSOR_SEPARATOR) == userId }
+    }
+
+    private suspend fun setOwnedValue(key: Preferences.Key<String>, userId: String, value: String) {
+        context.dataStore.edit { it[key] = "$userId$SYNC_CURSOR_SEPARATOR$value" }
     }
 
     /** The account whose profiles, library, and history this device holds (SHR-PROD-06). */
@@ -560,6 +599,9 @@ class UserPreferences(private val context: Context) {
             it.remove(SPOILER_BLUR_EPISODE_SYNOPSIS)
             it.remove(SETTINGS_UPDATED)
             it.remove(SYNC_CURSOR)
+            it.remove(PROVIDERS_CHANGED_AT)
+            it.remove(PROVIDERS_FETCHED_AT)
+            it.remove(ARTWORK_STATUSES)
         }
     }
 
@@ -584,6 +626,9 @@ class UserPreferences(private val context: Context) {
         val ACTIVE_PROFILE = stringPreferencesKey("active_profile")
         val PAIRING_DEVICE_ID = stringPreferencesKey("pairing_device_id")
         val SYNC_CURSOR = stringPreferencesKey("sync_cursor")
+        val PROVIDERS_CHANGED_AT = stringPreferencesKey("providers_changed_at")
+        val PROVIDERS_FETCHED_AT = stringPreferencesKey("providers_fetched_at")
+        val ARTWORK_STATUSES = stringPreferencesKey("artwork_statuses")
         val LOCAL_DATA_OWNER = stringPreferencesKey("local_data_owner")
         const val SYNC_CURSOR_SEPARATOR = '|'
         val THEME = stringPreferencesKey("theme")

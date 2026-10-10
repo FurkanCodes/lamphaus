@@ -10,6 +10,7 @@ import com.lamphaus.core.data.repository.applyCloudDelta
 import com.lamphaus.core.data.repository.reconcileLibrary
 import com.lamphaus.core.data.repository.reconcileProgress
 import com.lamphaus.core.model.ArtworkOverride
+import com.lamphaus.core.model.ArtworkProviderStatus
 import com.lamphaus.core.model.Profile
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -38,6 +39,7 @@ class AccountSync(
     private val gateway: CloudSyncGateway,
     private val libraryRepository: LibraryRepository,
     private val cursors: SyncCursors,
+    private val providerState: AccountProviderState,
     private val settings: SyncedSettingsSync,
     private val pushTokens: SyncPushTokens,
     private val installationId: String,
@@ -83,6 +85,30 @@ class AccountSync(
 
     private val mutableSignalMode = MutableStateFlow<SignalMode?>(null)
     val signalMode: StateFlow<SignalMode?> = mutableSignalMode.asStateFlow()
+
+    private val providerChangeCount = MutableStateFlow(0L)
+
+    /** Counts the pulls that reported changed add-ons or artwork keys. */
+    val providerChanges: StateFlow<Long> = providerChangeCount.asStateFlow()
+
+    /**
+     * The change number to record once a fetch of the account's add-ons and
+     * artwork keys that starts now succeeds, or null while this device's copy
+     * is current. A device that never fetched them for [userId] is stale.
+     */
+    suspend fun staleProvidersAt(userId: String): Long? {
+        val changed = providerState.changedAt(userId) ?: 0
+        val fetched = providerState.fetchedAt(userId) ?: return changed
+        return changed.takeIf { it > fetched }
+    }
+
+    suspend fun providersFetched(userId: String, at: Long) = providerState.setFetchedAt(userId, at)
+
+    /** The artwork-key status this device last saw, so key-backed UI needs no request at launch. */
+    suspend fun artworkStatuses(userId: String): List<ArtworkProviderStatus>? = providerState.artworkStatuses(userId)
+
+    suspend fun rememberArtworkStatuses(userId: String, statuses: List<ArtworkProviderStatus>) =
+        providerState.setArtworkStatuses(userId, statuses)
 
     fun artworkOverrides(profileId: String): Flow<List<ArtworkOverride>> =
         overrides.map { byProfile -> byProfile[profileId]?.values?.toList().orEmpty() }.distinctUntilChanged()
@@ -160,6 +186,10 @@ class AccountSync(
         if (signedInUserId() != userId) return null
         apply(userId, changes, localProfiles)
         cursors.setCursor(userId, changes.cursor)
+        if (changes.providersChanged) {
+            providerState.setChangedAt(userId, changes.cursor)
+            providerChangeCount.update { it + 1 }
+        }
         lastSucceededAt = elapsedMillis()
         CloudLog.d(
             "sync.pull ${reason.name.lowercase()} full=${changes.full} profiles=${changes.profiles.size} " +
