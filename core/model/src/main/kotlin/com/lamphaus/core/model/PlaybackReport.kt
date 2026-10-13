@@ -67,7 +67,7 @@ enum class ReportOutcome {
 }
 
 @Serializable
-enum class ReportDelivery { PENDING, SENT, NOT_SENT }
+enum class ReportDelivery { PENDING, SENT }
 
 @Serializable
 data class AppFacts(

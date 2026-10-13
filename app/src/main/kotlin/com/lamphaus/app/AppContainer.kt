@@ -293,16 +293,16 @@ class AppContainer(context: Context) {
      */
     /**
      * The device's playback journal and its opt-in delivery (SHR-PROD-18):
-     * reports leave the device only for a signed-in account that turned on
-     * Performance metrics (playbacks) or Crash reports (crashes).
+     * bad playbacks go to Sentry only while Performance metrics is on.
      */
     val playbackReports = com.lamphaus.core.data.diagnostics.PlaybackReportRepository(
         store = com.lamphaus.app.diagnostics.AppDiagnostics.store,
-        gateway = supabase?.let {
-            com.lamphaus.core.data.cloud.SupabaseDiagnosticsGateway(it, checkNotNull(sessionRecovery), syncInstallationId)
-        } ?: com.lamphaus.core.data.cloud.LocalDiagnosticsGateway,
+        gateway = if (com.lamphaus.app.diagnostics.SentryDiagnostics.configured) {
+            com.lamphaus.app.diagnostics.SentryDiagnosticsGateway
+        } else {
+            com.lamphaus.core.data.cloud.LocalDiagnosticsGateway
+        },
         consent = { preferences.settings.first().diagnostics },
-        signedInUserId = { (accountGateway.state.value as? AccountState.SignedIn)?.userId },
         scope = applicationScope,
     )
     val updatePreferences = com.lamphaus.app.update.UpdatePreferences(context)

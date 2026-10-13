@@ -44,19 +44,47 @@ object PlaybackReportPolicy {
     }
 
     /**
-     * Whether [report] may be sent now: a finished bad report from the last
-     * week, begun after the matching switch was turned on — Performance
-     * metrics for playbacks, Crash reports for crashes.
+     * Whether [report] may be sent now: a finished bad playback from the last
+     * week, begun after Performance metrics was turned on. Crashes never
+     * leave through the journal: the reporting service's SDK sends those,
+     * with native stacks, under Crash reports.
      */
     fun mayBeSent(report: PlaybackReport, consent: DiagnosticsConsent, nowEpochMillis: Long): Boolean {
+        if (report.kind != ReportKind.PLAYBACK || report.outcome == null) return false
         if (report.delivery != ReportDelivery.PENDING) return false
-        if (report.kind == ReportKind.PLAYBACK && report.outcome == null) return false
         if (nowEpochMillis - report.startedAtEpochMillis > SEND_WINDOW_MILLIS) return false
-        val allowed = when (report.kind) {
-            ReportKind.PLAYBACK -> consent.performanceMetrics
-            ReportKind.CRASH -> consent.crashReports
+        return consent.performanceMetrics &&
+            report.startedAtEpochMillis >= consent.updatedAtEpochMillis &&
+            isBad(report)
+    }
+
+    /**
+     * What went wrong, in a few words, for grouping bad playbacks: the first
+     * error's code (with its HTTP status), else why the process died, else
+     * the symptom.
+     */
+    fun cause(report: PlaybackReport): String {
+        val totals = report.totals
+        val firstError = report.events.firstOrNull { it.type == ReportEventType.ERROR }?.detail
+            ?.split(' ')
+            ?.filter { it.startsWith("ERROR_CODE_") || it.startsWith("http=") || it.startsWith("mpv=") }
+            ?.joinToString(" ")
+            ?.removePrefix("ERROR_CODE_")
+            ?.ifEmpty { null }
+        val played = totals.playedMillis.coerceAtLeast(60_000L)
+        return when {
+            report.outcome == ReportOutcome.PROCESS_DIED -> "process died: ${report.exit?.reason ?: "unknown"}"
+            firstError != null -> firstError
+            report.outcome == ReportOutcome.CLOSED_WHILE_LOADING -> "slow start"
+            report.outcome == ReportOutcome.CLOSED_WHILE_BUFFERING ||
+                totals.rebuffers >= REBUFFERS_BAD || totals.rebufferMillis >= REBUFFER_MILLIS_BAD -> "rebuffering"
+            totals.droppedFrames >= DROPPED_FRAMES_BAD &&
+                totals.droppedFrames * 60_000L / played >= DROPPED_PER_MINUTE_BAD -> "dropped frames"
+            totals.audioUnderruns >= UNDERRUNS_BAD -> "audio underruns"
+            totals.engineFallbacks > 0 -> "engine fallback"
+            totals.retries > 0 -> "recovered error"
+            else -> "other"
         }
-        return allowed && report.startedAtEpochMillis >= consent.updatedAtEpochMillis && isBad(report)
     }
 
     /** Closes a playback whose process ended while it was open. */

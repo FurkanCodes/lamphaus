@@ -393,7 +393,7 @@
     <string name="performance_metrics">Performance metrics</string>
     <string name="crash_reports_description">Sends why the app closed: the error type and where in the app it happened.</string>
     <string name="performance_metrics_description">Sends playbacks that failed, stalled, or stuttered: device, player, video format, and error codes.</string>
-    <string name="diagnostics_explanation">Off until you turn them on, and only playbacks that start afterwards are sent. Reports never include what you watch, your add-ons, or stream addresses, and are deleted after 30 days. Reports also stay on this device for troubleshooting.</string>
+    <string name="diagnostics_explanation">Off until you turn them on, and only what happens afterwards is sent. Reports go to Sentry, the error-reporting service Lamphaus uses, and are deleted after 30 days. They never include what you watch, your add-ons, or stream addresses. Reports also stay on this device for troubleshooting.</string>
     <string name="pairing_title">Finish setup on your phone</string>
     <string name="pairing_body">Open Lamphaus on Android, sign in, then scan this code. No account details appear on this shared screen.</string>
     <string name="pairing_expiry">This one-time code expires in five minutes.</string>

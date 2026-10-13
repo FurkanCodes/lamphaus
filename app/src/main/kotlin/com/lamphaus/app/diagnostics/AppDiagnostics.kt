@@ -20,6 +20,8 @@ import com.lamphaus.core.model.ProcessExitFacts
 import com.lamphaus.core.model.ReportKind
 import com.lamphaus.core.model.ReportOutcome
 import com.lamphaus.core.player.PlaybackDiagnostics
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -53,9 +55,22 @@ object AppDiagnostics {
     fun install(application: LamphausApplication) {
         appContext = application
         PlaybackDiagnostics.install(application, app, { device }) { report, closed ->
+            SentryDiagnostics.onPlaybackReport(report, closed)
             application.container.playbackReports.record(report, closed)
         }
         installCrashHandler()
+        // Sentry follows the Privacy switches from the first settings read on,
+        // started off the main thread (QA-08). Posted, so the app's
+        // dependencies are built where they always are, not inside onCreate.
+        Handler(Looper.getMainLooper()).post {
+            val container = application.container
+            container.applicationScope.launch {
+                container.preferences.settings
+                    .map { it.diagnostics }
+                    .distinctUntilChanged()
+                    .collect { consent -> SentryDiagnostics.apply(application, consent) }
+            }
+        }
         Handler(Looper.getMainLooper()).postDelayed({
             val container = application.container
             container.applicationScope.launch {

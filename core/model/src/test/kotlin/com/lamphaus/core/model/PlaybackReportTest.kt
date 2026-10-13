@@ -147,11 +147,28 @@ class PlaybackReportTest {
     }
 
     @Test
-    fun `SHR-PROD-18 crash reports need the crash switch`() {
-        val crash = PlaybackReport(id = "c", kind = ReportKind.CRASH, startedAtEpochMillis = epoch)
-        val consent = DiagnosticsConsent(crashReports = true, updatedAtEpochMillis = epoch - 1)
-        assertTrue(PlaybackReportPolicy.mayBeSent(crash, consent, epoch))
-        assertFalse(PlaybackReportPolicy.mayBeSent(crash, consent.copy(crashReports = false, performanceMetrics = true), epoch))
+    fun `SHR-PROD-18 crashes never leave through the journal`() {
+        val crash = PlaybackReport(id = "c", kind = ReportKind.CRASH, startedAtEpochMillis = epoch, outcome = ReportOutcome.PROCESS_DIED)
+        val consent = DiagnosticsConsent(crashReports = true, performanceMetrics = true, updatedAtEpochMillis = epoch - 1)
+        assertFalse(PlaybackReportPolicy.mayBeSent(crash, consent, epoch))
+    }
+
+    @Test
+    fun `SHR-PROD-18 a bad playback is grouped by its first error, death, or symptom`() {
+        val failed = builder().started().apply {
+            onError(9_000L, 5, 2004, "ERROR_CODE_IO_BAD_HTTP_STATUS http=403 InvalidResponseCodeException")
+            onError(9_500L, 5, 2001, "ERROR_CODE_IO_NETWORK_CONNECTION_FAILED")
+        }.close(20_000L, epoch, null)
+        assertEquals("IO_BAD_HTTP_STATUS http=403", PlaybackReportPolicy.cause(failed))
+
+        val died = builder().started().snapshot(epoch, 10_000L)
+            .let { PlaybackReportPolicy.closeAfterExit(it, ProcessExitFacts(pid = 42, reason = "CRASH_NATIVE")) }
+        assertEquals("process died: CRASH_NATIVE", PlaybackReportPolicy.cause(died))
+
+        val stalled = builder().started().apply { onPhase(EnginePhase.BUFFERING, 9_000L, 1, 0, null) }
+            .close(20_000L, epoch, "viewer")
+        assertEquals("rebuffering", PlaybackReportPolicy.cause(stalled))
+        assertEquals("slow start", PlaybackReportPolicy.cause(builder().close(21_000L, epoch, "viewer")))
     }
 
     @Test

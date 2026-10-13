@@ -18,14 +18,14 @@ import kotlinx.coroutines.withContext
 /**
  * Owns the playback journal and its delivery (SHR-PROD-18, SHR-ARC-05).
  * Reports are written in the order they arrive on one serial dispatcher.
- * Bad reports leave the device only for a signed-in account whose matching
- * switch was on when the playback began (see [PlaybackReportPolicy.mayBeSent]).
+ * Bad playbacks leave the device only when Performance metrics was on as
+ * they began (see [PlaybackReportPolicy.mayBeSent]), at most
+ * [MAX_SENT_PER_DAY] a day; crashes go through the reporting service's own SDK.
  */
 class PlaybackReportRepository(
     private val store: PlaybackReportStore,
     private val gateway: DiagnosticsGateway,
     private val consent: suspend () -> DiagnosticsConsent,
-    private val signedInUserId: () -> String?,
     private val scope: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1),
@@ -70,33 +70,33 @@ class PlaybackReportRepository(
         store.prune()
     }
 
-    /** Sends what may be sent; returns how many reports were delivered. */
+    /** Sends what may be sent; returns how many reports were handed over. */
     suspend fun sendPending(): Int = sending.withLock {
-        val userId = signedInUserId() ?: return 0
         val consent = consent()
-        if (!consent.crashReports && !consent.performanceMetrics) return 0
+        if (!consent.performanceMetrics) return 0
         val now = clock()
         val all = withContext(io) { store.all() }
         val recent = PlaybackReportPolicy.recent(all, now)
+        // The reporting service's free plan is shared by every opted-in device.
+        val sentToday = all.count {
+            it.delivery == ReportDelivery.SENT && now - it.startedAtEpochMillis < DAY_MILLIS
+        }
+        val room = (MAX_SENT_PER_DAY - sentToday).coerceAtLeast(0)
         var sent = 0
-        for (report in all.filter { PlaybackReportPolicy.mayBeSent(it, consent, now) }.take(MAX_PER_RUN)) {
-            val delivery = gateway.send(userId, report.copy(recent = recent))
-            val settled = when (delivery) {
-                DiagnosticsDelivery.SENT -> ReportDelivery.SENT
-                DiagnosticsDelivery.REJECTED -> ReportDelivery.NOT_SENT
-                DiagnosticsDelivery.RATE_LIMITED, DiagnosticsDelivery.UNAVAILABLE -> null
-            } ?: break
-            if (delivery == DiagnosticsDelivery.SENT) sent++
+        for (report in all.filter { PlaybackReportPolicy.mayBeSent(it, consent, now) }.sortedBy { it.startedAtEpochMillis }.take(room)) {
+            if (gateway.send(report.copy(recent = recent)) != DiagnosticsDelivery.SENT) break
+            sent++
             // Re-read so a write that landed meanwhile is not undone.
             withContext(io) {
                 val latest = store.all().firstOrNull { it.id == report.id } ?: report
-                store.write(latest.copy(delivery = settled))
+                store.write(latest.copy(delivery = ReportDelivery.SENT))
             }
         }
         sent
     }
 
-    private companion object {
-        const val MAX_PER_RUN = 10
+    companion object {
+        const val MAX_SENT_PER_DAY = 10
+        private const val DAY_MILLIS = 24L * 60 * 60 * 1000
     }
 }

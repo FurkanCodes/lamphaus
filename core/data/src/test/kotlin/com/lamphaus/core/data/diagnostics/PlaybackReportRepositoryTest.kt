@@ -19,7 +19,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-/** SHR-PROD-18: the journal keeps reports on the device and sends only consented bad ones. */
+/** SHR-PROD-18: the journal keeps reports on the device and sends only consented bad playbacks. */
 class PlaybackReportRepositoryTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -28,7 +28,7 @@ class PlaybackReportRepositoryTest {
 
     private class FakeGateway(var answer: DiagnosticsDelivery = DiagnosticsDelivery.SENT) : DiagnosticsGateway {
         val sent = mutableListOf<PlaybackReport>()
-        override suspend fun send(userId: String, report: PlaybackReport): DiagnosticsDelivery {
+        override suspend fun send(report: PlaybackReport): DiagnosticsDelivery {
             if (answer == DiagnosticsDelivery.SENT) sent += report
             return answer
         }
@@ -40,7 +40,6 @@ class PlaybackReportRepositoryTest {
     private fun TestScope.repository(
         gateway: DiagnosticsGateway,
         consent: DiagnosticsConsent = consented,
-        userId: String? = "user",
         store: PlaybackReportStore = PlaybackReportStore { folder.root },
     ): PlaybackReportRepository {
         val dispatcher = StandardTestDispatcher(testScheduler)
@@ -48,7 +47,6 @@ class PlaybackReportRepositoryTest {
             store = store,
             gateway = gateway,
             consent = { consent },
-            signedInUserId = { userId },
             scope = TestScope(dispatcher),
             clock = { now },
             io = dispatcher,
@@ -71,12 +69,23 @@ class PlaybackReportRepositoryTest {
     }
 
     @Test
-    fun `SHR-PROD-18 nothing leaves the device without consent or an account`() = runTest {
+    fun `SHR-PROD-18 nothing leaves the device without Performance metrics`() = runTest {
         val gateway = FakeGateway()
-        repository(gateway, consent = DiagnosticsConsent()).apply { record(report("a"), closed = true) }
+        repository(gateway, consent = DiagnosticsConsent(crashReports = true)).apply { record(report("a"), closed = true) }
         advanceUntilIdle()
-        repository(gateway, userId = null).sendPending()
         assertTrue(gateway.sent.isEmpty())
+    }
+
+    @Test
+    fun `SHR-PROD-18 a device sends at most ten playbacks a day`() = runTest {
+        val gateway = FakeGateway()
+        val store = PlaybackReportStore { folder.root }
+        repeat(14) { index -> store.write(report("r$index", startedAt = now - 10_000 + index)) }
+        val repository = repository(gateway, store = store)
+
+        assertEquals(PlaybackReportRepository.MAX_SENT_PER_DAY, repository.sendPending())
+        assertEquals(0, repository.sendPending())
+        assertEquals("r0", gateway.sent.first().id)
     }
 
     @Test
@@ -90,16 +99,16 @@ class PlaybackReportRepositoryTest {
     }
 
     @Test
-    fun `SHR-PROD-18 an unreachable backend keeps reports pending, a refusal settles them`() = runTest {
+    fun `SHR-PROD-18 reports wait while reporting is not running`() = runTest {
         val gateway = FakeGateway(DiagnosticsDelivery.UNAVAILABLE)
         val repository = repository(gateway)
         repository.record(report("a"), closed = true)
         advanceUntilIdle()
         assertEquals(ReportDelivery.PENDING, repository.reports().single().delivery)
 
-        gateway.answer = DiagnosticsDelivery.REJECTED
-        repository.sendPending()
-        assertEquals(ReportDelivery.NOT_SENT, repository.reports().single().delivery)
+        gateway.answer = DiagnosticsDelivery.SENT
+        assertEquals(1, repository.sendPending())
+        assertEquals(ReportDelivery.SENT, repository.reports().single().delivery)
     }
 
     @Test
@@ -134,8 +143,9 @@ class PlaybackReportRepositoryTest {
         val reports = repository.reports().associateBy { it.id }
         assertEquals(ReportOutcome.PROCESS_DIED, reports.getValue("open").outcome)
         assertEquals("CRASH_NATIVE", reports.getValue("open").exit?.reason)
+        // The crash itself stays in the journal; the reporting service's SDK sends crashes.
         assertEquals(ReportKind.CRASH, reports.getValue("crash").kind)
-        assertEquals(setOf("open", "crash"), gateway.sent.map { it.id }.toSet())
+        assertEquals(listOf("open"), gateway.sent.map { it.id })
         assertEquals(now, store.exitWatermark())
     }
 }

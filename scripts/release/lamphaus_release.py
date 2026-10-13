@@ -268,6 +268,12 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         if missing_built:
             return fail(f"libmpv.so not built for ABIs {missing_built}; run scripts/build-mpv-libs.sh")
         password = keychain_password(keychain_service, keychain_account)
+        # Sentry mapping upload (SHR-PROD-18): optional, but once named in
+        # signing.properties a missing token fails the release (REL-06 style).
+        sentry_service = signing.get("sentry.keychainService", "")
+        sentry_account = signing.get("sentry.keychainAccount", "")
+        sentry_token = keychain_password(sentry_service, sentry_account) if sentry_service and sentry_account else ""
+        print(f"Sentry R8 mapping upload: {'on' if sentry_token else 'off (no sentry.keychainService)'}")
         # Offline checks that do not need a build.
         print("Running unit tests, release lint, neutrality …")
         for cmd in (
@@ -286,6 +292,8 @@ def cmd_prepare(args: argparse.Namespace) -> int:
             "LAMPHAUS_RELEASE_STORE_PASSWORD": password,
             "LAMPHAUS_RELEASE_KEY_PASSWORD": password,
         })
+        if sentry_token:
+            env["SENTRY_AUTH_TOKEN"] = sentry_token
         release_output = ROOT / "app" / "build" / "outputs" / "apk" / "release"
         for stale_apk in release_output.glob("*.apk"):
             stale_apk.unlink()

@@ -1,6 +1,6 @@
 # Playback diagnostics
 
-How to find out why a playback dropped (`SHR-PROD-18`). Every device keeps a journal of its last 30 playbacks and crashes. Accounts that opt in also send the bad ones to Supabase.
+How to find out why a playback dropped (`SHR-PROD-18`). Every device keeps a journal of its last 30 playbacks and crashes. Viewers who opt in also send crashes and bad playbacks to Sentry.
 
 ## What a report holds
 
@@ -45,47 +45,39 @@ Each playback also logs a one-line summary when it closes:
 adb logcat -s Lamphaus.Playback
 ```
 
-## In Supabase
+## In Sentry
 
-Reports from opted-in accounts land in `public.diagnostic_reports`, which clients can only insert into. Read it in the SQL editor:
+Sentry runs only while Settings → Privacy allows it (TV and mobile, synced with the account):
 
-```sql
--- Latest bad playbacks and crashes
-select created_at, kind, outcome, device_model, app_version,
-       payload->'state'->>'engine' as engine,
-       payload->>'closeReason' as close_reason,
-       payload->'exit'->>'reason' as exit_reason,
-       payload->'totals' as totals
-  from public.diagnostic_reports
- order by created_at desc
- limit 50;
+- **Crash reports** turns on Sentry's own capture: Java crashes, native crashes in libmpv, FFmpeg, or MediaCodec, and ANRs. A crash during a playback carries the tags `playback_report` (the report's id) and `playback_engine`.
+- **Performance metrics** sends each bad playback as an event titled "Playback failed: IO_BAD_HTTP_STATUS http=403", "Playback process died: CRASH_NATIVE", "Playback closed while buffering: rebuffering", and so on. Events are grouped by outcome and cause. The tags `outcome`, `cause`, `engine`, `stream_type`, `video_codec`, `hdr`, `dolby_vision`, `exit_reason`, and `television` filter them. The timeline shows as breadcrumbs, the totals and formats as the `playback` context, and the whole report is attached as `playback-report.json`. `recent` in that context says how many playbacks the device finished in the past week, and how many were bad.
 
--- Which errors happen most
-select e->>'detail' as error, count(*)
-  from public.diagnostic_reports, jsonb_array_elements(payload->'events') e
- where e->>'type' = 'ERROR'
- group by 1 order by 2 desc;
+Useful searches: `report:playback`, `report:playback engine:MPV`, `cause:"process died: CRASH_NATIVE"`. To see the crash behind a "process died" playback, search `playback_report:<id>`.
 
--- Outcomes per device and engine
-select device_model, payload->'state'->>'engine' as engine, outcome, count(*)
-  from public.diagnostic_reports
- where kind = 'playback'
- group by 1, 2, 3 order by 4 desc;
+### Sending rules
 
--- One account's reports
-select created_at, outcome, payload
-  from public.diagnostic_reports
- where user_id = (select id from auth.users where email = 'someone@example.com')
- order by created_at desc;
-```
+- Only what happens after a switch is turned on is sent; playback reports older than a week never are.
+- A bad playback is handed to Sentry when it closes, and anything pending 15 s after the next launch. Sentry queues offline sends itself.
+- Each device sends at most 10 playbacks a day, to keep within Sentry's free plan (5k events a month).
+- Before anything leaves, events lose exception messages, the device name, the IP address, and any address in thread names or breadcrumbs. There are no sessions, tracing, screenshots, or replays.
 
-`payload->'recent'` gives each report a baseline: how many playbacks the device finished in the past week, and how many were bad.
+### Setup
 
-## Sending rules
+1. Create a Sentry project (platform: Android). In its settings, turn on **Data Scrubbing** and **Prevent Storing of IP Addresses**.
+2. Add the public identifiers to `~/.gradle/gradle.properties`. Without a DSN, Sentry never starts and reports stay on the device:
 
-- Performance metrics sends bad playbacks; Crash reports sends crashes and ANRs. Both switches are in Settings → Privacy on TV and mobile, and are account-wide.
-- Only reports begun after the switch was turned on are sent, and none older than a week.
-- A report is sent when its playback closes, and anything pending is sent 15 s after the next launch.
-- The table takes at most 20 reports per account a day (PostgREST answers 429 and the app tries again on a later launch). Reports must be under 32 KB, so the app drops events from the middle of an eventful report to fit. Rows are deleted after 30 days by the `prune-diagnostic-reports` cron job, and with the account.
+   ```properties
+   lamphaus.sentryDsn=https://…@….ingest.sentry.io/…
+   lamphaus.sentryOrg=your-org
+   lamphaus.sentryProject=lamphaus-android
+   ```
 
-Apply the migration (`supabase/migrations/20261013120000_diagnostic_reports.sql`) with `supabase db push` before shipping a build that sends reports. Until then, sends fail quietly and reports stay pending on the device for a week.
+3. Release builds upload their R8 mapping so Java stacks read as source. Create an organization auth token with the `project:releases` scope, then store it in the Keychain:
+
+   ```sh
+   security add-generic-password -s app.lamphaus.release.sentry -a lamphaus-sentry -w '<token>'
+   ```
+
+   Name that Keychain item in `release/signing.properties` (`sentry.keychainService`, `sentry.keychainAccount`). The release script then passes the token to the build as `SENTRY_AUTH_TOKEN`, and fails if the item is named but missing. Other builds upload nothing (REL-05).
+
+libmpv and FFmpeg ship stripped. Native crashes show the library and exported functions, not internal ones. Full native symbols would need unstripped copies kept from `scripts/build-mpv-libs.sh`, uploaded with `sentry-cli debug-files upload`.
