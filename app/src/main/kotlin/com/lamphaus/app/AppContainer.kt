@@ -291,6 +291,20 @@ class AppContainer(context: Context) {
      * sync and the large application ViewModel; application-scoped so checks
      * and reconciliation outlive any single screen.
      */
+    /**
+     * The device's playback journal and its opt-in delivery (SHR-PROD-18):
+     * reports leave the device only for a signed-in account that turned on
+     * Performance metrics (playbacks) or Crash reports (crashes).
+     */
+    val playbackReports = com.lamphaus.core.data.diagnostics.PlaybackReportRepository(
+        store = com.lamphaus.app.diagnostics.AppDiagnostics.store,
+        gateway = supabase?.let {
+            com.lamphaus.core.data.cloud.SupabaseDiagnosticsGateway(it, checkNotNull(sessionRecovery), syncInstallationId)
+        } ?: com.lamphaus.core.data.cloud.LocalDiagnosticsGateway,
+        consent = { preferences.settings.first().diagnostics },
+        signedInUserId = { (accountGateway.state.value as? AccountState.SignedIn)?.userId },
+        scope = applicationScope,
+    )
     val updatePreferences = com.lamphaus.app.update.UpdatePreferences(context)
     val updateRepository = com.lamphaus.app.update.UpdateRepository(context, updatePreferences)
     val updateDownloader = com.lamphaus.app.update.UpdateDownloader(context, updatePreferences)

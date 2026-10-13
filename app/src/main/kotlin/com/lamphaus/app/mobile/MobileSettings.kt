@@ -1615,11 +1615,19 @@ private fun SettingsPrivacyPage(state: AppUiState, viewModel: AppViewModel) {
     SettingsPage(title = stringResource(R.string.privacy)) {
         item {
             SettingsCard(stringResource(R.string.privacy)) {
-                ConsentRow(stringResource(R.string.crash_reports), state.diagnostics.crashReports) {
+                ConsentRow(
+                    stringResource(R.string.crash_reports),
+                    stringResource(R.string.crash_reports_description),
+                    state.diagnostics.crashReports,
+                ) {
                     viewModel.setDiagnostics(state.diagnostics.copy(crashReports = it))
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MobileTokens.hairline)
-                ConsentRow(stringResource(R.string.performance_metrics), state.diagnostics.performanceMetrics) {
+                ConsentRow(
+                    stringResource(R.string.performance_metrics),
+                    stringResource(R.string.performance_metrics_description),
+                    state.diagnostics.performanceMetrics,
+                ) {
                     viewModel.setDiagnostics(state.diagnostics.copy(performanceMetrics = it))
                 }
                 Text(
@@ -1701,9 +1709,10 @@ private fun SettingsCard(
 }
 
 @Composable
-private fun ConsentRow(title: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
+private fun ConsentRow(title: String, supporting: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
     ListItem(
         headlineContent = { Text(title) },
+        supportingContent = { Text(supporting) },
         trailingContent = { Switch(checked, onChecked) },
         modifier = Modifier.sizeIn(minHeight = 48.dp).semantics(mergeDescendants = true) {},
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),

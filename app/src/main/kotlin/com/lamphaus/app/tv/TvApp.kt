@@ -77,6 +77,7 @@ import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.PrivacyTip
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Visibility
@@ -3353,6 +3354,7 @@ private enum class TvSettingsSection(
     PLAYBACK(R.string.playback, Icons.Outlined.PlayArrow),
     APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
     SPOILERS(R.string.spoiler_protection, Icons.Outlined.Visibility),
+    PRIVACY(R.string.privacy, Icons.Outlined.PrivacyTip),
     ABOUT(R.string.about, Icons.Outlined.Info),
 }
 @OptIn(ExperimentalComposeUiApi::class)
@@ -3481,6 +3483,7 @@ private fun TvSettings(
                 TvSettingsSection.PLAYBACK -> TvPlaybackSettings(state, viewModel)
                 TvSettingsSection.APPEARANCE -> TvAppearanceSettings(state, viewModel)
                 TvSettingsSection.SPOILERS -> TvSpoilerSettings(state, viewModel)
+                TvSettingsSection.PRIVACY -> TvPrivacySettings(state, viewModel)
                 TvSettingsSection.ABOUT -> TvAboutSettings(updateViewModel)
             }
         }
@@ -4472,6 +4475,46 @@ private fun TvSpoilerSettings(state: AppUiState, viewModel: AppViewModel) {
         }
     }
 }
+/**
+ * Diagnostics consent on TV (SHR-PROD-18): the same account-wide switches as
+ * mobile Settings → Privacy, so a television can opt in without a phone.
+ */
+@Composable
+private fun TvPrivacySettings(state: AppUiState, viewModel: AppViewModel) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
+    ) {
+        item {
+            Text(stringResource(R.string.privacy), style = MaterialTheme.typography.headlineSmall)
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.performance_metrics),
+                description = stringResource(R.string.performance_metrics_description),
+                checked = state.diagnostics.performanceMetrics,
+                onCheckedChange = { viewModel.setDiagnostics(state.diagnostics.copy(performanceMetrics = it)) },
+            )
+        }
+        item {
+            TvSettingsToggleRow(
+                title = stringResource(R.string.crash_reports),
+                description = stringResource(R.string.crash_reports_description),
+                checked = state.diagnostics.crashReports,
+                onCheckedChange = { viewModel.setDiagnostics(state.diagnostics.copy(crashReports = it)) },
+            )
+        }
+        item {
+            Text(
+                stringResource(R.string.diagnostics_explanation),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 /** Aggregated rating sources offered by the MDBList integration (spec: recommended set). */
 private val ratingSourceOptions = listOf(
     R.string.source_imdb,

@@ -18,6 +18,7 @@ class LamphausPlaybackService : MediaSessionService() {
         playerConfig = Media3EngineFactory.deviceConfig
         val player = Media3EngineFactory.createPlayer(this, playerConfig)
         Media3EngineFactory.sessionPlayer = player
+        PlaybackDiagnostics.attach(player)
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val sessionActivity = launchIntent?.let {
             PendingIntent.getActivity(
@@ -49,15 +50,16 @@ class LamphausPlaybackService : MediaSessionService() {
         playerConfig = wanted
         session.player = fresh
         Media3EngineFactory.sessionPlayer = fresh
+        PlaybackDiagnostics.attach(fresh)
         current.release()
         installFallback(session)
     }
 
     private fun installFallback(session: MediaSession) {
         PlaybackEngineFallback.install(this, session) { replacement, state ->
-            adoptPlayer(session, replacement)
             // Diagnostics record only the engine switch, never the source (SHR-PROD-06).
-            android.util.Log.i("LamphausPlayback", "engine switch: ${state.fallbackReason}")
+            PlaybackDiagnostics.note(com.lamphaus.core.model.ReportEventType.ENGINE_FALLBACK, detail = state.fallbackReason)
+            adoptPlayer(session, replacement)
         }
     }
 
@@ -67,6 +69,7 @@ class LamphausPlaybackService : MediaSessionService() {
      */
     private fun adoptPlayer(session: MediaSession, player: androidx.media3.common.Player) {
         Media3EngineFactory.sessionPlayer = player as? androidx.media3.exoplayer.ExoPlayer
+        PlaybackDiagnostics.attach(player)
         if (player is androidx.media3.exoplayer.ExoPlayer) playerConfig = Media3EngineFactory.deviceConfig
         installFallback(session)
         // The session never passes the video surface on to a new player: the

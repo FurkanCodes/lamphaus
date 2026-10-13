@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import com.lamphaus.core.model.ReportEventType
 import com.lamphaus.core.player.mpv.MpvLibrary
 
 /** Process-wide recovery state the activity reads while it waits for playback to start. */
@@ -65,8 +66,16 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
                 )
             ) {
                 StreamingPolicy.StallDecision.Wait -> handler.postDelayed(this, StreamingPolicy.STALL_POLL_MS)
-                StreamingPolicy.StallDecision.GiveUp -> Unit
-                is StreamingPolicy.StallDecision.Seek -> player.seekTo(decision.positionMillis)
+                StreamingPolicy.StallDecision.GiveUp ->
+                    PlaybackDiagnostics.note(ReportEventType.STALL_GAVE_UP, value = now - stallSinceMillis)
+                is StreamingPolicy.StallDecision.Seek -> {
+                    PlaybackDiagnostics.note(
+                        ReportEventType.STALL_SKIP,
+                        value = now - stallSinceMillis,
+                        position = decision.positionMillis,
+                    )
+                    player.seekTo(decision.positionMillis)
+                }
             }
         }
     }
@@ -78,7 +87,7 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
      */
     private val firstFrameWatchdog = Runnable {
         if (!firstFrameRendered && player.playbackState == Player.STATE_READY && player.playWhenReady) {
-            fallBackToBaseLayer()
+            fallBackToBaseLayer("no picture")
         }
     }
 
@@ -130,7 +139,7 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
         val decoding = error.errorCode in PlaybackException.ERROR_CODE_DECODER_INIT_FAILED..PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED
         // A converted Dolby Vision stream gets its base layer before anything else.
         if (decoding && canFallBackToBaseLayer()) {
-            fallBackToBaseLayer()
+            fallBackToBaseLayer("decoder error")
             return
         }
         val causes = generateSequence<Throwable>(error) { it.cause }.toList()
@@ -149,8 +158,22 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
         val step = StreamingPolicy.recoveryStep(firstFrameRendered, attempt)?.takeIf { recoverable }
         if (step == null) {
             PlaybackRecovery.isRecovering = false
+            PlaybackDiagnostics.note(
+                ReportEventType.RECOVERY_GAVE_UP,
+                detail = when {
+                    engineSwitches -> "engine switch"
+                    !recoverable -> "not retried"
+                    else -> "attempts spent"
+                },
+            )
             return
         }
+        PlaybackDiagnostics.note(
+            ReportEventType.RETRY,
+            value = attempt + 1L,
+            detail = listOfNotNull(step.name, if (firstFrameRendered) "playing" else "startup", status?.let { "http=$it" })
+                .joinToString(" "),
+        )
         if (firstFrameRendered) playbackAttempts++ else startupAttempts++
         val position = player.currentPosition.coerceAtLeast(0L)
         PlaybackRecovery.isRecovering = true
@@ -195,9 +218,10 @@ internal class PlaybackRecoveryListener(private val player: ExoPlayer) : Player.
         }
     }
 
-    private fun fallBackToBaseLayer() {
+    private fun fallBackToBaseLayer(reason: String) {
         if (!canFallBackToBaseLayer() || Media3EngineFactory.sessionPlayer !== player) return
         val item = player.currentMediaItem ?: return
+        PlaybackDiagnostics.note(ReportEventType.DOLBY_VISION_BASE_LAYER, detail = reason)
         val position = player.currentPosition.coerceAtLeast(0L)
         val playWhenReady = player.playWhenReady
         DolbyVisionSession.forceBaseLayer = true
