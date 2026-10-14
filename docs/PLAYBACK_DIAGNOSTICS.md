@@ -11,7 +11,7 @@ One JSON file per playback (`kind: PLAYBACK`) or crash (`kind: CRASH`), written 
 - `events`: a timeline in milliseconds since the start. It covers readiness, first frame, buffering (with buffer level and bandwidth), seeks, and non-viewer pauses (audio focus, output removed). It also covers errors (code name, HTTP status, renderer and decoder, cause classes) and load errors. Then retries, stall skips, the Dolby Vision base-layer fallback, engine fallbacks, decoders and the audio output, dropped-frame bursts, audio underruns, network changes, low memory, background and foreground, and the close.
 - `totals`: startup time, rebuffers and their time, play time, dropped frames, underruns, errors, retries, seeks.
 - `outcome`: `ENDED`, `CLOSED`, `CLOSED_WHILE_LOADING`, `CLOSED_WHILE_BUFFERING`, `FAILED`, `CLOSED_IN_BACKGROUND`, or `PROCESS_DIED`.
-- `closeReason`: why the player closed. When the Back key did it, this adds the key's source and device ids, so a remote or HDMI-CEC device sending Back on its own shows up (`source=0x2000001` is HDMI).
+- `closeReason`: why the player closed (`viewer` for Back or Close, `switched playback`, `up next declined`, `end screen timed out`, …). Android 13+ hands Back to the app as a gesture without its key, so which remote sent it is not knowable.
 - `exit`: when the process died, Android's reason from the next launch (`CRASH`, `CRASH_NATIVE`, `ANR` with the main thread's stack, `LOW_MEMORY`, …), with memory use.
 - `crash`: exception classes and stack frames, never messages.
 

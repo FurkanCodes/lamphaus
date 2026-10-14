@@ -15,7 +15,6 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
-import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.ComponentActivity
@@ -173,8 +172,6 @@ class PlayerActivity : ComponentActivity() {
     /** This playback's diagnostics report (SHR-PROD-18) and why the player closed. */
     private var diagnosticsReportId: String? = null
     private var diagnosticsCloseReason: String? = null
-    /** When and from which device the last Back key arrived, for closes nobody meant. */
-    private var lastBackKey: Pair<Long, String>? = null
 
     /** Position of the last progress write; guards against redundant periodic saves. */
     @Volatile
@@ -1101,32 +1098,10 @@ class PlayerActivity : ComponentActivity() {
         closePlayer("switched playback")
     }
 
-    /**
-     * Closes the player, noting why for its diagnostics report. A close by
-     * the Back key also notes where the key came from, so a remote or HDMI-CEC
-     * device sending Back on its own shows up (SHR-PROD-18).
-     */
+    /** Closes the player, noting why for its diagnostics report (SHR-PROD-18). */
     private fun closePlayer(reason: String) {
-        val key = lastBackKey?.takeIf { (at, _) -> SystemClock.elapsedRealtime() - at < BACK_KEY_WINDOW_MILLIS }?.second
-        diagnosticsCloseReason = if (key != null) "$reason, back key $key" else reason
+        diagnosticsCloseReason = reason
         finish()
-    }
-
-    // Activity.dispatchKeyEvent is framework API; only androidx's override of it
-    // is marked library-internal, which lint reports on every subclass override.
-    @android.annotation.SuppressLint("RestrictedApi")
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
-            val device = event.device
-            lastBackKey = SystemClock.elapsedRealtime() to listOfNotNull(
-                "source=0x%x".format(java.util.Locale.ROOT, event.source),
-                device?.let { "device=%04x:%04x".format(java.util.Locale.ROOT, it.vendorId, it.productId) },
-                "virtual".takeIf { device?.isVirtual == true },
-                "external".takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && device?.isExternal == true },
-                "repeat".takeIf { event.repeatCount > 0 },
-            ).joinToString(" ")
-        }
-        return super.dispatchKeyEvent(event)
     }
 
     override fun onUserLeaveHint() {
@@ -1713,9 +1688,6 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private const val PROGRESS_LOG_TAG = "Lamphaus.Progress"
-
-        /** A Back key this recent is what closed the player. */
-        private const val BACK_KEY_WINDOW_MILLIS = 1_500L
         private const val EXTRA_REQUEST = "playback_request"
 
         /** How often playback position is persisted while the player is open. */
