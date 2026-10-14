@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.android.baselineprofile)
+    alias(libs.plugins.sentry.android)
 }
 
 // Single tracked version identity consumed by Gradle and release tooling
@@ -28,6 +29,12 @@ val firebaseProjectId = providers.gradleProperty("lamphaus.firebaseProjectId").o
 val firebaseAppId = providers.gradleProperty("lamphaus.firebaseAppId").orNull.orEmpty()
 val firebaseApiKey = providers.gradleProperty("lamphaus.firebaseApiKey").orNull.orEmpty()
 val firebaseSenderId = providers.gradleProperty("lamphaus.firebaseSenderId").orNull.orEmpty()
+// Crash and playback reports (SHR-PROD-18) go to Sentry, only for viewers who
+// opt in. The DSN is public; without it Sentry never starts. The auth token
+// that uploads R8 mappings is a secret the release script passes from the
+// Keychain on the owner's machine (REL-05); builds without it upload nothing.
+val sentryDsn = providers.gradleProperty("lamphaus.sentryDsn").orNull.orEmpty()
+val sentryAuthToken = providers.environmentVariable("SENTRY_AUTH_TOKEN").orNull.orEmpty()
 val pushConfigured = cloudConfigured &&
     listOf(firebaseProjectId, firebaseAppId, firebaseApiKey, firebaseSenderId).all { it.isNotBlank() }
 // PERF-02: keep fixture startup and production-like startup as distinct
@@ -83,6 +90,7 @@ android {
         buildConfigField("String", "EMAIL_LINK_DOMAIN", "\"${providers.gradleProperty("lamphaus.emailLinkDomain").orNull ?: "links.lamphaus.app"}\"")
         buildConfigField("String", "WEB_CLIENT_ID", "\"${providers.gradleProperty("lamphaus.webClientId").orNull.orEmpty()}\"")
         buildConfigField("String", "UPDATE_FEED_URL", "\"$updateFeedUrl\"")
+        buildConfigField("String", "SENTRY_DSN", "\"$sentryDsn\"")
         // Production update discovery only; debug/staging builds never poll it.
         buildConfigField("boolean", "UPDATES_ENABLED", "false")
         buildConfigField("boolean", "BENCHMARK_FIXTURES", "false")
@@ -174,6 +182,27 @@ android {
     }
 }
 
+// Sentry's plugin only uploads R8 mappings for release builds, so Java crash
+// stacks read as source. Everything else it can do (installing the SDK,
+// bytecode tracing, logcat capture, sources, its own telemetry) stays off.
+sentry {
+    org.set(providers.gradleProperty("lamphaus.sentryOrg"))
+    projectName.set(providers.gradleProperty("lamphaus.sentryProject"))
+    authToken.set(sentryAuthToken)
+    includeProguardMapping.set(true)
+    autoUploadProguardMapping.set(sentryAuthToken.isNotBlank())
+    // libmpv and FFmpeg ship stripped; their exported symbols still resolve.
+    uploadNativeSymbols.set(false)
+    includeNativeSources.set(false)
+    includeSourceContext.set(false)
+    includeDependenciesReport.set(false)
+    ignoredBuildTypes.set(setOf("debug", "staging"))
+    telemetry.set(false)
+    autoInstallation { enabled.set(false) }
+    tracingInstrumentation { enabled.set(false) }
+    runtimeOptimizations { enabled.set(false) }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -243,6 +272,8 @@ dependencies {
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+    implementation(libs.sentry.android.core)
+    implementation(libs.sentry.android.ndk)
     baselineProfile(project(":benchmark"))
 
     testImplementation(libs.junit)

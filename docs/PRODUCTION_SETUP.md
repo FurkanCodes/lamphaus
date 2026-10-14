@@ -157,7 +157,7 @@ Next.js static export deployed to GitHub Pages (`web-deploy.yml`). Routes: `/` p
 
 ## Release
 
-Use Play App Signing and inject upload credentials through CI secrets. Supply a verified privacy-policy URL, support contact, finalized package ownership, and legal approval before `bundleRelease` is promoted. Diagnostics (crash reports / performance metrics) remain off until the user opts in.
+Use Play App Signing and inject upload credentials through CI secrets. Supply a verified privacy-policy URL, support contact, finalized package ownership, and legal approval before `bundleRelease` is promoted. Diagnostics (crash reports / performance metrics) remain off until the user opts in; see `docs/PLAYBACK_DIAGNOSTICS.md` (SHR-PROD-18).
 
 ## Launch checklist
 

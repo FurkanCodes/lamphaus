@@ -103,6 +103,14 @@ class MpvPlayer(
 
     val isUsable: Boolean get() = handle != 0L && !released
 
+    /** Frames mpv's output and decoder have dropped in the loaded file, for playback diagnostics (SHR-PROD-18). */
+    fun droppedFrameCount(): Long? {
+        if (!isUsable) return null
+        val output = MpvLibrary.getPropertyString(handle, "frame-drop-count")?.toLongOrNull() ?: 0L
+        val decoder = MpvLibrary.getPropertyString(handle, "decoder-frame-drop-count")?.toLongOrNull() ?: 0L
+        return output + decoder
+    }
+
     init {
         handle = MpvLibrary.create()
         check(handle != 0L) { "libmpv.so is not present; check MpvLibrary.availability first" }

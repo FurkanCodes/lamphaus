@@ -42,6 +42,23 @@
         android:usesCleartextTraffic="false"
         tools:targetApi="33">
 
+        <!-- Sentry starts only while the viewer allows reports (SHR-PROD-18),
+             from AppDiagnostics; its own launch-time start is removed. -->
+        <provider
+            android:name="io.sentry.android.core.SentryInitProvider"
+            android:authorities="${applicationId}.SentryInitProvider"
+            tools:node="remove" />
+        <provider
+            android:name="io.sentry.android.core.SentryPerformanceProvider"
+            android:authorities="${applicationId}.SentryPerformanceProvider"
+            tools:node="remove" />
+        <!-- A .NET-runtime preload; Lamphaus has no use for it at launch (QA-08). -->
+        <provider
+            android:name="io.sentry.ndk.SentryNdkPreloadProvider"
+            android:authorities="${applicationId}.SentryNdkPreloadProvider"
+            tools:ignore="MissingClass"
+            tools:node="remove" />
+
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
             android:value="com.lamphaus.app.cast.LamphausCastOptionsProvider" />

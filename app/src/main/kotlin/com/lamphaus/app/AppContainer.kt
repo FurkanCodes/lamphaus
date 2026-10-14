@@ -291,6 +291,20 @@ class AppContainer(context: Context) {
      * sync and the large application ViewModel; application-scoped so checks
      * and reconciliation outlive any single screen.
      */
+    /**
+     * The device's playback journal and its opt-in delivery (SHR-PROD-18):
+     * bad playbacks go to Sentry only while Performance metrics is on.
+     */
+    val playbackReports = com.lamphaus.core.data.diagnostics.PlaybackReportRepository(
+        store = com.lamphaus.app.diagnostics.AppDiagnostics.store,
+        gateway = if (com.lamphaus.app.diagnostics.SentryDiagnostics.configured) {
+            com.lamphaus.app.diagnostics.SentryDiagnosticsGateway
+        } else {
+            com.lamphaus.core.data.cloud.LocalDiagnosticsGateway
+        },
+        consent = { preferences.settings.first().diagnostics },
+        scope = applicationScope,
+    )
     val updatePreferences = com.lamphaus.app.update.UpdatePreferences(context)
     val updateRepository = com.lamphaus.app.update.UpdateRepository(context, updatePreferences)
     val updateDownloader = com.lamphaus.app.update.UpdateDownloader(context, updatePreferences)

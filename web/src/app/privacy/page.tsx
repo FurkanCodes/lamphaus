@@ -13,7 +13,7 @@ export default function PrivacyPage() {
   return (
     <article className="mx-auto w-full max-w-2xl px-6 py-16 md:px-0">
       <h1 className="font-display text-3xl font-semibold tracking-tight">Privacy</h1>
-      <p className="mt-2 text-sm text-fg-subtle">Effective August 25, 2026</p>
+      <p className="mt-2 text-sm text-fg-subtle">Effective October 13, 2026</p>
 
       <div className="mt-10 space-y-8 leading-relaxed text-fg-muted [&_h2]:font-display [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-fg [&_h2]:mb-2">
         <section>
@@ -28,6 +28,17 @@ export default function PrivacyPage() {
             device registers with Google's push service (Firebase Cloud
             Messaging). The message only says "sync" — never what you watched,
             saved or changed — and the device then fetches the change from us.
+          </p>
+          <p className="mt-3">
+            If you turn on Crash reports or Performance metrics in the app's
+            Settings → Privacy, the app also sends error reports to Sentry, the
+            error-reporting service we use. They describe why the app closed, or
+            what went wrong in a playback that failed, stalled or stuttered: the
+            device model, Android version, player, video format, error codes and
+            where in the app the error happened. They never include what you
+            watched, your add-ons or stream addresses, aren't tied to your
+            account, and Sentry deletes them after 30 days. Both are off unless
+            you turn them on.
           </p>
         </section>
         <section>

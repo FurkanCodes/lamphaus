@@ -15,6 +15,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.ComponentActivity
@@ -70,6 +71,7 @@ import com.lamphaus.core.model.streamTraits
 import com.lamphaus.core.player.LamphausPlaybackService
 import com.lamphaus.core.player.Media3EngineFactory
 import com.lamphaus.core.player.PlaybackRecovery
+import com.lamphaus.core.player.PlaybackDiagnostics
 import com.lamphaus.core.player.PlaybackHeaderRegistry
 import com.lamphaus.core.player.toMediaItem
 import com.lamphaus.app.ui.SourceResolution
@@ -168,6 +170,11 @@ class PlayerActivity : ComponentActivity() {
     private var subtitleStyleSaveJob: Job? = null
     private var subtitleDelaySaveJob: Job? = null
     private var audioDelaySaveJob: Job? = null
+    /** This playback's diagnostics report (SHR-PROD-18) and why the player closed. */
+    private var diagnosticsReportId: String? = null
+    private var diagnosticsCloseReason: String? = null
+    /** When and from which device the last Back key arrived, for closes nobody meant. */
+    private var lastBackKey: Pair<Long, String>? = null
 
     /** Position of the last progress write; guards against redundant periodic saves. */
     @Volatile
@@ -360,7 +367,7 @@ class PlayerActivity : ComponentActivity() {
                     spoilerProtection = spoilerProtectionState.value,
                     nextEpisodeDismissed =
                         nextEpisodeDismissedVideoId.value == currentRequest.videoId,
-                    onExit = ::finish,
+                    onExit = { closePlayer("viewer") },
                     onOpenExternally = ::openExternally,
                     onNextEpisode = ::playNextEpisode,
                     onDismissNextEpisodeMessage = { nextEpisodeMessageState.value = null },
@@ -436,6 +443,20 @@ class PlayerActivity : ComponentActivity() {
                         anime = playback.preview?.looksLikeAnime() == true,
                         mpvAvailable = MpvLibrary.isAvailable(),
                         demandingVideo = (traits.height ?: 0) >= 2160 || traits.hdr || traits.dolbyVision,
+                    )
+                    diagnosticsReportId = PlaybackDiagnostics.begin(
+                        engineSetting = Media3EngineFactory.deviceConfig.engineKind.name,
+                        startEngine = engine.name,
+                        streamType = PlaybackDiagnostics.streamType(playback.source.uri, playback.source.mimeType),
+                        resumed = playback.startPositionMillis > 0,
+                        labeledTraits = listOfNotNull(
+                            traits.height?.let { "${it}p" },
+                            traits.videoCodec?.name,
+                            "DV".takeIf { traits.dolbyVision },
+                            "HDR".takeIf { traits.hdr },
+                            "remux".takeIf { traits.remux },
+                            traits.audio.takeIf { it != com.lamphaus.core.model.EncodedAudioFormat.NONE }?.name,
+                        ).joinToString(" "),
                     )
                     mediaController.sendCustomCommand(
                         androidx.media3.session.SessionCommand(ACTION_SELECT_ENGINE, Bundle.EMPTY),
@@ -752,7 +773,7 @@ class PlayerActivity : ComponentActivity() {
                 delay(1_000)
             }
             endPromptState.value = null
-            finish()
+            closePlayer("end screen timed out")
         }
     }
 
@@ -769,7 +790,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun declineUpNext() {
         clearEndPrompt()
-        finish()
+        closePlayer("up next declined")
     }
 
     /** "Continue": the viewer is here, so the next episode starts and the streak resets. */
@@ -780,7 +801,7 @@ class PlayerActivity : ComponentActivity() {
 
     private fun stopWatching() {
         clearEndPrompt()
-        finish()
+        closePlayer("still watching stopped")
     }
 
     /** Finished screen: the same title again from the start, in this session. */
@@ -1077,7 +1098,35 @@ class PlayerActivity : ComponentActivity() {
      */
     private fun switchPlayback(next: PlaybackRequest) {
         pendingNextPlayback = next
+        closePlayer("switched playback")
+    }
+
+    /**
+     * Closes the player, noting why for its diagnostics report. A close by
+     * the Back key also notes where the key came from, so a remote or HDMI-CEC
+     * device sending Back on its own shows up (SHR-PROD-18).
+     */
+    private fun closePlayer(reason: String) {
+        val key = lastBackKey?.takeIf { (at, _) -> SystemClock.elapsedRealtime() - at < BACK_KEY_WINDOW_MILLIS }?.second
+        diagnosticsCloseReason = if (key != null) "$reason, back key $key" else reason
         finish()
+    }
+
+    // Activity.dispatchKeyEvent is framework API; only androidx's override of it
+    // is marked library-internal, which lint reports on every subclass override.
+    @android.annotation.SuppressLint("RestrictedApi")
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_DOWN) {
+            val device = event.device
+            lastBackKey = SystemClock.elapsedRealtime() to listOfNotNull(
+                "source=0x%x".format(java.util.Locale.ROOT, event.source),
+                device?.let { "device=%04x:%04x".format(java.util.Locale.ROOT, it.vendorId, it.productId) },
+                "virtual".takeIf { device?.isVirtual == true },
+                "external".takeIf { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && device?.isExternal == true },
+                "repeat".takeIf { event.repeatCount > 0 },
+            ).joinToString(" ")
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onUserLeaveHint() {
@@ -1250,8 +1299,19 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        PlaybackDiagnostics.background(diagnosticsReportId, false)
+    }
+
     override fun onStop() {
         saveProgress(final = true)
+        // Before the pause below, so the report keeps where playback stood.
+        if (isFinishing) {
+            PlaybackDiagnostics.close(diagnosticsReportId, diagnosticsCloseReason ?: "finished")
+        } else if (!isChangingConfigurations && !displayModeSwitchInFlight) {
+            PlaybackDiagnostics.background(diagnosticsReportId, true)
+        }
         // A TV mode switch briefly stops the activity. Do not pause the source
         // in that window or the display match looks like a three-second crash.
         if ((isTelevision || isFinishing) && !isChangingConfigurations && !displayModeSwitchInFlight) {
@@ -1279,6 +1339,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        PlaybackDiagnostics.close(diagnosticsReportId, diagnosticsCloseReason ?: "destroyed")
         seekPreviews?.release()
         seekPreviews = null
         audioDeviceCallback?.let { callback ->
@@ -1652,6 +1713,9 @@ class PlayerActivity : ComponentActivity() {
 
     companion object {
         private const val PROGRESS_LOG_TAG = "Lamphaus.Progress"
+
+        /** A Back key this recent is what closed the player. */
+        private const val BACK_KEY_WINDOW_MILLIS = 1_500L
         private const val EXTRA_REQUEST = "playback_request"
 
         /** How often playback position is persisted while the player is open. */

@@ -15,6 +15,10 @@ production.signerFingerprint=
 production.feedUrl=https://raw.githubusercontent.com/furkancodes/lamphaus/release-metadata/updates/v1/index.json
 production.feedRepo=furkancodes/lamphaus
 production.metadataBranch=release-metadata
+# Optional: Sentry auth token for uploading R8 mappings (SHR-PROD-18), kept in
+# macOS Keychain like the keystore password. Leave unset to build without upload.
+# sentry.keychainService=app.lamphaus.release.sentry
+# sentry.keychainAccount=lamphaus-sentry
 # Trusted metadata signing key IDs (primary + offline recovery). Public keys are
 # embedded in the app and website; rotation is documented in the runbook.
 metadata.primaryKeyId=lamphaus-metadata-1

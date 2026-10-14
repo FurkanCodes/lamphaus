@@ -68,7 +68,7 @@ Lamphaus is one native Android app with purpose-built phone/tablet and televisio
 **Honest by design**
 
 - Provider-neutral: no bundled content and no affiliation with any media service.
-- Add-on addresses are hidden once added and never appear in diagnostics. No ads, no tracking scripts; crash reports only if you turn them on.
+- Add-on addresses are hidden once added and never appear in diagnostics. No ads, no tracking scripts; crash and playback reports only if you turn them on.
 
 ## Install
 
