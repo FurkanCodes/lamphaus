@@ -18,10 +18,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * End-of-playback contract (PLY-AUTO-01, MOB-A11Y-01, MOB-TYP-03): "Up next"
- * shows the next episode's code, title, and synopsis over a Yes/No question,
- * leaves the synopsis out under spoiler protection, waits without a countdown
- * unless auto-close is on, and keeps both answers reachable at 200% font. The
+ * End-of-playback contract (PLY-AUTO-01, MOB-A11Y-01, MOB-TYP-03, TV-NAV-04):
+ * "Up next" shows the series and the next episode's code, title, and synopsis
+ * over a Yes/No question, leaves the synopsis out under spoiler protection,
+ * waits without a countdown unless auto-close is on, and keeps both answers
+ * reachable at 200% font. After Yes it stays, saying where the start stands,
+ * with Cancel in place of the answers; a failed start keeps the answers. The
  * Finished screen offers Watch again and Close.
  */
 @RunWith(AndroidJUnit4::class)
@@ -44,6 +46,9 @@ class UpNextPromptTest {
         secondsLeft: Int? = 42,
         onYes: () -> Unit = {},
         onNo: () -> Unit = {},
+        progress: NextEpisodeProgress = NextEpisodeProgress.Idle,
+        failureMessage: String? = null,
+        onCancel: () -> Unit = {},
     ) {
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(density = 1f, fontScale = fontScale)) {
@@ -55,6 +60,10 @@ class UpNextPromptTest {
                     isTelevision = false,
                     onYes = onYes,
                     onNo = onNo,
+                    seriesTitle = "Night Observatory",
+                    progress = progress,
+                    failureMessage = failureMessage,
+                    onCancel = onCancel,
                 )
             }
         }
@@ -65,6 +74,7 @@ class UpNextPromptTest {
         setContent()
 
         compose.onNodeWithText("Up next").assertIsDisplayed()
+        compose.onNodeWithText("Night Observatory").assertIsDisplayed()
         compose.onNodeWithText("S1 · E2 • The Second Hour").assertIsDisplayed()
         compose.onNodeWithText("The crew returns to the observatory.").assertIsDisplayed()
         compose.onNodeWithText("Continue watching?").assertIsDisplayed()
@@ -108,6 +118,37 @@ class UpNextPromptTest {
 
         compose.onNodeWithText("Continue watching?").assertIsDisplayed()
         compose.onNodeWithText("Closes in", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun yesStaysOnScreenWithProgressAndCancel() {
+        var cancelled = 0
+        setContent(secondsLeft = null, progress = NextEpisodeProgress.Searching, onCancel = { cancelled++ })
+
+        compose.onNodeWithText("Finding source…").assertIsDisplayed()
+        compose.onNodeWithText("S1 · E2 • The Second Hour").assertIsDisplayed()
+        compose.onNodeWithText("Yes").assertDoesNotExist()
+        compose.onNodeWithText("Cancel").performClick()
+
+        assertEquals(1, cancelled)
+    }
+
+    @Test
+    fun aStartTheViewerAskedForNamesItsSource() {
+        setContent(secondsLeft = null, progress = NextEpisodeProgress.Starting("Torrentio 1080p", 0))
+
+        compose.onNodeWithText("Playing via Torrentio 1080p").assertIsDisplayed()
+    }
+
+    @Test
+    fun aFailedStartKeepsTheAnswersToTryAgain() {
+        var yes = 0
+        setContent(secondsLeft = null, failureMessage = "No source", onYes = { yes++ })
+
+        compose.onNodeWithText("No source").assertIsDisplayed()
+        compose.onNodeWithText("Yes").performClick()
+
+        assertEquals(1, yes)
     }
 
     @Test

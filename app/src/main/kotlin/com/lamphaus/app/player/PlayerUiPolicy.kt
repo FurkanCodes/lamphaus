@@ -59,6 +59,12 @@ internal fun subtitleLanguageDisplayName(
 internal const val REMOTE_SEEK_COMMIT_DELAY_MILLIS = 450L
 
 /**
+ * The next episode's source is searched this long before the credits begin,
+ * so a skipped ending lands on a source that is already found (PLY-AUTO-01).
+ */
+internal const val NEXT_EPISODE_PREFETCH_LEAD_MILLIS = 60_000L
+
+/**
  * Seek step for a remote key, growing while it is held (Nuvio's scrub
  * rates): 10 s for a tap, then 20 s, 30 s, and a minute on a long hold.
  * [repeatCount] is the key event's auto-repeat count.

@@ -66,6 +66,10 @@ internal fun PlayerControls(
     onSeekBack: () -> Unit,
     onSeekForward: () -> Unit,
     onSeekTo: (Long) -> Unit,
+    /** TV: the bar's Left/Right gather like the remote's seeks (PLY-SEEK-01). */
+    onKeySeek: (forward: Boolean, repeatCount: Int) -> Unit,
+    /** Where a gathering TV seek will land; the bar shows it until it does. */
+    seekTargetMillis: Long?,
     onEnterPictureInPicture: () -> Unit,
     pictureInPictureAvailable: Boolean,
     canPlayNext: Boolean,
@@ -121,8 +125,9 @@ internal fun PlayerControls(
                 PlayerTvTitle(request)
                 Spacer(Modifier.height(16.dp))
                 PlayerProgress(
-                    snapshot.positionMillis, snapshot.bufferedPositionMillis, snapshot.durationMillis,
+                    seekTargetMillis ?: snapshot.positionMillis, snapshot.bufferedPositionMillis, snapshot.durationMillis,
                     Modifier.fillMaxWidth(), onSeekTo, onInteraction, segments,
+                    onKeySeek = onKeySeek,
                 )
                 Spacer(Modifier.height(16.dp))
                 Row(

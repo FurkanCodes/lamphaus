@@ -287,6 +287,10 @@ internal fun PlaybackScreen(
     spoilerProtection: SpoilerProtectionSettings,
     nextEpisodeDismissed: Boolean,
     onDismissNextEpisodeCard: () -> Unit,
+    /** Stops a next-episode start in progress without dismissing the card. */
+    onCancelNextEpisode: () -> Unit = {},
+    /** The next episode is close: search its source now, so starting it uses what was found. */
+    onPrefetchNextEpisode: () -> Unit = {},
     onPlayerViewLayout: (android.view.View) -> Unit,
     onEnterPictureInPicture: () -> Unit,
     pictureInPictureAvailable: Boolean,
@@ -351,6 +355,9 @@ internal fun PlaybackScreen(
     // seek once: tap-tap-tap is a single +30 s jump, and a held key speeds up
     // (Nuvio's scrub rates) without a rebuffer per repeat.
     var keySeekTarget by remember { mutableStateOf<Long?>(null) }
+    // The last gathered target keeps its preview frame up with the time
+    // bubble after the seek lands, so a first frame still decoding shows.
+    var lastKeySeekTarget by remember { mutableStateOf<Long?>(null) }
     fun keySeek(forward: Boolean, repeatCount: Int) {
         val activePlayer = player ?: return
         val step = remoteSeekStepMillis(repeatCount)
@@ -358,6 +365,7 @@ internal fun PlaybackScreen(
         val duration = snapshot.durationMillis.takeIf { it > 0 } ?: Long.MAX_VALUE
         val next = (base + if (forward) step else -step).coerceIn(0L, duration)
         keySeekTarget = next
+        lastKeySeekTarget = next
         showHud(
             if (forward) Icons.Rounded.FastForward else Icons.Rounded.FastRewind,
             next.asPlaybackTime(),
@@ -377,13 +385,16 @@ internal fun PlaybackScreen(
     val seekPreviews = LocalSeekPreviews.current
     val knownDuration = snapshot.durationMillis.takeIf { it > 0 }
     LaunchedEffect(seekPreviews, knownDuration) {
-        if (seekPreviews != null && knownDuration != null) seekPreviews.prepare(knownDuration)
+        if (seekPreviews != null && knownDuration != null) {
+            seekPreviews.prepare(knownDuration, player?.currentPosition ?: 0L)
+        }
     }
 
     LaunchedEffect(hudText) {
         if (hudText != null) {
             delay(900)
             hudText = null
+            lastKeySeekTarget = null
         }
     }
     var editor by remember { mutableStateOf<PlayerEditor?>(null) }
@@ -464,12 +475,20 @@ internal fun PlaybackScreen(
         thresholdPercent = settings.nextEpisodeThresholdPercent,
         thresholdMinutesBeforeEnd = settings.nextEpisodeThresholdMinutesBeforeEnd,
     )
-    val nextEpisodeReady = settings.nextEpisodeEnabled &&
-        nextEpisode != null &&
-        nextEpisode.hasAired() &&
-        timingReady
-    val nextEpisodeCardVisible = nextEpisodeReady && !nextEpisodeDismissed
+    val nextEpisodeAvailable = settings.nextEpisodeEnabled && nextEpisode != null && nextEpisode.hasAired()
+    val nextEpisodeReady = nextEpisodeAvailable && timingReady
+    // A start the viewer asked for mid-episode shows the card too, so "Finding
+    // source…" is visible wherever Next was pressed.
+    val nextEpisodeCardVisible = (nextEpisodeReady && !nextEpisodeDismissed) || nextEpisodeLoading
     val endPromptShown = endPrompt != null && !inPictureInPicture
+    // The next episode's source is searched once the card is due or the credits
+    // are near, so Play, Yes, and auto-play start from what was already found.
+    val endingNear = segments.any { segment ->
+        segment.type == PlaybackSegmentType.ENDING &&
+            snapshot.positionMillis >= segment.startMillis - NEXT_EPISODE_PREFETCH_LEAD_MILLIS
+    }
+    val nextEpisodeDue = nextEpisodeAvailable && !nextEpisodeDismissed && (timingReady || endingNear)
+    LaunchedEffect(nextEpisodeDue, nextEpisode?.id) { if (nextEpisodeDue) onPrefetchNextEpisode() }
     // The end screen replaces the chrome; Watch again brings the chrome back with playback.
     LaunchedEffect(endPromptShown) { if (endPromptShown) controlsVisible = false }
     val nextEpisodeSkipInCard = nextEpisodeCardVisible && !wideLayout && !isTelevision &&
@@ -570,7 +589,11 @@ internal fun PlaybackScreen(
             locked -> locked = false
             editor != null -> closeEditor()
             panel != null -> closePanel()
-            nextEpisodeCardVisible -> onDismissNextEpisodeCard()
+            nextEpisodeCardVisible -> if (nextEpisodeReady && !nextEpisodeDismissed) {
+                onDismissNextEpisodeCard()
+            } else {
+                onCancelNextEpisode()
+            }
             shownError != null -> onExit()
             controlsVisible -> controlsVisible = false
             else -> onExit()
@@ -840,6 +863,8 @@ internal fun PlaybackScreen(
                     PlaybackSeeks.prepare(SeekKind.JUMP)
                     player?.seekTo(it)
                 },
+                onKeySeek = ::keySeek,
+                seekTargetMillis = keySeekTarget,
                 onEnterPictureInPicture = onEnterPictureInPicture,
                 pictureInPictureAvailable = pictureInPictureAvailable,
                 canPlayNext = settings.nextEpisodeEnabled && nextEpisode != null && nextEpisode.hasAired(),
@@ -915,7 +940,9 @@ internal fun PlaybackScreen(
         }
         val cueBottomPadding = if (controlsVisible) 190.dp else if (isTelevision) 32.dp else 28.dp
         val cueHorizontalPadding = if (isTelevision) 58.dp else 16.dp
-        val cuesAllowed = !loadingSurfaceVisible && !inPictureInPicture && panel == null && shownError == null
+        // An end screen owns the whole screen; nothing peeks out from under it.
+        val cuesAllowed = !loadingSurfaceVisible && !inPictureInPicture && panel == null && shownError == null &&
+            !endPromptShown
         if (cuesAllowed && nextEpisodeMessage != null && !nextEpisodeCardVisible) {
             PlaybackMessage(
                 message = nextEpisodeMessage,
@@ -982,7 +1009,7 @@ internal fun PlaybackScreen(
                     showSkipCredits = nextEpisodeSkipInCard,
                     onPlayNext = onNextEpisode,
                     onSkipCredits = skipSegment,
-                    onDismiss = onDismissNextEpisodeCard,
+                    onDismiss = if (nextEpisodeReady && !nextEpisodeDismissed) onDismissNextEpisodeCard else onCancelNextEpisode,
                     focusRequester = nextEpisodeFocus,
                     onFocusChanged = { cueFocused = it },
                     modifier = Modifier.padding(bottom = cueBottomPadding),
@@ -1076,7 +1103,7 @@ internal fun PlaybackScreen(
         // Remote seeks (TV) and drag-to-scrub (mobile) gather into one target
         // before committing: its frame shows above the bubble meanwhile
         // (PLY-SEEK-01). Drawn only when a preview exists.
-        val bubbleSeekTarget = keySeekTarget ?: seekTarget
+        val bubbleSeekTarget = keySeekTarget ?: seekTarget ?: lastKeySeekTarget?.takeIf { hudText != null }
         if (!loadingSurfaceVisible && bubbleSeekTarget != null) {
             val previewWidth = if (isTelevision) PlayerChromeTokens.TvSeekPreviewWidth else PlayerChromeTokens.SeekPreviewWidth
             SeekPreviewThumbnail(
@@ -1218,6 +1245,11 @@ internal fun PlaybackScreen(
                     onStop = onStillWatchingStop,
                     nextEpisode = nextEpisode,
                     blurArtwork = spoilerProtection.shouldBlur(SpoilerContent.EPISODE_ARTWORK, watched = false),
+                    seriesTitle = request.title,
+                    seriesLogoUrl = request.preview?.logoUrl,
+                    progress = nextEpisodeProgress,
+                    failureMessage = nextEpisodeMessage,
+                    onCancel = onCancelNextEpisode,
                 )
                 is PlayerEndPrompt.UpNext -> if (nextEpisode != null) {
                     UpNextPrompt(
@@ -1228,6 +1260,11 @@ internal fun PlaybackScreen(
                         isTelevision = isTelevision,
                         onYes = onUpNextYes,
                         onNo = onUpNextNo,
+                        seriesTitle = request.title,
+                        seriesLogoUrl = request.preview?.logoUrl,
+                        progress = nextEpisodeProgress,
+                        failureMessage = nextEpisodeMessage,
+                        onCancel = onCancelNextEpisode,
                     )
                 }
                 is PlayerEndPrompt.Finished -> FinishedPrompt(
@@ -1414,6 +1451,11 @@ internal fun PlayerProgress(
     onSeekTo: (Long) -> Unit,
     onInteraction: () -> Unit,
     segments: List<PlaybackSegment> = emptyList(),
+    /**
+     * TV: Left/Right on the focused bar gather into one seek like the remote's,
+     * so the bubble and its preview frame show (PLY-SEEK-01). Null seeks at once.
+     */
+    onKeySeek: ((forward: Boolean, repeatCount: Int) -> Unit)? = null,
 ) {
     val seekDescription = stringResource(R.string.player_seek)
     if (!LocalPlayerTelevision.current) {
@@ -1505,12 +1547,17 @@ internal fun PlayerProgress(
             }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown || durationMillis <= 0L) return@onPreviewKeyEvent false
-                val target = when (event.key) {
-                    Key.DirectionLeft -> positionMillis - 10_000L
-                    Key.DirectionRight -> positionMillis + 10_000L
+                val forward = when (event.key) {
+                    Key.DirectionLeft -> false
+                    Key.DirectionRight -> true
                     else -> return@onPreviewKeyEvent false
                 }
-                onSeekTo(target.coerceIn(0L, durationMillis))
+                if (onKeySeek != null) {
+                    onKeySeek(forward, event.nativeKeyEvent.repeatCount)
+                } else {
+                    val target = positionMillis + if (forward) 10_000L else -10_000L
+                    onSeekTo(target.coerceIn(0L, durationMillis))
+                }
                 onInteraction()
                 true
             }

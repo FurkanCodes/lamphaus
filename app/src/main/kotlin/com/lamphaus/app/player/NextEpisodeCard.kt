@@ -71,6 +71,7 @@ import com.lamphaus.core.model.hasAired
 internal sealed interface NextEpisodeProgress {
     data object Idle : NextEpisodeProgress
     data object Searching : NextEpisodeProgress
+    /** [secondsLeft] counts auto-play down; 0 is a start the viewer asked for, under way now. */
     data class Starting(val sourceName: String, val secondsLeft: Int) : NextEpisodeProgress
 }
 
@@ -207,8 +208,9 @@ private fun statusText(
 ): String? = when {
     !aired -> releaseCountdownText(episode.releasedAtEpochMillis, ReleaseKind.EPISODE)
     progress is NextEpisodeProgress.Searching -> stringResource(R.string.next_episode_finding_source)
-    progress is NextEpisodeProgress.Starting ->
+    progress is NextEpisodeProgress.Starting && progress.secondsLeft > 0 ->
         stringResource(R.string.next_episode_playing_via, progress.sourceName, progress.secondsLeft)
+    progress is NextEpisodeProgress.Starting -> stringResource(R.string.next_episode_starting_via, progress.sourceName)
     failureMessage != null -> failureMessage
     else -> null
 }

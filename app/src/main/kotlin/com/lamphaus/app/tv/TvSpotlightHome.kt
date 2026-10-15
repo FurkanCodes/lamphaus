@@ -69,6 +69,7 @@ import androidx.compose.ui.util.lerp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.SingletonImageLoader
+import coil3.size.Scale
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import com.lamphaus.app.R
@@ -255,7 +256,11 @@ internal fun TvSpotlightRow(
     detailsSlot: Boolean = true,
 ) {
     var focusedMedia by remember { mutableStateOf<MediaPreview?>(null) }
-    val prefetchStill = rememberStillPrefetcher()
+    val warmArtwork = rememberSpotlightArtworkWarmer()
+    // Entering a row lands on its first card (TV-CNT-03): its still and logo
+    // are on their way before the row takes focus.
+    val firstItem = section.items.firstOrNull()
+    LaunchedEffect(firstItem?.stableKey) { firstItem?.let(warmArtwork) }
     val row = rememberTvRowFocus()
     TvSpotlightRowFrame(
         title = section.title,
@@ -285,7 +290,8 @@ internal fun TvSpotlightRow(
                             onFocused = {
                                 focusedMedia = media
                                 onFocused(media)
-                                section.items.getOrNull(index + 1)?.let(prefetchStill)
+                                section.items.getOrNull(index + 1)?.let(warmArtwork)
+                                section.items.getOrNull(index - 1)?.let(warmArtwork)
                             },
                             modifier = Modifier
                                 .mediaFocusRestore(media.stableKey, restoreMediaKey, onFocusRestored)
@@ -721,25 +727,34 @@ private fun TvSpotlightStill(
 }
 
 /**
- * Warms the next card's still so it is ready when focus moves on. The
- * request matches the displayed size, so the memory cache can serve it.
+ * Warms what a card shows once it widens, its still and its title logo, at
+ * their displayed sizes so the memory cache serves them the moment focus
+ * arrives instead of the card waiting on the network.
  */
 @Composable
-private fun rememberStillPrefetcher(): (MediaPreview) -> Unit {
+private fun rememberSpotlightArtworkWarmer(): (MediaPreview) -> Unit {
     val context = LocalContext.current
     val resolver = LocalArtworkResolver.current
     val density = LocalDensity.current
     return remember(context, resolver, density) {
-        val width = with(density) { TvLayoutTokens.spotlightExpandedWidth.roundToPx() }
-        val height = with(density) { TvLayoutTokens.posterHeight.roundToPx() }
-        val prefetch: (MediaPreview) -> Unit = { media ->
-            val url = resolver.resolve(media).media.backgroundUrl
-            if (!url.isNullOrBlank()) {
-                SingletonImageLoader.get(context).enqueue(
-                    ImageRequest.Builder(context).data(url).size(width, height).build(),
+        val stillWidth = with(density) { TvLayoutTokens.spotlightExpandedWidth.roundToPx() }
+        val stillHeight = with(density) { TvLayoutTokens.posterHeight.roundToPx() }
+        val logoWidth = with(density) { SpotlightLogoWidth.roundToPx() }
+        val logoHeight = with(density) { SpotlightLogoHeight.roundToPx() }
+        val warm: (MediaPreview) -> Unit = { media ->
+            val resolved = resolver.resolve(media).media
+            val loader = SingletonImageLoader.get(context)
+            (resolved.backgroundUrl ?: resolved.posterUrl)?.takeIf(String::isNotBlank)?.let { url ->
+                loader.enqueue(
+                    ImageRequest.Builder(context).data(url).size(stillWidth, stillHeight).scale(Scale.FILL).build(),
+                )
+            }
+            resolved.logoUrl?.takeIf(String::isNotBlank)?.let { url ->
+                loader.enqueue(
+                    ImageRequest.Builder(context).data(url).size(logoWidth, logoHeight).scale(Scale.FIT).build(),
                 )
             }
         }
-        prefetch
+        warm
     }
 }
