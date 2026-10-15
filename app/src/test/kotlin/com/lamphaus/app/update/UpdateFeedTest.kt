@@ -54,6 +54,34 @@ class UpdateFeedTest {
     }
 
     @Test
+    fun `dex metadata matches the device's Android range`() {
+        val apk = loadPayload().releases.first().apk
+        assertTrue(UpdateFeed.validatePayload(loadPayload()) is UpdateFeed.VerifyResult.Valid)
+        assertEquals(30, apk.dexMetadataFor(30)?.maxSdk)
+        assertEquals(31, apk.dexMetadataFor(34)?.minSdk)
+        assertNull(apk.dexMetadataFor(27))
+        assertNull(apk.copy(dexMetadata = emptyList()).dexMetadataFor(34))
+    }
+
+    @Test
+    fun `dex metadata outside the repository or out of bounds rejected`() {
+        val payload = loadPayload()
+        fun tampered(change: (UpdateFeed.DexMetadata) -> UpdateFeed.DexMetadata) = payload.copy(
+            releases = payload.releases.mapIndexed { i, r ->
+                if (i == 0) r.copy(apk = r.apk.copy(dexMetadata = r.apk.dexMetadata.map(change))) else r
+            },
+        )
+        listOf<(UpdateFeed.DexMetadata) -> UpdateFeed.DexMetadata>(
+            { it.copy(url = "https://evil.example/x.dm") },
+            { it.copy(minSdk = 26) },
+            { it.copy(byteLength = 2L * 1024 * 1024) },
+            { it.copy(sha256 = "nope") },
+        ).forEach { change ->
+            assertTrue(UpdateFeed.validatePayload(tampered(change)) is UpdateFeed.VerifyResult.Invalid)
+        }
+    }
+
+    @Test
     fun `beta accepts newer beta and stable`() {
         val payload = loadPayload()
         val got = UpdateFeed.selectCandidate(

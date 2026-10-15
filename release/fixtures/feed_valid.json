@@ -19,7 +19,22 @@
         "abis": ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
         "byteLength": 48211328,
         "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "signerFingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD"
+        "signerFingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD",
+        "dexMetadata": [
+          {
+            "minSdk": 28,
+            "maxSdk": 30,
+            "url": "https://github.com/furkancodes/lamphaus/releases/download/v1.0.0-beta.1/lamphaus-v1.0.0-beta.1-vc2-api28-30.dm",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "byteLength": 23535
+          },
+          {
+            "minSdk": 31,
+            "url": "https://github.com/furkancodes/lamphaus/releases/download/v1.0.0-beta.1/lamphaus-v1.0.0-beta.1-vc2-api31-up.dm",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+            "byteLength": 23258
+          }
+        ]
       }
     },
     {

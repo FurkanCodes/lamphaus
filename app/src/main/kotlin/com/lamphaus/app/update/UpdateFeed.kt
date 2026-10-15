@@ -24,6 +24,8 @@ object UpdateFeed {
     const val MAX_PAYLOAD_BYTES = 1024 * 1024
     const val EXPECTED_PACKAGE = "com.lamphaus.app"
     const val EXPECTED_REPO_MARKER = "github.com/furkancodes/lamphaus/releases/download/"
+    const val MAX_DEX_METADATA = 4
+    const val MAX_DEX_METADATA_BYTES = 1024L * 1024
     val REQUIRED_ABIS = setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
     val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -66,6 +68,27 @@ object UpdateFeed {
         val byteLength: Long = 0,
         val sha256: String = "",
         val signerFingerprint: String = "",
+        /** The APK's compilation profiles, one per Android range; optional and additive. */
+        val dexMetadata: List<DexMetadata> = emptyList(),
+    ) {
+        /** The profile that fits [sdk], if any. */
+        fun dexMetadataFor(sdk: Int): DexMetadata? =
+            dexMetadata.firstOrNull { sdk >= it.minSdk && (it.maxSdk == null || sdk <= it.maxSdk) }
+    }
+
+    /**
+     * A dex metadata (`.dm`) file built with the APK: its baseline profile in
+     * the format the Android versions from [minSdk] to [maxSdk] (null: no
+     * upper bound) read. Installed next to the APK, as Google Play does, it
+     * lets Android compile the app during the install instead of days later.
+     */
+    @Serializable
+    data class DexMetadata(
+        val minSdk: Int = 0,
+        val maxSdk: Int? = null,
+        val url: String = "",
+        val sha256: String = "",
+        val byteLength: Long = 0,
     )
 
     @Serializable
@@ -172,6 +195,13 @@ object UpdateFeed {
         if (!fingerprintRe.matches(apk.signerFingerprint)) return "bad fingerprint"
         if (apk.byteLength < 1) return "bad byte length"
         if (apk.abis.toSet() != REQUIRED_ABIS) return "bad abis"
+        if (apk.dexMetadata.size > MAX_DEX_METADATA) return "too many dex metadata files"
+        for (dm in apk.dexMetadata) {
+            if (dm.minSdk < 28 || (dm.maxSdk != null && dm.maxSdk < dm.minSdk)) return "bad dex metadata range"
+            if (!dm.url.startsWith("https://") || EXPECTED_REPO_MARKER !in dm.url) return "dex metadata outside repository"
+            if (!sha256Re.matches(dm.sha256)) return "bad dex metadata sha256"
+            if (dm.byteLength !in 1..MAX_DEX_METADATA_BYTES) return "bad dex metadata length"
+        }
         return null
     }
 

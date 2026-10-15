@@ -100,6 +100,57 @@ class UpdateDownloader(private val context: Context, private val prefs: UpdatePr
             dst
         }
 
+    /**
+     * Fetches the release's compilation profile for this device's Android
+     * version into private storage, verified against the signed feed, so the
+     * install can compile the app at once as a Play install does. Best effort:
+     * null when there is none or anything fails, and the APK installs alone.
+     */
+    suspend fun fetchDexMetadata(versionCode: Int, entry: UpdateFeed.DexMetadata): File? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val connection = (java.net.URL(entry.url).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = DEX_METADATA_TIMEOUT_MILLIS
+                    readTimeout = DEX_METADATA_TIMEOUT_MILLIS
+                    instanceFollowRedirects = true
+                }
+                val bytes = try {
+                    if (connection.responseCode != 200) return@runCatching null
+                    connection.inputStream.use { input -> readBounded(input, UpdateFeed.MAX_DEX_METADATA_BYTES) }
+                        ?: return@runCatching null
+                } finally {
+                    connection.disconnect()
+                }
+                if (bytes.size.toLong() != entry.byteLength || !sha256(bytes).equals(entry.sha256, ignoreCase = true)) {
+                    return@runCatching null
+                }
+                dexMetadataFile(versionCode).apply { writeBytes(bytes) }
+            }.getOrNull()
+        }
+
+    /** The verified profile for [versionCode], if it is still there and still matches [entry]. */
+    fun verifiedDexMetadata(versionCode: Int, entry: UpdateFeed.DexMetadata): ByteArray? {
+        val file = dexMetadataFile(versionCode)
+        if (!file.exists() || file.length() != entry.byteLength) return null
+        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
+        return bytes.takeIf { sha256(it).equals(entry.sha256, ignoreCase = true) }
+    }
+
+    /** At most [limit] bytes, or null when the stream holds more. */
+    private fun readBounded(input: java.io.InputStream, limit: Long): ByteArray? {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(16 * 1024)
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) return out.toByteArray()
+            if (out.size() + n > limit) return null
+            out.write(buf, 0, n)
+        }
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
     /** Remove cancelled, corrupt, withdrawn, superseded, installed artifacts. */
     fun cleanupStale(keepCodes: List<Int>) {
         stagingDir().listFiles()?.forEach { file ->
@@ -114,6 +165,7 @@ class UpdateDownloader(private val context: Context, private val prefs: UpdatePr
 
     fun stagingFile(versionCode: Int): File = File(stagingDir(), "$STAGING_PREFIX$versionCode.apk")
     fun privateFile(versionCode: Int): File = File(filesDir(), "$PRIVATE_PREFIX$versionCode.apk")
+    private fun dexMetadataFile(versionCode: Int): File = File(filesDir(), "$PRIVATE_PREFIX$versionCode.dm")
 
     private fun stagingDir(): File {
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir()
@@ -126,5 +178,6 @@ class UpdateDownloader(private val context: Context, private val prefs: UpdatePr
     private companion object {
         const val STAGING_PREFIX = "lamphaus-update-staging-"
         const val PRIVATE_PREFIX = "lamphaus-update-"
+        const val DEX_METADATA_TIMEOUT_MILLIS = 15_000
     }
 }

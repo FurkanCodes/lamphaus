@@ -22,14 +22,16 @@ class UpdateInstaller(private val context: Context) {
         const val ACTION_SESSION_CALLBACK = "com.lamphaus.app.update.SESSION_CALLBACK"
         const val EXTRA_SESSION_ID = "session_id"
         const val EXTRA_VERSION_CODE = "version_code"
+        private const val SESSION_APK = "base.apk"
+        private const val SESSION_DEX_METADATA = "base.dm"
     }
 
     data class Session(val sessionId: Int)
 
-    fun createSession(apkLength: Long): Session {
+    fun createSession(totalLength: Long): Session {
         val pi = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-            setSize(apkLength)
+            setSize(totalLength)
             if (Build.VERSION.SDK_INT >= 31) {
                 setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
             }
@@ -37,14 +39,19 @@ class UpdateInstaller(private val context: Context) {
         return Session(pi.createSession(params))
     }
 
-    /** Stream the verified private file into the session, verifying again. */
-    fun writeSession(sessionId: Int, apk: File, expectedSha256: String): Boolean {
+    /**
+     * Stream the verified private file into the session, verifying again.
+     * [dexMetadata], already verified against the signed feed, goes in beside
+     * it as `base.dm`, the way Google Play installs: Android then compiles the
+     * app with its profile during the install instead of days later.
+     */
+    fun writeSession(sessionId: Int, apk: File, expectedSha256: String, dexMetadata: ByteArray? = null): Boolean {
         val digest = MessageDigest.getInstance("SHA-256")
         return try {
             val pi = context.packageManager.packageInstaller
             pi.openSession(sessionId).use { session ->
                 apk.inputStream().use { input ->
-                    session.openWrite("apk", 0, apk.length()).use { out ->
+                    session.openWrite(SESSION_APK, 0, apk.length()).use { out ->
                         val buf = ByteArray(256 * 1024)
                         while (true) {
                             val n = input.read(buf)
@@ -52,6 +59,13 @@ class UpdateInstaller(private val context: Context) {
                             out.write(buf, 0, n)
                             digest.update(buf, 0, n)
                         }
+                        session.fsync(out)
+                    }
+                }
+                // The name pairs it with the APK; Android drops a .dm it cannot pair.
+                dexMetadata?.let { bytes ->
+                    session.openWrite(SESSION_DEX_METADATA, 0, bytes.size.toLong()).use { out ->
+                        out.write(bytes)
                         session.fsync(out)
                     }
                 }
