@@ -45,6 +45,15 @@ export const TRUSTED_KEYS: Record<string, string> = {
     "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5bDScNmr8IEldGY53Ovgx+FSUvYwxTMCcP+D/SvKvGUXMHNkz16GWSOsLj0Rxghwr2RSp4XSeNvma1B2uVuIyt57cXeYC3ZR2AGPhzYUWtuW9EnSJLRZJ44Wa8UhuT6vDxQNFJxugi13hr4DPIiQ09OYgnN5iKNUAa/+T9FqmFj6bY51ZHWezGYSQKiF1CDavYwtogsOm/UWY5rut4QEajslImvG/mmRg5dmFvCfbGaYniwBIoblNWaPpOk4QfztVcO/vg3Zep2rlNL8UUDQD5BT7flRTmTXhB2RCkCAdIkGcWeVSxkZ817/Y3IZ113aM7vcdhMl8+4o3+MejLvrrwIDAQAB",
 };
 
+/** A `.dm` compilation profile built with the APK (the in-app updater installs it). */
+export interface FeedDexMetadata {
+  minSdk: number;
+  maxSdk?: number | null;
+  url: string;
+  sha256: string;
+  byteLength: number;
+}
+
 export interface FeedApk {
   packageId: string;
   url: string;
@@ -52,6 +61,7 @@ export interface FeedApk {
   byteLength: number;
   sha256: string;
   signerFingerprint: string;
+  dexMetadata?: FeedDexMetadata[];
 }
 
 export interface FeedRelease {
@@ -139,6 +149,15 @@ function validateRelease(rel: FeedRelease): string | null {
   if (!FINGERPRINT_RE.test(apk.signerFingerprint)) return "bad fingerprint";
   if (!Number.isInteger(apk.byteLength) || apk.byteLength < 1) return "bad byte length";
   if ([...apk.abis].sort().join(",") !== [...REQUIRED_ABIS].sort().join(",")) return "bad abis";
+  const dexMetadata = apk.dexMetadata ?? [];
+  if (!Array.isArray(dexMetadata) || dexMetadata.length > 4) return "too many dex metadata files";
+  for (const dm of dexMetadata) {
+    if (!Number.isInteger(dm.minSdk) || dm.minSdk < 28) return "bad dex metadata range";
+    if (dm.maxSdk != null && (!Number.isInteger(dm.maxSdk) || dm.maxSdk < dm.minSdk)) return "bad dex metadata range";
+    if (!dm.url.startsWith("https://") || !dm.url.includes(EXPECTED_REPO_MARKER)) return "dex metadata outside repository";
+    if (!SHA256_RE.test(dm.sha256)) return "bad dex metadata sha256";
+    if (!Number.isInteger(dm.byteLength) || dm.byteLength < 1 || dm.byteLength > 1024 * 1024) return "bad dex metadata length";
+  }
   return null;
 }
 

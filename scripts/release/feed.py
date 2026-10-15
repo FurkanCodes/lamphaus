@@ -21,6 +21,8 @@ MAX_PAYLOAD_BYTES = 1024 * 1024
 FEED_PATH = "updates/v1/index.json"
 MAX_CHANGELOG_CHARS = 8000
 MAX_RELEASES = 64
+MAX_DEX_METADATA = 4
+MAX_DEX_METADATA_BYTES = 1024 * 1024
 
 _CHANNELS = ("beta", "stable")
 _ABI_SET = ("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
@@ -156,6 +158,31 @@ def _validate_release(rel: dict, *, expected_repo: str = "") -> None:
         raise ValueError("release.apk.abis must cover all four ABIs")
     if len(apk.get("packageId", "")) > 128:
         raise ValueError("packageId too long")
+    _validate_dex_metadata(apk.get("dexMetadata", []), expected_repo=expected_repo)
+
+
+def _validate_dex_metadata(entries, *, expected_repo: str = "") -> None:
+    """Optional `.dm` files built with the APK, one per Android range (additive)."""
+    if not isinstance(entries, list) or len(entries) > MAX_DEX_METADATA:
+        raise ValueError("release.apk.dexMetadata must be a list of at most 4")
+    for dm in entries:
+        if not isinstance(dm, dict):
+            raise ValueError("dexMetadata entry must be an object")
+        min_sdk, max_sdk = dm.get("minSdk"), dm.get("maxSdk")
+        if not isinstance(min_sdk, int) or min_sdk < 28:
+            raise ValueError("dexMetadata.minSdk must be >= 28")
+        if max_sdk is not None and (not isinstance(max_sdk, int) or max_sdk < min_sdk):
+            raise ValueError("dexMetadata.maxSdk must be >= minSdk")
+        url = dm.get("url")
+        if not isinstance(url, str) or not _URL_RE.match(url):
+            raise ValueError("dexMetadata.url must be https")
+        if expected_repo and f"github.com/{expected_repo}/releases/download/" not in url:
+            raise ValueError("dexMetadata.url outside configured repository")
+        if not isinstance(dm.get("sha256"), str) or not _SHA256_RE.match(dm["sha256"].lower()):
+            raise ValueError("dexMetadata.sha256 must be 64 hex chars")
+        size = dm.get("byteLength")
+        if not isinstance(size, int) or not 1 <= size <= MAX_DEX_METADATA_BYTES:
+            raise ValueError("dexMetadata.byteLength must be 1..1 MiB")
 
 
 def select_candidate(

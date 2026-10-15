@@ -95,7 +95,9 @@ rtk python3 scripts/release/lamphaus_release.py prepare --commit <full-sha>
 two-worker production build, signing verification, all-ABI and MPV checks
 (`libmpv.so` and `liblamphaus_mpv.so` for every ABI), and
 the packaged-profile check. It writes the immutable APK, checksum, build
-report, and pipeline state under ignored `dist/release/`.
+report, the APK's dex metadata files (`<apk>-api28-30.dm`, `<apk>-api31-up.dm`,
+recorded under `dexMetadata` in the build report, `REL-10`), and pipeline
+state under ignored `dist/release/`.
 
 Stop Gradle after the build:
 
@@ -109,16 +111,19 @@ Perform these stages in order on the owner’s Mac:
 
 1. Create or resume a GitHub draft for `v<versionName>` at the exact source
    commit. Mark versions containing a prerelease suffix as prereleases.
-2. Upload the APK, its `.sha256` file, and `build_report.json` from
-   `dist/release/`.
+2. Upload the APK, its `.sha256` file, `build_report.json`, and the `.dm`
+   files from `dist/release/`.
 3. Download the GitHub asset into a temporary directory and compare its size
    and SHA-256 with the local build report. Publish only after they match.
 4. Build the next signed-feed payload from that verified GitHub asset. Increase
-   the feed revision, include the exact release-notes text, sign with the
+   the feed revision, include the exact release-notes text and the `.dm` files
+   as `apk.dexMetadata` (`dex_metadata_feed_entries` in
+   `scripts/release/lamphaus_release.py`), sign with the
    trusted metadata key, verify the signature locally, and push the new
    `updates/v1/index.json` to `release-metadata` with compare-and-swap behavior.
 5. Fetch the public feed again and verify its signature, revision, version,
-   source commit, APK URL, size, checksum, signer fingerprint, and ABI list.
+   source commit, APK URL, size, checksum, signer fingerprint, ABI list, and
+   each `.dm` URL, size, and checksum.
 6. Confirm an anonymous APK download and confirm the website displays the new
    release. Test in-app update selection when the release is meant to update an
    installed build.

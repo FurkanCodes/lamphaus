@@ -3,6 +3,7 @@ package com.lamphaus.app.update
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.os.Build
 import android.os.SystemClock
 import com.lamphaus.app.BuildConfig
 import kotlinx.coroutines.CoroutineScope
@@ -230,6 +231,8 @@ class UpdateCoordinator(
                         _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.WITHDRAWN_OR_STALE)
                         return
                     }
+                    // Best effort: without it the APK installs alone, as before.
+                    rel.apk.dexMetadataFor(Build.VERSION.SDK_INT)?.let { downloader.fetchDexMetadata(rel.versionCode, it) }
                     _state.value = _state.value.copy(phase = UpdatePhase.Ready)
                     return
                 }
@@ -277,9 +280,12 @@ class UpdateCoordinator(
                     _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.MISSING_FILE)
                     return@launch
                 }
-                val session = installer.createSession(file.length())
+                val dexMetadata = withContext(Dispatchers.IO) {
+                    rel.apk.dexMetadataFor(Build.VERSION.SDK_INT)?.let { downloader.verifiedDexMetadata(rel.versionCode, it) }
+                }
+                val session = installer.createSession(file.length() + (dexMetadata?.size ?: 0))
                 prefs.installerSessionId = session.sessionId
-                if (!withContext(Dispatchers.IO) { installer.writeSession(session.sessionId, file, rel.apk.sha256) }) {
+                if (!withContext(Dispatchers.IO) { installer.writeSession(session.sessionId, file, rel.apk.sha256, dexMetadata) }) {
                     prefs.installerSessionId = -1
                     _state.value = _state.value.copy(phase = UpdatePhase.Error, errorKind = UpdateError.VERIFY_FAILED)
                     return@launch

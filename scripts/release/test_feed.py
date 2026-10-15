@@ -57,6 +57,25 @@ class FeedContractTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_payload(payload)
 
+    def test_dex_metadata_is_optional(self):
+        payload = load_valid()
+        for rel in payload["releases"]:
+            rel["apk"].pop("dexMetadata", None)
+        validate_payload(payload, expected_repo="furkancodes/lamphaus")
+
+    def test_rejects_dex_metadata_outside_repo(self):
+        payload = load_valid()
+        payload["releases"][0]["apk"]["dexMetadata"][0]["url"] = "https://evil.example/x.dm"
+        with self.assertRaises(ValueError):
+            validate_payload(payload, expected_repo="furkancodes/lamphaus")
+
+    def test_rejects_bad_dex_metadata_range_and_size(self):
+        for field, value in (("maxSdk", 27), ("minSdk", 26), ("byteLength", 2 * 1024 * 1024), ("sha256", "nope")):
+            payload = load_valid()
+            payload["releases"][0]["apk"]["dexMetadata"][0][field] = value
+            with self.assertRaises(ValueError, msg=field):
+                validate_payload(payload)
+
     def test_beta_accepts_newer_beta_and_stable(self):
         payload = load_valid()
         got = select_candidate(

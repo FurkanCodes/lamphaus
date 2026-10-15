@@ -297,6 +297,8 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         release_output = ROOT / "app" / "build" / "outputs" / "apk" / "release"
         for stale_apk in release_output.glob("*.apk"):
             stale_apk.unlink()
+        for stale_dm in release_output.glob("baselineProfiles/*/*.dm"):
+            stale_dm.unlink()
         p = subprocess.run(
             ["./gradlew", ":app:assembleRelease", "--stacktrace", "--max-workers=2"],
             cwd=ROOT,
@@ -337,6 +339,10 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         canonical = DIST / f"lamphaus-{version_name}-vc{version_code}.apk"
         shutil.copyfile(apk, canonical)
         (DIST / f"{canonical.name}.sha256").write_text(f"{digest}  {canonical.name}\n")
+        try:
+            dex_metadata = collect_dex_metadata(release_output, canonical.stem)
+        except ValueError as e:
+            return fail(str(e))
         report = {
             "versionName": version_name,
             "versionCode": version_code,
@@ -346,6 +352,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
             "sha256": digest,
             "signerFingerprint": fp,
             "abis": abis,
+            "dexMetadata": dex_metadata,
             "toolchain": {"jdk": "17", "ndk": PINNED["ndk"]},
             "builtAt": datetime.now(timezone.utc).isoformat(),
         }
@@ -355,6 +362,60 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         return 0
     except RuntimeError as e:
         return fail(str(e))
+
+
+def collect_dex_metadata(release_output: Path, stem: str) -> list[dict]:
+    """Copy AGP's per-Android-range `.dm` files beside the APK (REL-07).
+
+    Each holds the APK's baseline profile in the format its Android range
+    reads. The in-app updater installs the matching one with the APK, as Google
+    Play does, so Android compiles the app during the install instead of at its
+    next idle maintenance. Returns build-report entries; raises ValueError when
+    AGP produced none or one is malformed.
+    """
+    import zipfile
+
+    metadata = json.loads((release_output / "output-metadata.json").read_text())
+    entries = []
+    for group in metadata.get("baselineProfiles", []):
+        min_sdk = int(group["minApi"])
+        max_api = int(group["maxApi"])
+        max_sdk = None if max_api >= 2_147_483_647 else max_api
+        (relative,) = group["baselineProfiles"]
+        source = release_output / relative
+        with zipfile.ZipFile(source) as z:
+            header = z.read("primary.prof")[:4]
+        if header != b"pro\x00":
+            raise ValueError(f"{relative} holds no ART profile")
+        suffix = f"api{min_sdk}" + (f"-{max_sdk}" if max_sdk is not None else "-up")
+        target = DIST / f"{stem}-{suffix}.dm"
+        shutil.copyfile(source, target)
+        entries.append({
+            "file": target.name,
+            "minSdk": min_sdk,
+            "maxSdk": max_sdk,
+            "byteLength": target.stat().st_size,
+            "sha256": sha256_file(target),
+        })
+    if not entries:
+        raise ValueError("AGP produced no baseline-profile .dm files")
+    return sorted(entries, key=lambda e: e["minSdk"])
+
+
+def dex_metadata_feed_entries(report: dict, repo: str, tag: str) -> list[dict]:
+    """The signed feed's `apk.dexMetadata` for a build report's `.dm` files."""
+    entries = []
+    for dm in report.get("dexMetadata", []):
+        entry = {
+            "minSdk": dm["minSdk"],
+            "url": f"https://github.com/{repo}/releases/download/{tag}/{dm['file']}",
+            "sha256": dm["sha256"],
+            "byteLength": dm["byteLength"],
+        }
+        if dm["maxSdk"] is not None:
+            entry["maxSdk"] = dm["maxSdk"]
+        entries.append(entry)
+    return entries
 
 
 def gh_api(method: str, path: str, token: str, data: dict | None = None) -> dict:
