@@ -5,14 +5,15 @@ package com.lamphaus.core.model
  * binge group wins as soon as any provider returns it; otherwise, once the
  * search settles, the same add-on, the same quality and the most release
  * tags in common (WEB-DL, x265, HDR, the release group…) decide, with ties
- * kept in provider order. The winner starts after a short visible countdown
- * as a new playback, exactly like a source picked on the sources screen.
+ * kept in provider order. The winner starts as a new playback, exactly like
+ * a source picked on the sources screen: after a short visible countdown for
+ * auto-play, at once when the viewer asked for it.
  */
 object NextEpisodeSourcePolicy {
     /** The search stops waiting for slower providers after this long. */
     const val SEARCH_TIMEOUT_MILLIS = 10_000L
 
-    /** "Playing via … in 3s" before switching. */
+    /** "Playing via … in 3s" before auto-play switches. */
     const val START_COUNTDOWN_SECONDS = 3
 
     private val QUALITY = Regex("2160p|4k|1080p|720p|480p", RegexOption.IGNORE_CASE)

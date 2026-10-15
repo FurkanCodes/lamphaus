@@ -101,6 +101,13 @@ class MobileNextEpisodeCardTest {
     }
 
     @Test
+    fun aStartTheViewerAskedForNamesTheSourceWithoutCountdown() {
+        setContent(progress = NextEpisodeProgress.Starting("Torrentio", 0))
+
+        compose.onNodeWithText("Playing via Torrentio").assertIsDisplayed()
+    }
+
+    @Test
     fun failureStateExplainsInlineAndTheCardRetries() {
         var retries = 0
         setContent(failureMessage = "No playable source", onPlay = { retries++ })

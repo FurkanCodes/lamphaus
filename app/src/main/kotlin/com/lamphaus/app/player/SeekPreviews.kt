@@ -49,8 +49,11 @@ import kotlinx.coroutines.withContext
 internal fun interface SeekPreviewSource {
     suspend fun thumbnail(positionMillis: Long, durationMillis: Long): ImageBitmap?
 
-    /** Loads the preview track ahead of the first seek, once the duration is known. */
-    suspend fun prepare(durationMillis: Long) {}
+    /**
+     * Loads the preview track ahead of the first seek, once the duration is
+     * known; sheets around [positionMillis] come first.
+     */
+    suspend fun prepare(durationMillis: Long, positionMillis: Long = 0L) {}
 }
 
 /** Provided by the player screen; absent (null) means scrubbing shows only the time. */
@@ -75,6 +78,7 @@ internal class PlaybackSeekPreviews(
     private val lock = Mutex()
     private var track: SeekPreviewTrack? = null
     private var trackDuration = 0L
+    private var prefetchFromMillis = 0L
     private var lastAttemptMillis = Long.MIN_VALUE / 2
     private var prefetchJob: Job? = null
     private val decoders = LinkedHashMap<String, BitmapRegionDecoder>()
@@ -96,8 +100,11 @@ internal class PlaybackSeekPreviews(
         }
     }
 
-    override suspend fun prepare(durationMillis: Long) {
-        lock.withLock { ensureTrack(durationMillis) }
+    override suspend fun prepare(durationMillis: Long, positionMillis: Long) {
+        lock.withLock {
+            prefetchFromMillis = positionMillis
+            ensureTrack(durationMillis)
+        }
     }
 
     override suspend fun thumbnail(positionMillis: Long, durationMillis: Long): ImageBitmap? {
@@ -146,11 +153,18 @@ internal class PlaybackSeekPreviews(
         }
     }
 
-    /** Sheets download one at a time in the background once the track is known. */
+    /**
+     * Sheets download one at a time in the background once the track is
+     * known, starting at the playing position (a resume lands mid-title), then
+     * the ones before it, so the first seek's frame is usually on disk already.
+     */
     private fun prefetch(track: SeekPreviewTrack) {
         prefetchJob?.cancel()
+        val urls = track.sheetUrls
+        val first = track.cueAt(prefetchFromMillis)?.tile?.sheetUrl?.let(urls::indexOf)?.coerceAtLeast(0) ?: 0
+        val ordered = urls.drop(first) + urls.take(first)
         prefetchJob = scope.launch(Dispatchers.IO) {
-            track.sheetUrls.take(MAX_PREFETCH_SHEETS).forEach { url -> ensureSheet(url) }
+            ordered.take(MAX_PREFETCH_SHEETS).forEach { url -> ensureSheet(url) }
         }
     }
 

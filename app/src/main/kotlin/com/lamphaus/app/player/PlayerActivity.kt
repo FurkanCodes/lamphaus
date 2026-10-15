@@ -80,6 +80,7 @@ import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -129,6 +130,8 @@ class PlayerActivity : ComponentActivity() {
     private var progressPulseJob: Job? = null
     private var segmentLookupJob: Job? = null
     private var nextEpisodeResolutionJob: Job? = null
+    /** The next episode's source, searched ahead of the viewer's answer (PLY-AUTO-01). */
+    private var nextEpisodePrefetch: NextEpisodePrefetch? = null
     private var displayModeController: PlaybackDisplayModeController? = null
     private var surfaceFrameRateHost: AndroidPlaybackSurfaceFrameRateHost? = null
     /** This playback's seek previews; null for a title without a catalog entry. */
@@ -369,6 +372,8 @@ class PlayerActivity : ComponentActivity() {
                     onNextEpisode = ::playNextEpisode,
                     onDismissNextEpisodeMessage = { nextEpisodeMessageState.value = null },
                     onDismissNextEpisodeCard = ::dismissNextEpisodeCard,
+                    onCancelNextEpisode = ::cancelNextEpisodeStart,
+                    onPrefetchNextEpisode = ::prefetchNextEpisode,
                     onPlayerViewLayout = ::updatePipSourceRect,
                     onEnterPictureInPicture = ::enterPlayerPictureInPicture,
                     pictureInPictureAvailable = packageManager.hasSystemFeature(
@@ -684,9 +689,11 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * Starts the next episode on the source closest to this one. [automatic]
-     * is the end-of-episode auto-play: it extends the auto-play streak that
-     * "Still watching?" counts, while the viewer's own press resets it.
+     * Starts the next episode on the source closest to this one, the one
+     * already searched for when there is one. [automatic] is the
+     * end-of-episode auto-play: it counts down on the card first and extends
+     * the auto-play streak that "Still watching?" counts, while the viewer's
+     * own press starts at once and resets it.
      */
     private fun playNextEpisode(automatic: Boolean = false) {
         if (nextEpisodeProgressState.value != NextEpisodeProgress.Idle || request?.nextEpisode == null) return
@@ -697,14 +704,18 @@ class PlayerActivity : ComponentActivity() {
             try {
                 val current = request
                 val target = current?.nextEpisode
-                val next = if (current != null && target != null) resolvePlaybackFor(current, target) else null
+                val next = if (current != null && target != null) nextPlaybackFor(current, target) else null
                 if (current == null || next == null) {
                     nextEpisodeMessageState.value = getString(R.string.next_episode_source_unavailable)
                 } else {
-                    // Nuvio's hand-off: name the chosen source and count down before switching.
-                    for (secondsLeft in NextEpisodeSourcePolicy.START_COUNTDOWN_SECONDS downTo 1) {
-                        nextEpisodeProgressState.value = NextEpisodeProgress.Starting(next.sourceName, secondsLeft)
-                        delay(1_000)
+                    if (automatic) {
+                        // Nuvio's hand-off: name the chosen source and count down before switching.
+                        for (secondsLeft in NextEpisodeSourcePolicy.START_COUNTDOWN_SECONDS downTo 1) {
+                            nextEpisodeProgressState.value = NextEpisodeProgress.Starting(next.sourceName, secondsLeft)
+                            delay(1_000)
+                        }
+                    } else {
+                        nextEpisodeProgressState.value = NextEpisodeProgress.Starting(next.sourceName, 0)
                     }
                     switchPlayback(
                         next.request.copy(autoPlayStreak = AutoPlayPolicy.nextStreak(current.autoPlayStreak, automatic)),
@@ -779,9 +790,12 @@ class PlayerActivity : ComponentActivity() {
         endPromptState.value = null
     }
 
-    /** "Yes": the viewer chose the next episode, so it starts and the streak resets. */
+    /**
+     * "Yes": the viewer chose the next episode, so it starts and the streak
+     * resets. The screen stays, saying where the start stands, until it plays.
+     */
     private fun acceptUpNext() {
-        clearEndPrompt()
+        holdEndPrompt()
         playNextEpisode(automatic = false)
     }
 
@@ -790,10 +804,28 @@ class PlayerActivity : ComponentActivity() {
         closePlayer("up next declined")
     }
 
-    /** "Continue": the viewer is here, so the next episode starts and the streak resets. */
+    /** "Continue": the viewer is here, so the next episode starts as Yes does and the streak resets. */
     private fun continueWatching() {
-        clearEndPrompt()
+        holdEndPrompt()
         playNextEpisode(automatic = false)
+    }
+
+    /** The answered screen stays up without its closing countdown. */
+    private fun holdEndPrompt() {
+        endPromptJob?.cancel()
+        endPromptState.value = when (val prompt = endPromptState.value) {
+            is PlayerEndPrompt.UpNext -> prompt.copy(secondsLeft = null)
+            is PlayerEndPrompt.StillWatching -> prompt.copy(secondsLeft = null)
+            else -> prompt
+        }
+    }
+
+    /** Stops a next-episode start in progress; the card and the end screens stay as they were. */
+    private fun cancelNextEpisodeStart() {
+        nextEpisodeResolutionJob?.cancel()
+        nextEpisodeResolutionJob = null
+        nextEpisodeProgressState.value = NextEpisodeProgress.Idle
+        nextEpisodeMessageState.value = null
     }
 
     private fun stopWatching() {
@@ -822,7 +854,7 @@ class PlayerActivity : ComponentActivity() {
         episodeSwitchState.value = EpisodeSwitchState(episode.id)
         episodeSwitchJob = lifecycleScope.launch {
             val next = try {
-                resolvePlaybackFor(current, episode)
+                nextPlaybackFor(current, episode)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -837,18 +869,58 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /**
-     * Dismisses the card for the current video and cancels any in-flight
-     * source resolution; it returns when the episode changes.
+     * Dismisses the card for the current video and cancels a start in
+     * progress; it returns when the episode changes. A search already made
+     * ahead is kept, for the Next button.
      */
     private fun dismissNextEpisodeCard() {
         nextEpisodeDismissedVideoId.value = request?.videoId
-        nextEpisodeResolutionJob?.cancel()
-        nextEpisodeResolutionJob = null
-        nextEpisodeProgressState.value = NextEpisodeProgress.Idle
-        nextEpisodeMessageState.value = null
+        cancelNextEpisodeStart()
     }
 
+    /**
+     * Searches the next episode's source once its card is due or the credits
+     * are near, so Play, Yes, Continue, auto-play, or picking it in the
+     * episode list start from the result instead of searching again. Only
+     * stream lists are asked for; nothing is opened until it plays.
+     */
+    private fun prefetchNextEpisode() {
+        val current = request ?: return
+        val next = current.nextEpisode?.takeIf { it.hasAired() } ?: return
+        if (nextEpisodePrefetch?.isFor(current, next) == true) return
+        nextEpisodePrefetch = NextEpisodePrefetch(
+            videoId = current.videoId,
+            sourceUri = current.source.uri,
+            episodeId = next.id,
+            playback = lifecycleScope.async {
+                try {
+                    resolvePlaybackFor(current, next)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+            },
+        )
+    }
+
+    /** What the search made ahead found for [episode]; a fresh search when there was none or it found nothing. */
+    private suspend fun nextPlaybackFor(current: PlaybackRequest, episode: Episode): NextPlayback? =
+        nextEpisodePrefetch?.takeIf { it.isFor(current, episode) }?.playback?.await()
+            ?: resolvePlaybackFor(current, episode)
+
     private class NextPlayback(val request: PlaybackRequest, val sourceName: String)
+
+    /** One search made ahead: for this video on this source, and this next episode. */
+    private class NextEpisodePrefetch(
+        val videoId: String,
+        val sourceUri: String,
+        val episodeId: String,
+        val playback: Deferred<NextPlayback?>,
+    ) {
+        fun isFor(current: PlaybackRequest, episode: Episode): Boolean =
+            videoId == current.videoId && sourceUri == current.source.uri && episodeId == episode.id
+    }
 
     private class NextCandidate(val stream: StreamCandidate, val url: String, val providerName: String?)
 

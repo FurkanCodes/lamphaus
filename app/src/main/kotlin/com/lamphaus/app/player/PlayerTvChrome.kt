@@ -17,10 +17,7 @@ import com.lamphaus.core.model.PlaybackRequest
  */
 @Composable
 internal fun PlayerTvTitle(request: PlaybackRequest, modifier: Modifier = Modifier) {
-    val episodeLine = listOfNotNull(
-        request.subtitle?.takeIf(String::isNotBlank),
-        request.episode?.title?.takeIf { it.isNotBlank() && it != request.title },
-    ).joinToString(" • ")
+    val episodeLine = tvEpisodeLine(request)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = request.title,
@@ -58,4 +55,18 @@ internal fun PlayerTvTime(positionMillis: Long, durationMillis: Long, modifier: 
         style = MaterialTheme.typography.bodyLarge,
         modifier = modifier,
     )
+}
+
+/**
+ * The line under the TV title: the subtitle ("S1 · E2 · Pilot"), and the
+ * episode title only when the subtitle does not carry it already.
+ */
+internal fun tvEpisodeLine(request: PlaybackRequest): String {
+    val subtitle = request.subtitle?.takeIf(String::isNotBlank)
+    return listOfNotNull(
+        subtitle,
+        request.episode?.title?.takeIf {
+            it.isNotBlank() && it != request.title && subtitle?.contains(it) != true
+        },
+    ).joinToString(" • ")
 }
