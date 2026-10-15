@@ -2857,12 +2857,7 @@ private fun TvDetailScreen(
                         onSelectRating = { selectedRating = it },
                     )
                     val actionRow = rememberTvRowFocus()
-                    Row(
-                        modifier = Modifier
-                            .padding(top = 12.dp)
-                            .tvRowFocus(actionRow, plainRow = true),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
+                    TvActionRow(row = actionRow, modifier = Modifier.padding(top = 12.dp)) {
                         val nextUpLabel = nextUp?.episode?.numberParts()?.let { number ->
                             if (number.season != null && number.episode != null) {
                                 stringResource(R.string.episode_format, number.season, number.episode)
