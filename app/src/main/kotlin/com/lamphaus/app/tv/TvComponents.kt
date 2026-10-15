@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -52,6 +53,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -879,6 +881,29 @@ internal fun TvEmptyMark(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * A row of [TvAction]s at their natural width, even past a narrower parent
+ * such as the 520dp details header: a long "Resume S2 · E10" used to squeeze
+ * the last action until its label wrapped, and the taller action then took
+ * Down from its neighbours instead of the section below (TV-NAV-05).
+ */
+@Composable
+internal fun TvActionRow(
+    row: TvRowFocus,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .wrapContentWidth(Alignment.Start, unbounded = true)
+            .tvRowFocus(row, plainRow = true),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/** One line whatever room it gets, so a row of actions keeps one height (TV-CNT-02). */
 @Composable
 internal fun TvAction(
     label: String,
@@ -903,6 +928,8 @@ internal fun TvAction(
                 text = label,
                 color = if (focused) TvFocusTokens.focusedContent else MaterialTheme.colorScheme.onBackground,
                 style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
