@@ -31,7 +31,7 @@ class IntroDbSkipRepository(
     private val client: HttpClient = HttpClient(OkHttp) {
         install(HttpTimeout)
     },
-    private val baseUrl: String = "https://api.theintrodb.org/v3/media",
+    private val baseUrl: String = "https://api.theintrodb.org/v4/media",
     private val introDbUrl: String = "https://api.introdb.app/segments",
 ) {
     private val cache = ConcurrentHashMap<String, List<PlaybackSegment>>()
