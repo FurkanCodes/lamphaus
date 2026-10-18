@@ -175,6 +175,8 @@ import com.lamphaus.app.R
 import com.lamphaus.app.ui.SpoilerContent
 import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.shouldBlur
+import com.lamphaus.app.ui.uniqueItems
+import com.lamphaus.app.ui.uniqueItemsIndexed
 import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.SubtitleCue
 import com.lamphaus.core.model.SubtitleEdgeStyle
@@ -1717,7 +1719,7 @@ private fun PlayerSettingsPanel(
             PlayerPanel.SPEED -> {
                 val selectedIndex = PLAYBACK_SPEEDS.indexOf(snapshot.speed).coerceAtLeast(0)
                 LazyColumn(Modifier.heightIn(max = 360.dp), state = rememberLazyListState(selectedIndex)) {
-                    itemsIndexed(PLAYBACK_SPEEDS, key = { _, speed -> speed }) { index, speed ->
+                    uniqueItemsIndexed(PLAYBACK_SPEEDS, key = { _, speed -> speed }) { index, speed ->
                         PlayerChoiceRow(
                             title = if (speed == 1f) stringResource(R.string.player_speed_normal) else "${speed}×",
                             supportingText = null, selected = snapshot.speed == speed,
@@ -1866,7 +1868,7 @@ private fun TvSubtitleRailPanel(
                 state = rememberLazyListState(initialLanguageIndex),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                itemsIndexed(languageItems, key = { _, item -> item.key }) { index, item ->
+                uniqueItemsIndexed(languageItems, key = { _, item -> item.key }) { index, item ->
                     val isOff = item.key == SUBTITLE_LANGUAGE_OFF
                     PlayerChoiceRow(
                         title = item.label,
@@ -1919,7 +1921,7 @@ private fun TvSubtitleRailPanel(
                                         onClick = { originFilter = null },
                                     )
                                 }
-                                items(origins, key = { it.first.key }) { (origin, count) ->
+                                uniqueItems(origins, key = { it.first.key }) { (origin, count) ->
                                     TvFilterChip(
                                         label = trackOriginLabel(origin),
                                         count = count,
@@ -1939,7 +1941,7 @@ private fun TvSubtitleRailPanel(
                         modifier = Modifier.fillMaxWidth().weight(1f).focusRestorer(selectedFocus),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        itemsIndexed(visibleOptions, key = { _, item -> item.id }) { index, option ->
+                        uniqueItemsIndexed(visibleOptions, key = { _, item -> item.id }) { index, option ->
                             PlayerChoiceRow(
                                 title = option.title,
                                 supportingText = null,
@@ -2290,7 +2292,7 @@ private fun PlayerTrackList(
                         modifier = Modifier.heightIn(min = 48.dp),
                     )
                 }
-                items(origins, key = { it.first.key }) { (origin, count) ->
+                uniqueItems(origins, key = { it.first.key }) { (origin, count) ->
                     FilterChip(
                         selected = originFilter == origin.key,
                         onClick = { originFilter = origin.key },
@@ -2348,7 +2350,7 @@ private fun PlayerTrackList(
                     )
                 }
             }
-            itemsIndexed(visible, key = { _, item -> item.id }) { index, option ->
+            uniqueItemsIndexed(visible, key = { _, item -> item.id }) { index, option ->
                 PlayerChoiceRow(
                     title = option.title,
                     supportingText = null,
@@ -2718,7 +2720,7 @@ private fun PlayerTimingEditor(
                     Text(stringResource(R.string.player_sync_no_sidecar), color = PlayerOnSurfaceMuted,
                         style = MaterialTheme.typography.bodyMedium)
                 }
-                else itemsIndexed(visibleCues, key = { index, cue -> "$index:${cue.startMillis}" }) { _, cue ->
+                else uniqueItemsIndexed(visibleCues, key = { index, cue -> "$index:${cue.startMillis}" }) { _, cue ->
                     PlayerChoiceRow(cue.text.replace("\n", " "), cue.startMillis.asPlaybackTime(), false) {
                         onApplySyncByLine(capturedPositionMillis!!, cue.startMillis)
                     }

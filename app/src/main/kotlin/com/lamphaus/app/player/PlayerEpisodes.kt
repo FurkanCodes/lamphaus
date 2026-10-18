@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.episodeAirDateText
 import com.lamphaus.app.ui.upNextEpisodeLabel
+import com.lamphaus.app.ui.uniqueItemsIndexed
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.hasAired
 
@@ -74,7 +75,7 @@ internal fun PlayerEpisodesPanel(
             modifier = Modifier.fillMaxWidth().heightIn(max = if (isTelevision) 420.dp else 560.dp),
             state = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 1).coerceAtLeast(0)),
         ) {
-            itemsIndexed(episodes, key = { _, episode -> episode.id }) { index, episode ->
+            uniqueItemsIndexed(episodes, key = { _, episode -> episode.id }) { index, episode ->
                 val playing = episode.id == currentVideoId
                 val aired = remember(episode) { episode.hasAired() }
                 val status = when {

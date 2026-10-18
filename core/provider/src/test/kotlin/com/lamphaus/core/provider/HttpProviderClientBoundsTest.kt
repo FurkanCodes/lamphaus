@@ -60,6 +60,8 @@ class HttpProviderClientBoundsTest {
         maxResponseBytes = maxResponseBytes,
         maxConcurrentRequests = maxConcurrentRequests,
         maxConcurrentRequestsPerScope = maxConcurrentRequestsPerScope,
+        // These tests watch every request reach the server, revalidation included.
+        manifestFreshMillis = 0,
     )
 
     @Test

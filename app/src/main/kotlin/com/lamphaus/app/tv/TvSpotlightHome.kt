@@ -86,6 +86,7 @@ import com.lamphaus.app.ui.SelectionCheckmark
 import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.metadataPresentation
 import com.lamphaus.app.ui.rememberReducedMotion
+import com.lamphaus.app.ui.uniqueItemsIndexed
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.TrailerSource
@@ -281,7 +282,7 @@ internal fun TvSpotlightRow(
                     horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                     contentPadding = PaddingValues(horizontal = TvLayoutTokens.screenHorizontalPadding),
                 ) {
-                    itemsIndexed(section.items, key = { _, media -> media.stableKey }) { index, media ->
+                    uniqueItemsIndexed(section.items, key = { _, media -> media.stableKey }) { index, media ->
                         TvSpotlightCard(
                             media = media,
                             index = index,
@@ -357,7 +358,7 @@ internal fun TvSpotlightContinueWatchingRow(
                 horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                 contentPadding = PaddingValues(horizontal = TvLayoutTokens.screenHorizontalPadding),
             ) {
-                itemsIndexed(items, key = { _, item -> item.first.stableKey }) { index, (media, progress) ->
+                uniqueItemsIndexed(items, key = { _, item -> item.first.stableKey }) { index, (media, progress) ->
                     TvContinueWatchingCard(
                         media = media,
                         progress = progress,

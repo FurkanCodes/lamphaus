@@ -72,6 +72,8 @@ class HttpProviderClient(
     private val maxResponseBytes: Long = DEFAULT_MAX_RESPONSE_BYTES,
     maxConcurrentRequests: Int = DEFAULT_MAX_CONCURRENT_REQUESTS,
     maxConcurrentRequestsPerScope: Int = DEFAULT_MAX_CONCURRENT_PER_SCOPE,
+    /** How long a fetched manifest answers from memory before it is asked again. */
+    private val manifestFreshMillis: Long = DEFAULT_MANIFEST_FRESH_MILLIS,
 ) : ProviderClient {
     private data class CacheEntry(
         val body: String,
@@ -105,6 +107,9 @@ class HttpProviderClient(
     private val cache = java.util.LinkedHashMap<String, CacheEntry>(16, 0.75f, true)
     private var cacheBytes = 0L
 
+    /** Cached manifests Refresh asked for again; still usable stale on errors. */
+    private val expiredManifests = ConcurrentHashMap.newKeySet<String>()
+
     // Identical simultaneous requests share one network call; cancellation of
     // one subscriber must not cancel another subscriber's shared request, and
     // the shared call only stops when nobody waits for it (PERF-04).
@@ -120,10 +125,18 @@ class HttpProviderClient(
     override suspend fun manifest(manifestUrl: String): ProviderResult<ProviderManifest> = guardedProviderCall {
         val normalized = urlPolicy.normalizeManifestUrl(manifestUrl)
             ?: return@guardedProviderCall ProviderResult.Failure(ProviderFailureKind.INVALID_URL, "Use a valid HTTPS provider address.")
-        val payload = fetch(normalized, scope = normalized)
+        // Search, Home, and details all start from the manifest; a recent one
+        // answers from memory, so a search goes straight to its catalogs.
+        val payload = fetch(normalized, scope = normalized, freshForMillis = manifestFreshMillis)
         withContext(cpuDispatcher) {
             ProviderResult.Success(parseManifest(payload.element.jsonObject), payload.stale)
         }
+    }
+
+    /** The next [manifest] call for [manifestUrl] asks the provider again (Refresh). */
+    override fun expireManifest(manifestUrl: String) {
+        val normalized = urlPolicy.normalizeManifestUrl(manifestUrl) ?: return
+        expiredManifests += cacheKey(normalized, normalized)
     }
 
     override suspend fun discoverProviderUrls(catalogUrl: String): ProviderResult<List<String>> = guardedProviderCall {
@@ -232,10 +245,11 @@ class HttpProviderClient(
         scope: String,
         cacheable: Boolean = true,
         allowStaleOnError: Boolean = true,
+        freshForMillis: Long = 0,
     ): Payload {
         val key = cacheKey(scope, url)
         return coalesced(key) {
-            performFetch(key, url, cacheable, allowStaleOnError)
+            performFetch(key, url, cacheable, allowStaleOnError, freshForMillis)
         }
     }
 
@@ -244,8 +258,14 @@ class HttpProviderClient(
         url: String,
         cacheable: Boolean,
         allowStaleOnError: Boolean,
+        freshForMillis: Long,
     ): Payload {
         val cached = if (cacheable) cached(key) else null
+        val fresh = cached != null && key !in expiredManifests &&
+            System.currentTimeMillis() - cached.fetchedAtMillis < freshForMillis
+        if (fresh) {
+            return Payload(parseJson(cached.body), stale = false)
+        }
         return try {
             val fetched = withAdmission(key) { loadBody(url, key, cached, cacheable) }
             Payload(parseJson(fetched.body), fetched.stale)
@@ -361,6 +381,7 @@ class HttpProviderClient(
     private fun cached(key: String): CacheEntry? = synchronized(cacheLock) { cache[key] }
 
     private fun store(key: String, entry: CacheEntry) {
+        expiredManifests -= key
         if (entry.sizeBytes > maxCacheEntryBytes) return
         synchronized(cacheLock) {
             cache.put(key, entry)?.let { cacheBytes -= it.sizeBytes }
@@ -830,6 +851,9 @@ class HttpProviderClient(
 
         const val DEFAULT_MAX_CONCURRENT_REQUESTS = 8
         const val DEFAULT_MAX_CONCURRENT_PER_SCOPE = 3
+
+        /** Manifests rarely change; Refresh (and any add-on change) asks again sooner. */
+        const val DEFAULT_MANIFEST_FRESH_MILLIS = 15L * 60 * 1000
 
         val QUALITY = Regex("(?:2160p|4k|1080p|720p|480p)", RegexOption.IGNORE_CASE)
     }

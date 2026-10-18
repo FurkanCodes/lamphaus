@@ -42,6 +42,7 @@ import com.lamphaus.app.R
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MonthlyRecap
 import java.time.format.TextStyle
+import com.lamphaus.app.ui.uniqueItems
 
 /** The recap month's name in the viewer's language ("September"). */
 @Composable
@@ -129,7 +130,7 @@ internal fun RecapSheet(recap: MonthlyRecap, onDismiss: () -> Unit, onMedia: (Me
                     contentPadding = PaddingValues(horizontal = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    items(recap.titles, key = MediaPreview::stableKey) { media ->
+                    uniqueItems(recap.titles, key = MediaPreview::stableKey) { media ->
                         Column(
                             Modifier
                                 .width(96.dp)

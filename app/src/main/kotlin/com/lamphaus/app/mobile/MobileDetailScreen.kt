@@ -118,6 +118,7 @@ import com.lamphaus.app.ui.seasonTimeLeftText
 import com.lamphaus.app.ui.seriesRecap
 import com.lamphaus.app.ui.nextUpEpisode
 import com.lamphaus.app.ui.numberParts
+import com.lamphaus.app.ui.uniqueItems
 import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
@@ -957,7 +958,7 @@ private fun CastRow(cast: List<PersonCredit>, onOpenPerson: ((PersonCredit) -> U
             contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            items(cast.take(20), key = { it.personId ?: it.name }) { person ->
+            uniqueItems(cast.take(20), key = { it.personId ?: it.name }) { person ->
                 // Only TMDB-resolved people have titles to show; provider-only
                 // names stay plain text rather than leading nowhere.
                 val open = onOpenPerson?.takeIf { person.personId != null }
@@ -1030,7 +1031,7 @@ private fun SimilarRow(similar: List<MediaPreview>, onOpenMedia: (MediaPreview) 
             contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(similar, key = { it.stableKey }) { media ->
+            uniqueItems(similar, key = { it.stableKey }) { media ->
                 Column(
                     Modifier
                         .width(116.dp)

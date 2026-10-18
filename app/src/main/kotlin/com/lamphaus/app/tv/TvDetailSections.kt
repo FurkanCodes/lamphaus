@@ -50,6 +50,8 @@ import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.openRatingPage
+import com.lamphaus.app.ui.uniqueItems
+import com.lamphaus.app.ui.uniqueItemsIndexed
 import com.lamphaus.core.model.MediaFacts
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.PersonCredit
@@ -91,7 +93,7 @@ internal fun TvPeopleRail(cast: List<PersonCredit>) {
             ),
             horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
         ) {
-            items(cast, key = { credit -> "${credit.personId ?: credit.name}|${credit.role.orEmpty()}" }) { credit ->
+            uniqueItems(cast, key = { credit -> "${credit.personId ?: credit.name}|${credit.role.orEmpty()}" }) { credit ->
                 Column(
                     modifier = Modifier.width(CastItemWidth),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -162,7 +164,7 @@ internal fun TvSimilarRail(
             ),
             horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
         ) {
-            itemsIndexed(similar, key = { _, media -> media.stableKey }) { index, media ->
+            uniqueItemsIndexed(similar, key = { _, media -> media.stableKey }) { index, media ->
                 TvMediaCard(
                     media = media,
                     onClick = { onOpenMedia(media) },

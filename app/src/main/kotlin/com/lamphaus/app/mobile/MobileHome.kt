@@ -130,6 +130,7 @@ import com.lamphaus.app.ui.menuActions
 import com.lamphaus.app.ui.RatingBadge
 import com.lamphaus.app.ui.RatingBadgeChip
 import com.lamphaus.app.ui.metadataImdbScore
+import com.lamphaus.app.ui.uniqueItems
 import com.lamphaus.core.model.MediaType
 import com.lamphaus.core.model.RatingSourceScore
 
@@ -272,7 +273,7 @@ internal fun MobileHomeScreen(
             ) {
                 item { EmptyProviders(Modifier.padding(horizontal = 16.dp), onAddSource) }
             }
-            items(homeRows, key = CatalogSection::id) { section ->
+            uniqueItems(homeRows, key = CatalogSection::id) { section ->
                 CatalogRow(
                     section,
                     onMedia,
@@ -380,6 +381,28 @@ private fun MobileHomeCatalogLoadingSkeleton() {
                 }
                 MobileCatalogItemsLoadingSkeleton(skeletonColor, pulse)
             }
+        }
+    }
+}
+
+/** Poster rows standing in for search results until the first ones arrive (SHR-PROD-19). */
+@Composable
+internal fun MobileCatalogRowsLoading(rows: Int = 2) {
+    val pulse by rememberInfiniteTransition(label = "catalog rows loading").animateFloat(
+        initialValue = 0.58f,
+        targetValue = 0.78f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "skeleton pulse",
+    )
+    Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        repeat(rows) {
+            MobileCatalogItemsLoadingSkeleton(
+                skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = pulse),
+                pulse = pulse,
+            )
         }
     }
 }
@@ -780,7 +803,7 @@ private fun MobileContinueWatchingRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(items, key = { it.first.stableKey }) { (media, progress) ->
+            uniqueItems(items, key = { it.first.stableKey }) { (media, progress) ->
                 val focusKey = mobileMediaFocusKey("home:continue-watching", media)
                 MobileContinueWatchingCard(
                     media,
@@ -1020,7 +1043,7 @@ internal fun CatalogRow(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(section.items, key = MediaPreview::stableKey) { media ->
+                uniqueItems(section.items, key = MediaPreview::stableKey) { media ->
                     val menuTarget = ContentMenuTarget(media, progress = progressByVideo[media.id])
                     val focusKey = mobileMediaFocusKey(focusContainerKey, media)
                     PosterCard(
@@ -1206,7 +1229,7 @@ internal fun MediaGrid(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        items(media, key = MediaPreview::stableKey) { item ->
+        uniqueItems(media, key = MediaPreview::stableKey) { item ->
             val focusKey = mobileMediaFocusKey(focusContainerKey, item)
             PosterCard(
                 media = item,

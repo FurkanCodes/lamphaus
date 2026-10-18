@@ -434,6 +434,45 @@ class HttpProviderClientTest {
     }
 
     @Test
+    fun `a recent manifest answers from memory without asking the provider`() = runTest {
+        server.enqueue(jsonResponse(MANIFEST))
+        val address = server.url("/manifest.json").toString()
+
+        client.manifest(address)
+        val second = client.manifest(address)
+
+        assertEquals("fixture.provider", (second as ProviderResult.Success).value.id)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `an expired manifest is asked for again`() = runTest {
+        server.enqueue(jsonResponse(MANIFEST))
+        server.enqueue(jsonResponse(MANIFEST))
+        val address = server.url("/manifest.json").toString()
+
+        client.manifest(address)
+        client.expireManifest(address)
+        client.manifest(address)
+
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `an expired manifest still answers stale while the provider is unreachable`() = runTest {
+        server.enqueue(jsonResponse(MANIFEST))
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        val address = server.url("/manifest.json").toString()
+
+        client.manifest(address)
+        client.expireManifest(address)
+        val fallback = client.manifest(address)
+
+        assertTrue((fallback as ProviderResult.Success).isStale)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun `cached catalog is returned stale after a temporary network failure`() = runTest {
         server.enqueue(jsonResponse("""{"metas":[{"id":"m1","type":"movie","name":"Cached"}]}"""))
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
