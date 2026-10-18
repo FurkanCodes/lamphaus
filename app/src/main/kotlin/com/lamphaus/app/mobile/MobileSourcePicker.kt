@@ -77,6 +77,8 @@ import com.lamphaus.app.ui.StreamBadgeRow
 import com.lamphaus.app.ui.sourceItemKeys
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceQuality
+import com.lamphaus.app.ui.uniqueItems
+import com.lamphaus.app.ui.uniqueItemsIndexed
 import com.lamphaus.core.model.StreamCandidate
 
 private val SourcesMaxWidth = 720.dp
@@ -132,7 +134,7 @@ internal fun MobileSourcePickerScreen(
                     )
                 }
             }
-            itemsIndexed(sources, key = { index, _ -> sourceKeys[index] }, contentType = { _, _ -> "source" }) { _, source ->
+            uniqueItemsIndexed(sources, key = { index, _ -> sourceKeys[index] }, contentType = { _, _ -> "source" }) { _, source ->
                 SourceCard(
                     source = source,
                     providerLabel = picker.providerLabels[source.providerId],
@@ -270,7 +272,7 @@ private fun ProviderFilters(picker: SourcePickerState, onProvider: (String?) -> 
                     onClick = { onProvider(null) },
                 )
             }
-            items(picker.providerIds, key = { it }) { providerId ->
+            uniqueItems(picker.providerIds, key = { it }) { providerId ->
                 FilterPill(
                     label = picker.providerLabels[providerId] ?: providerId,
                     count = picker.sources.count { it.providerId == providerId },

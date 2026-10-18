@@ -109,6 +109,7 @@ import com.lamphaus.app.ui.numberParts
 import com.lamphaus.core.model.WatchProgress
 import com.lamphaus.app.ui.sourcePresentation
 import com.lamphaus.app.ui.sourceItemKeys
+import com.lamphaus.app.ui.uniqueItems
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -189,7 +190,7 @@ internal fun MobileArtworkEditorScreen(
                     MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_logo_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(logos, key = { "${it.provider}:${it.reference}" }) { asset ->
+                        uniqueItems(logos, key = { "${it.provider}:${it.reference}" }) { asset ->
                             val selected = editor.selectedLogo == asset
                             Card(
                                 modifier = Modifier
@@ -245,7 +246,7 @@ internal fun MobileArtworkEditorScreen(
                     MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_poster_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(posters, key = { "${it.provider}:${it.reference}" }) { asset ->
+                        uniqueItems(posters, key = { "${it.provider}:${it.reference}" }) { asset ->
                             val selected = editor.selectedPoster == asset
                             Card(
                                 modifier = Modifier
@@ -295,7 +296,7 @@ internal fun MobileArtworkEditorScreen(
                     MobileArtworkEmptyMessage(editor, stringResource(R.string.artwork_backdrop_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(backdrops, key = { "${it.provider}:${it.reference}" }) { asset ->
+                        uniqueItems(backdrops, key = { "${it.provider}:${it.reference}" }) { asset ->
                             val selected = editor.selectedBackdrop == asset
                             Card(
                                 modifier = Modifier

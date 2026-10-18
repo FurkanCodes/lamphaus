@@ -160,6 +160,9 @@ class AppViewModel(
     private var screenStarted = false
     private var builtInAddonsJob: Job? = null
     private var searchJob: Job? = null
+    /** The search last started ([searchRequestKey]), and whether it finished. */
+    private var lastSearchKey: String? = null
+    private var lastSearchComplete = false
     private var browseJob: Job? = null
     private val pageJobs = mutableMapOf<String, Job>()
     private var personJob: Job? = null
@@ -562,6 +565,9 @@ class AppViewModel(
 
     fun refreshContent() {
         ensureBuiltInAddons(state.value.providers)
+        // Refresh asks every add-on for its manifest again, and searches anew.
+        state.value.providers.forEach { container.providerClient.expireManifest(it.manifestUrl) }
+        lastSearchKey = null
         refreshCatalogs(force = true)
     }
 
@@ -582,23 +588,34 @@ class AppViewModel(
     }
 
     fun searchContent(input: String) {
-        searchJob?.cancel()
-        val queryText = input.trim()
-        if (queryText.isBlank()) {
+        val queryText = searchQueryOrNull(input)
+        if (queryText == null) {
+            searchJob?.cancel()
+            lastSearchKey = null
             mutableState.update { it.copy(searchSections = emptyList(), searching = false) }
             ensureBrowseTargets()
             return
         }
+        val enabledProviders = state.value.providers
+            .filter(ProviderSubscription::enabled)
+            .sortedWith(compareBy<ProviderSubscription> { it.sortOrder }.thenBy { it.id })
+        // Returning to Search, or pressing Search after typing, finds these
+        // results already shown or on their way and asks nobody again (SHR-PROD-19).
+        val profileKey = state.value.activeProfile?.let { "${it.id}:${it.kind}:${it.hideUnrated}" }
+        val requestKey = searchRequestKey(queryText, profileKey, enabledProviders)
+        if (requestKey == lastSearchKey && (lastSearchComplete || searchJob?.isActive == true)) return
+        searchJob?.cancel()
+        lastSearchKey = requestKey
+        lastSearchComplete = false
+        // The previous results stay until this search's arrive; searching shows
+        // through the pause, so "No results" never flashes while typing.
+        mutableState.update { it.copy(searching = true) }
         searchJob = viewModelScope.launch {
             delay(300)
             searchFirstResultMarked = false
-            mutableState.update { it.copy(searching = true) }
-            val enabledProviders = state.value.providers
-                .filter(ProviderSubscription::enabled)
-                .sortedWith(compareBy<ProviderSubscription> { it.sortOrder }.thenBy { it.id })
             // Discovery is bounded per provider so one slow manifest cannot hold
             // back every other provider's search (PERF-06); a canceled search
-            // cancels only its own wait.
+            // cancels only its own wait. Recent manifests answer from memory.
             val searchableCatalogs = coroutineScope {
                 enabledProviders.map { subscription ->
                     async {
@@ -606,7 +623,7 @@ class AppViewModel(
                             (container.providerClient.manifest(subscription.manifestUrl) as? ProviderResult.Success)?.value
                         }
                         manifest?.catalogs
-                            ?.filter { it.supportsExtra("search") }
+                            ?.filter(ProviderCatalog::isSearchable)
                             .orEmpty()
                             .map { subscription to it }
                     }
@@ -618,18 +635,23 @@ class AppViewModel(
                     }
             }
             // Sections publish as each provider answers while the list stays in
-            // deterministic provider/catalog order (SHR-ARC-06, TV-CNT-02).
+            // deterministic provider/catalog order (SHR-ARC-06, TV-CNT-02). A
+            // catalog that found nothing leaves no empty row behind.
             val orderedIds = searchableCatalogs.map { (subscription, catalog) ->
                 searchSectionId(subscription.id, catalog.request(search = queryText))
             }
             val resolved = LinkedHashMap<String, CatalogSection>()
+            fun publish() {
+                val ordered = orderedResolvedSections(orderedIds, resolved)
+                    .filter { it.items.isNotEmpty() || it.errorMessage != null }
+                mutableState.update { it.copy(searchSections = ordered) }
+            }
             coroutineScope {
                 searchableCatalogs.forEach { (subscription, catalog) ->
                     launch {
                         val section = resolveSearchSection(subscription, catalog, queryText)
                         resolved[section.id] = section
-                        val ordered = orderedResolvedSections(orderedIds, resolved)
-                        mutableState.update { it.copy(searchSections = ordered) }
+                        publish()
                         if (!searchFirstResultMarked && section.items.isNotEmpty()) {
                             searchFirstResultMarked = true
                             PerfTrace.mark(PerfTrace.SEARCH_QUERY_TO_FIRST_RESULT)
@@ -637,6 +659,11 @@ class AppViewModel(
                     }
                 }
             }
+            // A search whose every catalog came back empty replaces the
+            // previous query's rows too. One where no catalog answered
+            // (offline, say) is tried again when Search comes back.
+            publish()
+            lastSearchComplete = resolved.values.any { it.errorMessage == null }
             mutableState.update { it.copy(searching = false) }
         }
     }
@@ -661,18 +688,6 @@ class AppViewModel(
             skipStep = catalog.initialSkipStep(),
             hasMore = catalog.supportsSkip(),
         )
-        val missingRequired = catalog.requiredExtras.filterNot { required ->
-            required.canonicalExtraName() == "search" ||
-                catalog.extraDefaults.keys.any { key ->
-                    key.canonicalExtraName() == required.canonicalExtraName()
-                }
-        }
-        if (missingRequired.isNotEmpty()) {
-            return section.copy(
-                errorMessage = "Unavailable: ${missingRequired.sorted().joinToString(", ")} is required.",
-                hasMore = false,
-            )
-        }
         return when (val result = container.providerClient.catalog(
             subscription.manifestUrl,
             subscription.id,

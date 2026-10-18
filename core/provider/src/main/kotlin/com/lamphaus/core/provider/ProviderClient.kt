@@ -45,4 +45,11 @@ interface ProviderClient {
      * change (PERF-04). Implementations without a cache may ignore this.
      */
     fun invalidateProvider(manifestUrl: String) = Unit
+
+    /**
+     * Makes the next manifest request for [manifestUrl] reach the provider
+     * instead of a recently fetched copy. Implementations without a cache may
+     * ignore this.
+     */
+    fun expireManifest(manifestUrl: String) = Unit
 }

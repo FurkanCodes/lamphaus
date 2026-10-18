@@ -235,6 +235,9 @@ import com.lamphaus.app.ui.defaultPlayerLabel
 import com.lamphaus.app.ui.AutoSkipRows
 import com.lamphaus.app.ui.downmixLayoutLabel
 import com.lamphaus.app.ui.seekrLimitLines
+import com.lamphaus.app.ui.uniqueItems
+import com.lamphaus.app.ui.searchQueryOrNull
+import com.lamphaus.app.ui.uniqueItemsIndexed
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
 import com.lamphaus.core.model.SpoilerProtectionSettings
@@ -1483,7 +1486,7 @@ private fun TvHome(
                         }
                     }
                 }
-                items(visibleHomeSections, key = CatalogSection::id) { section ->
+                uniqueItems(visibleHomeSections, key = CatalogSection::id) { section ->
                     if (spotlight) {
                         val leadsHome = !heroHoldsEntry &&
                             continueWatching.isEmpty() &&
@@ -1500,7 +1503,7 @@ private fun TvHome(
                             firstItemFocusRequester = initialFocusRequester.takeIf { leadsHome },
                             detailsSlot = !showcase,
                         )
-                        return@items
+                        return@uniqueItems
                     }
                     TvCatalogRow(
                         section = section,
@@ -1653,7 +1656,7 @@ private fun TvContinueWatchingRow(
                 bottom = TvLayoutTokens.screenBottomPadding,
             ),
         ) {
-            itemsIndexed(items, key = { _, item -> item.first.stableKey }) { index, (media, progress) ->
+            uniqueItemsIndexed(items, key = { _, item -> item.first.stableKey }) { index, (media, progress) ->
                 TvContinueWatchingCard(
                     media = media,
                     progress = progress,
@@ -1949,7 +1952,7 @@ private fun TvRatingBadgeStrip(
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        items(ratings, key = RatingSourceScore::sourceId) { score ->
+        uniqueItems(ratings, key = RatingSourceScore::sourceId) { score ->
             val valueText = ratingValueText(score)
             val description = stringResource(R.string.rating_badge_description, score.displayName, valueText)
             TvFocusableSurface(
@@ -2025,7 +2028,7 @@ private fun TvCatalogRow(
                     bottom = TvLayoutTokens.screenBottomPadding,
                 ),
             ) {
-                itemsIndexed(section.items, key = { _, media -> media.stableKey }) { index, media ->
+                uniqueItemsIndexed(section.items, key = { _, media -> media.stableKey }) { index, media ->
                     TvMediaCard(
                         media = media,
                         onClick = { onMedia(media) },
@@ -2115,7 +2118,7 @@ private fun TvMediaGrid(
                 horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                 verticalArrangement = Arrangement.spacedBy(28.dp),
             ) {
-                itemsIndexed(media, key = { _, item -> item.stableKey }, contentType = { _, _ -> "poster" }) { index, item ->
+                uniqueItemsIndexed(media, key = { _, item -> item.stableKey }, contentType = { _, _ -> "poster" }) { index, item ->
                     TvMediaCard(
                         media = item,
                         onClick = { onMedia(item) },
@@ -2251,7 +2254,7 @@ private fun TvDiscover(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    itemsIndexed(types, key = { _, type -> "type:$type" }, contentType = { _, _ -> "chip" }) { index, type ->
+                    uniqueItemsIndexed(types, key = { _, type -> "type:$type" }, contentType = { _, _ -> "chip" }) { index, type ->
                         TvFilterChip(
                             label = catalogTypeLabel(type),
                             selected = type == selectedType,
@@ -2268,7 +2271,7 @@ private fun TvDiscover(
                                 .background(TvSurfaceTokens.subtleBorder),
                         )
                     }
-                    itemsIndexed(catalogs, key = { _, target -> "catalog:${target.id}" }, contentType = { _, _ -> "chip" }) { index, target ->
+                    uniqueItemsIndexed(catalogs, key = { _, target -> "catalog:${target.id}" }, contentType = { _, _ -> "chip" }) { index, target ->
                         TvFilterChip(
                             label = if (multipleProviders) "${target.catalog.name} · ${target.providerName}" else target.catalog.name,
                             selected = target.id == selectedTarget?.id,
@@ -2290,7 +2293,7 @@ private fun TvDiscover(
                                 modifier = Modifier.tvRowItem(genreRow, 0),
                             )
                         }
-                        itemsIndexed(genres, key = { _, genre -> "genre:$genre" }) { index, genre ->
+                        uniqueItemsIndexed(genres, key = { _, genre -> "genre:$genre" }) { index, genre ->
                             TvFilterChip(
                                 label = genre,
                                 selected = browse.selectedGenre == genre,
@@ -2348,7 +2351,7 @@ private fun TvDiscover(
                 )
             }
             else -> {
-                itemsIndexed(items, key = { _, item -> item.stableKey }, contentType = { _, _ -> "poster" }) { _, item ->
+                uniqueItemsIndexed(items, key = { _, item -> item.stableKey }, contentType = { _, _ -> "poster" }) { _, item ->
                     TvMediaCard(
                         media = item,
                         onClick = { onMedia(item) },
@@ -2418,7 +2421,8 @@ private fun TvSearch(
 ) {
     val focusManager = LocalFocusManager.current
     LaunchedEffect(query) { onSearch(query) }
-    val blank = query.isBlank()
+    // One character keeps the suggestions up; search starts at two (SHR-PROD-19).
+    val blank = searchQueryOrNull(query) == null
     // Rows are titled by what they hold: every search catalog is named after
     // its browse feed ("Popular"), which read as a filter, not a result.
     val typeLabels = mapOf(
@@ -2469,7 +2473,7 @@ private fun TvSearch(
                 item(key = "search-empty") {
                     TvDiscoverMessage(text = stringResource(R.string.search_no_results))
                 }
-            else -> items(sections, key = CatalogSection::id) { section ->
+            else -> uniqueItems(sections, key = CatalogSection::id) { section ->
                 TvCatalogRow(
                     section = section,
                     onMedia = onMedia,
@@ -2543,7 +2547,7 @@ internal fun TvSourcePickerScreen(
                             modifier = Modifier.focusRequester(filtersFocus),
                         )
                     }
-                    items(picker.providerIds, key = { it }) { providerId ->
+                    uniqueItems(picker.providerIds, key = { it }) { providerId ->
                         TvFilterChip(
                             label = picker.providerLabels[providerId] ?: providerId,
                             count = providerCounts[providerId],
@@ -2627,7 +2631,7 @@ internal fun TvSeasonChips(
         ),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        itemsIndexed(seasonNumbers, key = { _, season -> season }) { index, season ->
+        uniqueItemsIndexed(seasonNumbers, key = { _, season -> season }) { index, season ->
             TvFilterChip(
                 label = stringResource(R.string.season_format, season),
                 selected = selectedSeason == season,
@@ -2967,7 +2971,7 @@ private fun TvDetailScreen(
                         ),
                         horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
                     ) {
-                        itemsIndexed(visibleEpisodes, key = { _, episode -> episode.id }) { index, episode ->
+                        uniqueItemsIndexed(visibleEpisodes, key = { _, episode -> episode.id }) { index, episode ->
                             TvEpisodeCard(
                                 modifier = Modifier.tvRowItem(episodeRow, index),
                                 media = detail.preview,
@@ -3085,7 +3089,7 @@ private fun TvArtworkEditorScreen(
                             onClick = { onProviderSelected(null) },
                         )
                     }
-                    items(editor.availableProviders, key = { it.value }) { provider ->
+                    uniqueItems(editor.availableProviders, key = { it.value }) { provider ->
                         TvFilterChip(
                             label = provider.value,
                             selected = editor.providerFilter == provider,
@@ -3117,7 +3121,7 @@ private fun TvArtworkEditorScreen(
                     TvArtworkEmptyMessage(editor, stringResource(R.string.artwork_logo_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(logos, key = { "${it.provider}:${it.reference}" }) { asset ->
+                        uniqueItems(logos, key = { "${it.provider}:${it.reference}" }) { asset ->
                             val selected = editor.selectedLogo == asset
                             TvFocusableSurface(
                                 onClick = { onLogoSelected(asset) },
@@ -3176,7 +3180,7 @@ private fun TvArtworkEditorScreen(
                     TvArtworkEmptyMessage(editor, stringResource(R.string.artwork_poster_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(posters, key = { "${it.provider}:${it.reference}" }) { asset ->
+                        uniqueItems(posters, key = { "${it.provider}:${it.reference}" }) { asset ->
                             val selected = editor.selectedPoster == asset
                             TvFocusableSurface(
                                 onClick = { onPosterSelected(asset) },
@@ -3229,7 +3233,7 @@ private fun TvArtworkEditorScreen(
                     TvArtworkEmptyMessage(editor, stringResource(R.string.artwork_backdrop_kind))
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(backdrops, key = { "${it.provider}:${it.reference}" }) { asset ->
+                        uniqueItems(backdrops, key = { "${it.provider}:${it.reference}" }) { asset ->
                             val selected = editor.selectedBackdrop == asset
                             TvFocusableSurface(
                                 onClick = { onBackdropSelected(asset) },
@@ -4027,7 +4031,7 @@ private fun TvPlaybackLanguageDialog(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = PaddingValues(vertical = 4.dp),
                 ) {
-                    itemsIndexed(options, key = { _, option -> option.tag.ifEmpty { "fallback" } }) { index, option ->
+                    uniqueItemsIndexed(options, key = { _, option -> option.tag.ifEmpty { "fallback" } }) { index, option ->
                         val selected = option.tag == selectedTag
                         TvFocusableSurface(
                             onClick = { onSelect(option.tag) },
@@ -4165,7 +4169,7 @@ private fun TvProfilesSettings(state: AppUiState, viewModel: AppViewModel) {
         item {
             Text(stringResource(R.string.profiles), style = MaterialTheme.typography.headlineSmall)
         }
-        items(state.profiles, key = { it.id }) { profile ->
+        uniqueItems(state.profiles, key = { it.id }) { profile ->
             val requester = remember(profile.id) { FocusRequester().also { rowFocus[profile.id] = it } }
             // Switching profiles lives in the navigation avatar; here a row
             // edits that profile's avatar.
@@ -4663,7 +4667,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
         }
         // Artwork providers double as enrichment sources: a TMDB key powers
         // artwork, cast, and ratings; Fanart.tv covers artwork only.
-        items(state.artworkProviders, key = { it.provider.value }) { provider ->
+        uniqueItems(state.artworkProviders, key = { it.provider.value }) { provider ->
             val providerId = provider.provider
             val providerName = provider.displayName
             val apiKey = artworkKeys[providerId.value].orEmpty()
@@ -5065,7 +5069,7 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
                 )
             }
         }
-        items(state.providers, key = { it.id }) { provider ->
+        uniqueItems(state.providers, key = { it.id }) { provider ->
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

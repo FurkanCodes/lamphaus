@@ -37,6 +37,8 @@ import com.lamphaus.app.tv.TvSourceCard
 import com.lamphaus.app.tv.TvSourceSkeletons
 import com.lamphaus.core.model.SourceFit
 import com.lamphaus.core.model.StreamCandidate
+import com.lamphaus.app.ui.uniqueItems
+import com.lamphaus.app.ui.uniqueItemsIndexed
 
 /** A source the player can switch to: the add-on's stream and its resolved playable address. */
 internal data class PlayerSourceOption(
@@ -168,7 +170,7 @@ private fun ColumnScope.TvPlayerSources(content: PlayerSourcesContent) {
                     modifier = Modifier.focusRequester(firstChipFocus),
                 )
             }
-            items(content.groups, key = { it.id }) { group ->
+            uniqueItems(content.groups, key = { it.id }) { group ->
                 TvFilterChip(
                     label = content.groupLabel(group),
                     count = group.options.size,
@@ -188,7 +190,7 @@ private fun ColumnScope.TvPlayerSources(content: PlayerSourcesContent) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
-            itemsIndexed(content.visible, key = { _, option -> option.key }) { index, option ->
+            uniqueItemsIndexed(content.visible, key = { _, option -> option.key }) { index, option ->
                 TvSourceCard(
                     source = option.stream,
                     providerLabel = option.providerName,
@@ -224,7 +226,7 @@ private fun ColumnScope.MobilePlayerSources(content: PlayerSourcesContent) {
                     onClick = { content.onGroup(null) },
                 )
             }
-            items(content.groups, key = { it.id }) { group ->
+            uniqueItems(content.groups, key = { it.id }) { group ->
                 FilterPill(
                     label = content.groupLabel(group),
                     count = group.options.size,
@@ -246,7 +248,7 @@ private fun ColumnScope.MobilePlayerSources(content: PlayerSourcesContent) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
-            items(content.visible, key = { it.key }) { option ->
+            uniqueItems(content.visible, key = { it.key }) { option ->
                 SourceCard(
                     source = option.stream,
                     providerLabel = option.providerName,

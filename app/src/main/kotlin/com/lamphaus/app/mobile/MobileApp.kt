@@ -129,6 +129,8 @@ import com.lamphaus.app.ui.LocalArtworkResolver
 import com.lamphaus.app.ui.AppUiState
 import com.lamphaus.app.ui.AppViewModel
 import com.lamphaus.app.ui.CatalogSection
+import com.lamphaus.app.ui.uniqueItems
+import com.lamphaus.app.ui.searchQueryOrNull
 import com.lamphaus.core.data.cloud.AccountState
 import com.lamphaus.core.data.perf.PerfTrace
 import com.lamphaus.core.model.MediaPreview
@@ -1017,7 +1019,7 @@ private fun SearchScreen(
     // A search counts once the viewer acts on it: opening a result or
     // pressing Search. Abandoned typing is never remembered (MOB-SRCH-01).
     val openResult: (MediaPreview, String) -> Unit = { media, key ->
-        if (query.isNotBlank()) onRecordSearch(query)
+        searchQueryOrNull(query)?.let(onRecordSearch)
         onMedia(media, key)
     }
     val voiceLauncher = rememberVoiceSearch { spoken -> query = spoken }
@@ -1047,7 +1049,7 @@ private fun SearchScreen(
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = {
-                if (query.isNotBlank()) onRecordSearch(query)
+                searchQueryOrNull(query)?.let(onRecordSearch)
                 keyboard?.hide()
             }),
             singleLine = true,
@@ -1064,7 +1066,8 @@ private fun SearchScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = MobileTokens.spacingScreen),
         )
         if (state.searching || state.browse.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (query.isBlank()) {
+        // One character keeps browsing on screen; search starts at two (SHR-PROD-19).
+        if (searchQueryOrNull(query) == null) {
             if (history.isNotEmpty()) {
                 RecentSearches(
                     history = history,
@@ -1076,7 +1079,7 @@ private fun SearchScreen(
             val browse = state.browse
             val selectedTarget = browse.targets.firstOrNull { it.id == browse.selectedCatalogId }
             LazyRow(contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(browse.targets.map { it.catalog.type }.distinct(), key = { it }) { type ->
+                uniqueItems(browse.targets.map { it.catalog.type }.distinct(), key = { it }) { type ->
                     MobileFilterChip(
                         selected = browse.selectedType == type,
                         onClick = { onBrowseType(type) },
@@ -1085,7 +1088,7 @@ private fun SearchScreen(
                 }
             }
             LazyRow(contentPadding = PaddingValues(horizontal = MobileTokens.spacingScreen), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(browse.targets.filter { it.catalog.type == browse.selectedType }, key = { it.id }) { target ->
+                uniqueItems(browse.targets.filter { it.catalog.type == browse.selectedType }, key = { it.id }) { target ->
                     MobileFilterChip(
                         selected = browse.selectedCatalogId == target.id,
                         onClick = { onBrowseCatalog(target.id) },
@@ -1103,7 +1106,7 @@ private fun SearchScreen(
                             label = { Text(stringResource(R.string.all_genres)) },
                         )
                     }
-                    items(genres, key = { it }) { genre ->
+                    uniqueItems(genres, key = { it }) { genre ->
                         MobileFilterChip(
                             selected = browse.selectedGenre == genre,
                             onClick = { onBrowseGenre(genre) },
@@ -1134,13 +1137,14 @@ private fun SearchScreen(
                     else -> EmptyProviders(Modifier.padding(24.dp))
                 }
             }
-        } else if (state.searching) {
-            Box(Modifier.weight(1f))
+        } else if (state.searchSections.isEmpty() && state.searching) {
+            // Rows replace these as each add-on answers; nothing waits for the slowest.
+            MobileCatalogRowsLoading()
         } else if (state.searchSections.isEmpty()) {
             Text(stringResource(R.string.search_no_results), modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = navBarClearancePadding()), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                items(state.searchSections, key = CatalogSection::id) { section ->
+                uniqueItems(state.searchSections, key = CatalogSection::id) { section ->
                     // Search rows are titled by what they hold, as on TV:
                     // every search catalog is named after its feed ("Popular").
                     val typeTitle = when (section.baseQuery.type.lowercase()) {

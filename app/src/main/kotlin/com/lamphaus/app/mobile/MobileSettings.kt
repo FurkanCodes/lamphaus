@@ -115,6 +115,7 @@ import com.lamphaus.app.ui.downmixLayoutLabel
 import com.lamphaus.app.ui.playbackLanguageLabel
 import com.lamphaus.app.ui.playbackLanguageOptions
 import com.lamphaus.app.ui.seekrLimitLines
+import com.lamphaus.app.ui.uniqueItems
 import com.lamphaus.core.model.ResolutionMatching
 import com.lamphaus.core.model.SubtitleDefaultMode
 import java.util.Locale
@@ -1389,7 +1390,7 @@ private fun SettingsIntegrationsPage(state: AppUiState, viewModel: AppViewModel)
                 }
             }
         }
-        items(state.artworkProviders, key = { it.provider.value }) { provider ->
+        uniqueItems(state.artworkProviders, key = { it.provider.value }) { provider ->
             val providerId = provider.provider
             val providerName = provider.displayName
             val apiKey = artworkKeys[providerId.value].orEmpty()
