@@ -124,6 +124,21 @@ class CatalogSectionRequestTest {
         assertEquals(50, request.skip)
     }
 
+    @Test
+    fun `repeated genre options appear once`() {
+        // Genre chips are keyed by name; a repeated option crashed the row.
+        val target = CatalogBrowseTarget(
+            providerId = "provider",
+            providerName = "Provider",
+            manifestUrl = "https://example.invalid/manifest.json",
+            catalog = genreCatalog("movie").copy(
+                extraOptions = mapOf("genre" to listOf("Action", "Drama", "Action")),
+            ),
+        )
+
+        assertEquals(listOf("Action", "Drama"), target.genres)
+    }
+
     private fun genreCatalog(type: String) = ProviderCatalog(
         type = type,
         id = "top",

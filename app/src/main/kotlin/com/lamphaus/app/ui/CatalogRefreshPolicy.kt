@@ -67,12 +67,13 @@ internal fun appendHomeCatalogBatch(
 
 /**
  * Publishes incrementally resolved sections in deterministic provider/catalog
- * order, dropping anything that has not resolved yet (PERF-06).
+ * order, dropping anything that has not resolved yet (PERF-06). Each id
+ * appears once: rows are keyed by id, and a repeated key crashes the list.
  */
 internal fun orderedResolvedSections(
     orderedIds: List<String>,
     resolved: Map<String, CatalogSection>,
-): List<CatalogSection> = orderedIds.mapNotNull(resolved::get)
+): List<CatalogSection> = orderedIds.distinct().mapNotNull(resolved::get)
 internal fun CatalogSection.isRenderableHomeCatalogSection(): Boolean =
     initialLoading || items.isNotEmpty() || hasMore || errorMessage != null || loadMoreError != null
 

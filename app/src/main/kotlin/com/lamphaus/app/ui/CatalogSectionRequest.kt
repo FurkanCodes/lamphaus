@@ -24,7 +24,7 @@ data class CatalogBrowseTarget(
 ) {
     val id: String get() = "$providerId:${catalog.type}:${catalog.id}"
     val genres: List<String>
-        get() = catalog.extraOptions[catalog.wireExtraName("genre") ?: "genre"].orEmpty()
+        get() = catalog.extraOptions[catalog.wireExtraName("genre") ?: "genre"].orEmpty().distinct()
 }
 
 internal fun ProviderCatalog.homePlans(
