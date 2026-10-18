@@ -611,6 +611,11 @@ class AppViewModel(
                             .map { subscription to it }
                     }
                 }.awaitAll().flatten()
+                    // A manifest may list the same catalog twice; search it once,
+                    // since rows are keyed by id and a repeated key crashes the list.
+                    .distinctBy { (subscription, catalog) ->
+                        searchSectionId(subscription.id, catalog.request(search = queryText))
+                    }
             }
             // Sections publish as each provider answers while the list stays in
             // deterministic provider/catalog order (SHR-ARC-06, TV-CNT-02).
@@ -770,7 +775,7 @@ class AppViewModel(
                                 )
                             }
                     }
-                }.awaitAll().flatten()
+                }.awaitAll().flatten().distinctBy(CatalogBrowseTarget::id)
             }
             val selected = targets.firstOrNull { it.unavailableReason == null } ?: targets.firstOrNull()
             mutableState.update { current ->

@@ -42,6 +42,18 @@ class SearchPublicationOrderTest {
     }
 
     @Test
+    fun `a catalog listed twice publishes one row`() {
+        // A manifest that repeats a search catalog gives both entries the same
+        // row id; publishing it twice crashed the keyed result list.
+        val publication = orderedResolvedSections(
+            listOf("a:one", "b:two", "a:one"),
+            mapOf("a:one" to section("a:one"), "b:two" to section("b:two")),
+        )
+
+        assertEquals(listOf("a:one", "b:two"), publication.map(CatalogSection::id))
+    }
+
+    @Test
     fun `failed provider keeps its slot with a local error`() {
         val orderedIds = listOf("a:one", "b:two")
 
