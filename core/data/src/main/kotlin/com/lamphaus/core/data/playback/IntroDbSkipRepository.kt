@@ -11,8 +11,10 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -26,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
  * supplies intro, recap, outro, and movie post-credits segments; TheIntroDB
  * fills any category IntroDB lacks. Missing data and network failures are a
  * normal empty result: playback must remain fully functional without them.
+ * Requests carry [userAgent] so both services can attribute the traffic.
  */
 class IntroDbSkipRepository(
     private val client: HttpClient = HttpClient(OkHttp) {
@@ -33,6 +36,7 @@ class IntroDbSkipRepository(
     },
     private val baseUrl: String = "https://api.theintrodb.org/v4/media",
     private val introDbUrl: String = "https://api.introdb.app/segments",
+    private val userAgent: String = "Lamphaus",
 ) {
     private val cache = ConcurrentHashMap<String, List<PlaybackSegment>>()
 
@@ -60,7 +64,7 @@ class IntroDbSkipRepository(
     private suspend fun fetchIntroDb(imdbId: String, episode: Episode?, movie: Boolean): List<PlaybackSegment>? =
         runCatching {
             val response = client.get(introDbUrl) {
-                requestTimeout()
+                requestDefaults()
                 parameter("imdb_id", imdbId)
                 if (movie) {
                     parameter("is_movie", true)
@@ -80,7 +84,7 @@ class IntroDbSkipRepository(
         movie: Boolean,
     ): List<PlaybackSegment>? = runCatching {
         val response = client.get(baseUrl) {
-            requestTimeout()
+            requestDefaults()
             when (identifier) {
                 is IntroDbIdentifier.Imdb -> parameter("imdb_id", identifier.value)
                 is IntroDbIdentifier.Tmdb -> parameter("tmdb_id", identifier.value)
@@ -100,7 +104,8 @@ class IntroDbSkipRepository(
         }.distinct().sortedBy(PlaybackSegment::startMillis)
     }.getOrNull()
 
-    private fun HttpRequestBuilder.requestTimeout() {
+    private fun HttpRequestBuilder.requestDefaults() {
+        header(HttpHeaders.UserAgent, userAgent)
         timeout {
             connectTimeoutMillis = REQUEST_TIMEOUT_MILLIS
             requestTimeoutMillis = REQUEST_TIMEOUT_MILLIS

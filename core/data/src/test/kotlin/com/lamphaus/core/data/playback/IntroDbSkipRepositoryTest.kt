@@ -9,21 +9,26 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Url
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.util.Collections
 
 class IntroDbSkipRepositoryTest {
 
-    private val requests = mutableListOf<Url>()
+    // IntroDB and TheIntroDB are asked in parallel, so record from either thread.
+    private val requests: MutableList<Url> = Collections.synchronizedList(mutableListOf())
+    private val userAgents: MutableList<String?> = Collections.synchronizedList(mutableListOf())
 
     /** TheIntroDB answers with [theIntroDbBody]; IntroDB has nothing, so TheIntroDB's segments are used. */
     private fun repository(theIntroDbBody: String) = IntroDbSkipRepository(
         client = HttpClient(
             MockEngine { request ->
                 requests += request.url
+                userAgents += request.headers[HttpHeaders.UserAgent]
                 if (request.url.host == "api.theintrodb.org") {
                     respond(theIntroDbBody, HttpStatusCode.OK)
                 } else {
@@ -33,6 +38,7 @@ class IntroDbSkipRepositoryTest {
         ) {
             install(HttpTimeout)
         },
+        userAgent = "Lamphaus/1.0.0",
     )
 
     @Test
@@ -51,6 +57,7 @@ class IntroDbSkipRepositoryTest {
         assertEquals("tt0903747", request.parameters["imdb_id"])
         assertEquals("1", request.parameters["season"])
         assertEquals("1", request.parameters["episode"])
+        assertEquals(listOf("Lamphaus/1.0.0", "Lamphaus/1.0.0"), userAgents)
         assertEquals(
             listOf(
                 PlaybackSegment(PlaybackSegmentType.INTRO, 228_664, 246_143),
