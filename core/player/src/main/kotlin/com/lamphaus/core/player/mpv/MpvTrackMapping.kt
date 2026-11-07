@@ -45,6 +45,33 @@ internal data class MpvTrackPlan(
 @UnstableApi
 internal object MpvTrackMapping {
 
+    /**
+     * The `loadfile` command. Since mpv 0.38 an insertion index comes before the
+     * options, read only by the insert actions; leave it out and the options
+     * land in its place, so mpv refuses the whole command and the file never
+     * opens. Headers are one list option: a repeated key keeps only the last,
+     * so commas between fields separate them and those inside values are
+     * escaped, and `%N%` quotes the list by byte length. Never logged (SHR-PROD-06).
+     */
+    fun loadCommand(uri: String, startPositionMillis: Long, headers: Map<String, String>): List<String> {
+        val fields = headers.entries.joinToString(",") { (name, value) ->
+            "$name: $value".replace("\\", "\\\\").replace(",", "\\,")
+        }
+        val options = buildList {
+            if (fields.isNotEmpty()) add("http-header-fields=%${fields.toByteArray().size}%$fields")
+            if (startPositionMillis > 0) add("start=${startPositionMillis / 1000.0}")
+        }
+        return buildList {
+            addAll(listOf("loadfile", uri, "replace"))
+            if (options.isNotEmpty()) {
+                add(NO_PLAYLIST_INDEX)
+                add(options.joinToString(","))
+            }
+        }
+    }
+
+    private const val NO_PLAYLIST_INDEX = "-1"
+
     /** Add-on subtitles in the order mpv downloads them: preferred languages first, otherwise as given. */
     fun subtitleLoadOrder(
         subtitles: List<androidx.media3.common.MediaItem.SubtitleConfiguration>,

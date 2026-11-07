@@ -124,15 +124,14 @@ internal fun MobileSourcePickerScreen(
                     ProviderFilters(picker, onProvider, stuck)
                 }
             }
-            picker.failures.values.forEach { error ->
-                item(key = "failure:$error", contentType = "failure") {
-                    Text(
-                        error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.constrainedSources(),
-                    )
-                }
+            // Keyed by add-on: two add-ons can fail with the same message (SHR-ARC-18).
+            uniqueItems(picker.failures.toList(), key = { (providerId, _) -> "failure:$providerId" }, contentType = { "failure" }) { (_, error) ->
+                Text(
+                    error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.constrainedSources(),
+                )
             }
             uniqueItemsIndexed(sources, key = { index, _ -> sourceKeys[index] }, contentType = { _, _ -> "source" }) { _, source ->
                 SourceCard(

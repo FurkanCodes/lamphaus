@@ -230,6 +230,32 @@ fun selectAudioTrack(
 private fun prefersForced(semantic: MediaPlaybackSelection?, mode: SubtitleDefaultMode): Boolean =
     semantic?.subtitlesForcedOnly ?: (mode == SubtitleDefaultMode.FORCED_ONLY)
 
+private fun subtitleLanguages(
+    semantic: MediaPlaybackSelection?,
+    profile: ProfilePlaybackPreferences,
+    deviceLanguageTag: String,
+): List<String> = listOfNotNull(
+    semantic?.subtitleLanguageTag,
+    profile.preferredSubtitleLanguageTag.ifBlank { null },
+    profile.secondarySubtitleLanguageTag.ifBlank { null },
+    deviceLanguageTag,
+).map(::normalizeBcp47Tag).filter(String::isNotEmpty).distinct()
+
+/**
+ * The language a viewer's subtitles will default to, or null when they start
+ * off or forced-only: only then is an add-on's answer worth a stream's wait
+ * (PLY-SUB-01).
+ */
+fun wantedSubtitleLanguage(
+    semantic: MediaPlaybackSelection?,
+    profile: ProfilePlaybackPreferences,
+    deviceLanguageTag: String,
+): String? {
+    if (profile.subtitleDefaultMode == SubtitleDefaultMode.OFF && semantic?.subtitlesForcedOnly == null) return null
+    if (prefersForced(semantic, profile.subtitleDefaultMode)) return null
+    return subtitleLanguages(semantic, profile, deviceLanguageTag).firstOrNull()
+}
+
 /**
  * Subtitle selection precedence (plan §3). Returns the track id to activate,
  * or null when no subtitles should play. [OFF] always disables subtitles.
@@ -250,12 +276,7 @@ fun selectSubtitleTrack(
         return null
     }
     val forcedOnly = prefersForced(semantic, profile.subtitleDefaultMode)
-    val wantedLanguages = listOfNotNull(
-        semantic?.subtitleLanguageTag,
-        profile.preferredSubtitleLanguageTag.ifBlank { null },
-        profile.secondarySubtitleLanguageTag.ifBlank { null },
-        deviceLanguageTag,
-    ).map(::normalizeBcp47Tag).filter(String::isNotEmpty).distinct()
+    val wantedLanguages = subtitleLanguages(semantic, profile, deviceLanguageTag)
     if (forcedOnly) {
         for (language in wantedLanguages) {
             tracks.firstOrNull { languageMatches(it.languageTag, language) && TrackRole.FORCED in it.roles }

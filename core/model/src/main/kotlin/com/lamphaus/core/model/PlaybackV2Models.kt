@@ -196,9 +196,9 @@ data class DevicePlaybackConfig(
     /** Night listening (SHR-PROD-15): compress loud and quiet moments, lift dialogue; decodes on the device. */
     val nightListening: Boolean = false,
     /** Native memory buffer (PLY-NET-01): buffered media and download chunks live outside the Java heap. */
-    val nativeMemoryBuffer: Boolean = false,
+    val nativeMemoryBuffer: Boolean = true,
     /** Parallel connections (PLY-NET-01): progressive streams download in ranged chunks over several connections. */
-    val parallelConnections: Boolean = false,
+    val parallelConnections: Boolean = true,
     val parallelConnectionCount: Int = StreamingChoices.DEFAULT_CONNECTIONS,
     val parallelChunkSizeKb: Int = StreamingChoices.DEFAULT_CHUNK_SIZE_KB,
     /** Convert to DV8.1 keeps profile 7 mappings as authored (PLY-DV-01). */

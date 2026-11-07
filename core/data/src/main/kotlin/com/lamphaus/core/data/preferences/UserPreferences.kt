@@ -677,8 +677,10 @@ class UserPreferences(private val context: Context) {
         val PLAYBACK_DECODER_PRIORITY = stringPreferencesKey("playback_decoder_priority")
         val PLAYBACK_DOWNMIX = stringPreferencesKey("playback_downmix")
         val PLAYBACK_NIGHT_LISTENING = booleanPreferencesKey("playback_night_listening")
-        val PLAYBACK_NATIVE_MEMORY = booleanPreferencesKey("playback_native_memory")
-        val PLAYBACK_PARALLEL = booleanPreferencesKey("playback_parallel_connections")
+        // New names: PLY-NET-01 turned both on by default, and every device
+        // setting saved before then stored them off.
+        val PLAYBACK_NATIVE_MEMORY = booleanPreferencesKey("playback_native_memory_v2")
+        val PLAYBACK_PARALLEL = booleanPreferencesKey("playback_parallel_connections_v2")
         val PLAYBACK_PARALLEL_CONNECTIONS = intPreferencesKey("playback_parallel_connection_count")
         val PLAYBACK_PARALLEL_CHUNK_KB = intPreferencesKey("playback_parallel_chunk_kb")
         val PLAYBACK_DV_PRESERVE_MAPPING = booleanPreferencesKey("playback_dv_preserve_mapping")
@@ -782,8 +784,8 @@ internal fun devicePlaybackConfigFromKeys(
         decoderPriority = parseEnum(decoderPriority, DecoderPriority.AUTO),
         downmixMode = parseEnum(downmixMode, DownmixMode.AUTO),
         nightListening = nightListening ?: false,
-        nativeMemoryBuffer = nativeMemoryBuffer ?: false,
-        parallelConnections = parallelConnections ?: false,
+        nativeMemoryBuffer = nativeMemoryBuffer ?: true,
+        parallelConnections = parallelConnections ?: true,
         parallelConnectionCount = StreamingChoices.connections(parallelConnectionCount),
         parallelChunkSizeKb = StreamingChoices.chunkSizeKb(parallelChunkSizeKb),
         dolbyVisionPreserveMapping = dolbyVisionPreserveMapping ?: false,

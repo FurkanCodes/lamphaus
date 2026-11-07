@@ -1,0 +1,61 @@
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java
+index 3def7e4..19775d2 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java
+@@ -122,12 +122,16 @@ public final class CompositeSequenceableLoader implements SequenceableLoader {
+       if (nextLoadPositionUs == C.TIME_END_OF_SOURCE) {
+         break;
+       }
++      long nextMediaLoadPositionUs = getNextMediaLoadPositionUs();
+       for (int i = 0; i < loadersWithTrackTypes.size(); i++) {
+         long loaderNextLoadPositionUs = loadersWithTrackTypes.get(i).getNextLoadPositionUs();
+         boolean isLoaderBehind =
+             loaderNextLoadPositionUs != C.TIME_END_OF_SOURCE
+                 && loaderNextLoadPositionUs <= loadingInfo.playbackPositionUs;
+-        if (loaderNextLoadPositionUs == nextLoadPositionUs || isLoaderBehind) {
++        boolean isNextMediaLoader =
++            loaderNextLoadPositionUs != C.TIME_END_OF_SOURCE
++                && loaderNextLoadPositionUs == nextMediaLoadPositionUs;
++        if (loaderNextLoadPositionUs == nextLoadPositionUs || isLoaderBehind || isNextMediaLoader) {
+           madeProgressThisIteration |= loadersWithTrackTypes.get(i).continueLoading(loadingInfo);
+         }
+       }
+@@ -136,6 +140,22 @@ public final class CompositeSequenceableLoader implements SequenceableLoader {
+     return madeProgress;
+   }
+ 
++  /**
++   * The next load position of everything but side-loaded subtitles. A subtitle host that answers
++   * slowly, or never, must not hold back the audio and video loaded beside it.
++   */
++  private long getNextMediaLoadPositionUs() {
++    long nextLoadPositionUs = Long.MAX_VALUE;
++    for (int i = 0; i < loadersWithTrackTypes.size(); i++) {
++      SequenceableLoaderWithTrackTypes loader = loadersWithTrackTypes.get(i);
++      long loaderNextLoadPositionUs = loader.getNextLoadPositionUs();
++      if (!loader.isSubtitlesOnly() && loaderNextLoadPositionUs != C.TIME_END_OF_SOURCE) {
++        nextLoadPositionUs = min(nextLoadPositionUs, loaderNextLoadPositionUs);
++      }
++    }
++    return nextLoadPositionUs == Long.MAX_VALUE ? C.TIME_END_OF_SOURCE : nextLoadPositionUs;
++  }
++
+   @Override
+   public boolean isLoading() {
+     for (int i = 0; i < loadersWithTrackTypes.size(); i++) {
+@@ -161,6 +181,15 @@ public final class CompositeSequenceableLoader implements SequenceableLoader {
+       return trackTypes;
+     }
+ 
++    public boolean isSubtitlesOnly() {
++      for (int i = 0; i < trackTypes.size(); i++) {
++        if (trackTypes.get(i) != C.TRACK_TYPE_TEXT) {
++          return false;
++        }
++      }
++      return !trackTypes.isEmpty();
++    }
++
+     // SequenceableLoader implementation
+ 
+     @Override

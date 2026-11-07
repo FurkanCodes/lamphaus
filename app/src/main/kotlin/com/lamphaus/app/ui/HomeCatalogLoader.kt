@@ -185,34 +185,20 @@ internal class HomeCatalogLoader(
         subscription: ProviderSubscription,
         catalog: ProviderCatalog,
         plan: CatalogHomePlan,
-    ): Target = when (plan) {
-        is CatalogHomePlan.Request -> {
-            val section = CatalogSection(
-                id = "home:${canonicalCatalogRequestIdentity(subscription.id, plan.query)}",
-                providerId = subscription.id,
-                title = plan.title,
-                providerName = subscription.displayName,
-                items = emptyList(),
-                baseQuery = plan.query,
-                supportsSkip = catalog.supportsSkip(),
-                skipStep = catalog.initialSkipStep(),
-                hasMore = catalog.supportsSkip(),
-                initialLoading = true,
-            )
-            Target.Request(subscription, section)
-        }
-
-        is CatalogHomePlan.Unavailable -> Target.Ready(
-            CatalogSection(
-                id = "${subscription.id}:${catalog.type}:${catalog.id}:unavailable",
-                providerId = subscription.id,
-                title = plan.title,
-                providerName = subscription.displayName,
-                items = emptyList(),
-                errorMessage = plan.reason,
-                initialLoading = false,
-            ),
+    ): Target {
+        val section = CatalogSection(
+            id = "home:${canonicalCatalogRequestIdentity(subscription.id, plan.query)}",
+            providerId = subscription.id,
+            title = plan.title,
+            providerName = subscription.displayName,
+            items = emptyList(),
+            baseQuery = plan.query,
+            supportsSkip = catalog.supportsSkip(),
+            skipStep = catalog.initialSkipStep(),
+            hasMore = catalog.supportsSkip(),
+            initialLoading = true,
         )
+        return Target.Request(subscription, section)
     }
 
     private fun enqueue(target: Target): Boolean {

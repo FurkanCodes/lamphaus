@@ -56,6 +56,8 @@ import com.lamphaus.core.model.PlaybackRequest
 import com.lamphaus.core.model.PlaybackSettings
 import com.lamphaus.core.model.PlaybackSource
 import com.lamphaus.core.model.ProviderManifest
+import com.lamphaus.core.model.languageMatches
+import com.lamphaus.core.model.wantedSubtitleLanguage
 import com.lamphaus.core.model.ProviderResult
 import com.lamphaus.core.model.ProviderSubscription
 import com.lamphaus.core.model.SpoilerProtectionSettings
@@ -149,6 +151,10 @@ class PlayerActivity : ComponentActivity() {
         deviceLanguageTag = { resources.configuration.locales[0].toLanguageTag() },
     )
     private val audioFollowsDefaultsState = mutableStateOf(true)
+    /** Add-on subtitles that answered after the stream started (PLY-SUB-01). */
+    private val lateSubtitlesState = mutableStateOf<List<SubtitleTrack>>(emptyList())
+    private var lateSubtitlesAttachedForViewer = false
+    private val openedAtElapsed = SystemClock.elapsedRealtime()
     private var rememberedSelection: com.lamphaus.core.model.MediaPlaybackSelection? = null
     private val streamInfoState = mutableStateOf<String?>(null)
     private val playbackStartupPhaseState = mutableStateOf(PlaybackStartupPhase.LOADING)
@@ -270,35 +276,33 @@ class PlayerActivity : ComponentActivity() {
         if (lookup == null || media == null) {
             start(playback)
         } else {
-            // The player opened at once; add-on subtitles arrive while it
-            // connects and are attached before the stream starts. A slow or
-            // hung add-on never holds playback past the cap.
+            // The player opened at once. The stream waits only as long as
+            // its subtitles are worth (PLY-SUB-01); what answers later joins
+            // through the panel, or by itself when it is what the viewer wants.
             lifecycleScope.launch {
-                val tracks = withTimeoutOrNull(ADDON_SUBTITLES_WAIT_MILLIS) {
-                    runCatching {
-                        loadAddonSubtitles(
-                            media = media,
-                            season = playback.episode?.season,
-                            episode = playback.episode?.episode,
-                            videoId = lookup.videoId,
-                            extras = buildMap {
-                                lookup.videoHash?.let { put("videoHash", it) }
-                                lookup.videoSize?.let { put("videoSize", it.toString()) }
-                                lookup.filename?.let { put("filename", it) }
-                            },
-                            providers = resolvedPlaybackProviders(),
-                        )
-                    }.getOrDefault(emptyList())
-                }.orEmpty()
-                val ready = playback.copy(
-                    source = playback.source.copy(
-                        subtitles = (playback.source.subtitles + tracks).distinctBy { "${it.language}|${it.url}|${it.id}" },
+                val wanted = wantedSubtitleLanguage(playback)
+                val subtitles = AddonSubtitleLookup(
+                    lifecycleScope,
+                    addonSubtitleLookups(
+                        media = media,
+                        season = playback.episode?.season,
+                        episode = playback.episode?.episode,
+                        videoId = lookup.videoId,
+                        extras = buildMap {
+                            lookup.videoHash?.let { put("videoHash", it) }
+                            lookup.videoSize?.let { put("videoSize", it.toString()) }
+                            lookup.filename?.let { put("filename", it) }
+                        },
                     ),
-                    addonSubtitles = null,
                 )
+                val tracks = subtitles.await(AddonSubtitleLookup.waitMillis(wanted != null)) { arrived ->
+                    arrived.any { languageMatches(it.language, wanted ?: return@any false) }
+                }
+                val ready = playback.withAddonSubtitles(tracks).copy(addonSubtitles = null)
                 request = ready
                 requestState.value = ready
                 start(ready)
+                subtitles.arrived.collect { arrived -> onSubtitlesArrived(arrived, wanted) }
             }
         }
         lifecycleScope.launch {
@@ -324,6 +328,7 @@ class PlayerActivity : ComponentActivity() {
                 }
         }
         setContent {
+            com.lamphaus.app.diagnostics.ReportScreen(com.lamphaus.app.diagnostics.AppScreen.PLAYER)
             playerChoiceState.value?.let { pending ->
                 PlayerChoice(
                     isTelevision = isTelevision,
@@ -361,6 +366,8 @@ class PlayerActivity : ComponentActivity() {
                     episodeSwitch = episodeSwitchState.value,
                     onSelectEpisode = ::selectEpisode,
                     audioFollowsDefaults = audioFollowsDefaultsState.value,
+                    lateSubtitleCount = lateSubtitlesState.value.size,
+                    onAddLateSubtitles = ::attachLateSubtitles,
                     onTrackChosen = ::onViewerTrackChoice,
                     onTrackDefaults = ::restoreTrackDefaults,
                     nextEpisodeMessage = nextEpisodeMessageState.value,
@@ -447,6 +454,7 @@ class PlayerActivity : ComponentActivity() {
                         demandingVideo = (traits.height ?: 0) >= 2160 || traits.hdr || traits.dolbyVision,
                     )
                     diagnosticsReportId = PlaybackDiagnostics.begin(
+                        waitedMillis = SystemClock.elapsedRealtime() - openedAtElapsed,
                         engineSetting = Media3EngineFactory.deviceConfig.engineKind.name,
                         startEngine = engine.name,
                         streamType = PlaybackDiagnostics.streamType(playback.source.uri, playback.source.mimeType),
@@ -1083,18 +1091,20 @@ class PlayerActivity : ComponentActivity() {
             currentLabel = current.sourceLabel,
         ) ?: return null
         val source = selected.stream
-        val subtitles = loadAddonSubtitles(
-            media = media,
-            season = next.season,
-            episode = next.episode,
-            videoId = next.id,
-            extras = buildMap {
-                source.videoHash?.let { put("videoHash", it) }
-                source.videoSize?.let { put("videoSize", it.toString()) }
-                source.filename?.let { put("filename", it) }
-            },
-            providers = resolvedProviders,
-        )
+        val subtitles = AddonSubtitleLookup(
+            lifecycleScope,
+            addonSubtitleLookups(
+                media = media,
+                season = next.season,
+                episode = next.episode,
+                videoId = next.id,
+                extras = buildMap {
+                    source.videoHash?.let { put("videoHash", it) }
+                    source.videoSize?.let { put("videoSize", it.toString()) }
+                    source.filename?.let { put("filename", it) }
+                },
+            ),
+        ).await(AddonSubtitleLookup.waitMillis(wanted = true)) { false }
         val nextRequest = current.copy(
             videoId = next.id,
             subtitle = next.episodeLabel(),
@@ -1117,45 +1127,92 @@ class PlayerActivity : ComponentActivity() {
         return NextPlayback(nextRequest, NextEpisodeSourcePolicy.sourceName(source, providerName))
     }
 
-    /** Subtitles from every enabled add-on that serves this video, labelled by add-on. */
-    private suspend fun loadAddonSubtitles(
+    /**
+     * One lookup per enabled add-on that serves subtitles for this video, each
+     * labelled by its add-on. Each fetches its own manifest, so a slow add-on
+     * holds up nobody else.
+     */
+    private suspend fun addonSubtitleLookups(
         media: MediaPreview,
         season: Int?,
         episode: Int?,
         videoId: String,
         extras: Map<String, String>,
-        providers: List<ResolvedPlaybackProvider>,
-    ): List<SubtitleTrack> {
-        return supervisorScope {
-            providers.mapNotNull { provider ->
-                val manifest = provider.manifest ?: return@mapNotNull null
-                val subtitleVideoId = provider.subscription.subtitleVideoId(
+    ): List<suspend () -> List<SubtitleTrack>> = container.libraryRepository.providers().first()
+        .filter(ProviderSubscription::enabled)
+        .sortedBy(ProviderSubscription::sortOrder)
+        .map { subscription ->
+            suspend {
+                val manifest = (container.providerClient.manifest(subscription.manifestUrl) as? ProviderResult.Success)?.value
+                val subtitleVideoId = subscription.subtitleVideoId(
                     imdbId = media.id,
                     season = season,
                     episode = episode,
                     fallbackVideoId = videoId,
                 )
-                if (!container.providerAggregator.supports(
-                        manifest,
-                        "subtitles",
-                        media.rawType,
-                        subtitleVideoId,
-                    )
+                if (manifest == null ||
+                    !container.providerAggregator.supports(manifest, "subtitles", media.rawType, subtitleVideoId)
                 ) {
-                    return@mapNotNull null
-                }
-                async {
+                    emptyList()
+                } else {
                     (container.providerClient.subtitles(
-                        provider.subscription.manifestUrl,
+                        subscription.manifestUrl,
                         media.rawType,
                         subtitleVideoId,
                         extras,
                     ) as? ProviderResult.Success)?.value.orEmpty().map { track ->
-                        track.copy(providerName = provider.subscription.displayName)
+                        track.copy(providerName = subscription.displayName)
                     }
                 }
-            }.awaitAll().flatten()
+            }
         }
+
+    private fun PlaybackRequest.withAddonSubtitles(tracks: List<SubtitleTrack>): PlaybackRequest = copy(
+        source = source.copy(
+            subtitles = (source.subtitles + tracks).distinctBy { "${it.language}|${it.url}|${it.id}" },
+        ),
+    )
+
+    /** The language this profile's subtitles start in, or null when they start off. */
+    private suspend fun wantedSubtitleLanguage(playback: PlaybackRequest): String? {
+        val profileId = activePlaybackProfileId() ?: return null
+        val preferences = container.playbackPreferencesRepository
+        return wantedSubtitleLanguage(
+            semantic = preferences.mediaSelection(profileId, playback.mediaKey),
+            profile = preferences.profilePreferences(profileId),
+            deviceLanguageTag = resources.configuration.locales[0].toLanguageTag(),
+        )
+    }
+
+    /**
+     * What answered after the stream started waits in the panel, since adding
+     * tracks reloads the stream. The subtitle a viewer is otherwise left
+     * without is worth that once.
+     */
+    private fun onSubtitlesArrived(arrived: List<SubtitleTrack>, wanted: String?) {
+        val attached = request?.source?.subtitles.orEmpty()
+        val late = arrived.filterNot { track -> attached.any { it.url == track.url && it.id == track.id } }
+        lateSubtitlesState.value = late
+        val needed = wanted != null && !lateSubtitlesAttachedForViewer && trackDefaults.subtitlesFollowDefaults &&
+            late.any { languageMatches(it.language, wanted) } &&
+            controller?.currentTracks?.isTypeSelected(C.TRACK_TYPE_TEXT) == false
+        if (needed) {
+            lateSubtitlesAttachedForViewer = true
+            attachLateSubtitles()
+        }
+    }
+
+    /** Reloads the stream at this position with the late subtitles among its tracks. */
+    private fun attachLateSubtitles() {
+        val playback = request ?: return
+        val mediaController = controller?.takeIf { it.currentMediaItem != null } ?: return
+        val ready = playback.withAddonSubtitles(lateSubtitlesState.value)
+        ready.source.subtitles.forEach { PlaybackHeaderRegistry.put(it.url, it.headers) }
+        request = ready
+        requestState.value = ready
+        lateSubtitlesState.value = emptyList()
+        mediaController.setMediaItem(ready.toMediaItem(), mediaController.currentPosition)
+        mediaController.prepare()
     }
 
     /**
@@ -1766,9 +1823,6 @@ class PlayerActivity : ComponentActivity() {
         // Nuvio's cadence: each local save re-runs Continue Watching, which costs
     // a weak TV box frames mid-playback. Pause, stop, and the end save at once.
     private const val PROGRESS_SAVE_INTERVAL_MILLIS = 90_000L
-        /** Longest wait for add-on subtitles before the stream starts without the rest. */
-        private const val ADDON_SUBTITLES_WAIT_MILLIS = 8_000L
-
         /** Minimum playback advance between periodic progress writes. */
         private const val PROGRESS_SAVE_DELTA_MILLIS = 5_000L
     private const val EXTERNAL_SEGMENTS_WAIT_MILLIS = 4_000L

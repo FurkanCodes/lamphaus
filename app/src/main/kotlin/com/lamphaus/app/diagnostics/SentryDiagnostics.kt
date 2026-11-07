@@ -45,6 +45,8 @@ object SentryDiagnostics {
     private const val PLAYBACK_TAG = "report"
     private const val PLAYBACK = "playback"
     private const val MAX_BREADCRUMBS = 100
+    private const val SCREEN = "screen"
+    private const val HOME_LAYOUT = "home_layout"
     private val CONTEXT_KEYS = listOf("closeReason", "totals", "state", "playback", "media", "exit", "recent", "omittedEvents")
 
     val configured: Boolean get() = BuildConfig.SENTRY_DSN.isNotBlank()
@@ -55,6 +57,8 @@ object SentryDiagnostics {
     private var running: DiagnosticsConsent? = null
     private var taggedReport: String? = null
     private var taggedEngine: String? = null
+    @Volatile private var screen: String? = null
+    @Volatile private var homeLayout: String? = null
 
     /** Starts, restarts, or stops Sentry to match [next]. Called off the main thread. */
     @Synchronized
@@ -77,6 +81,35 @@ object SentryDiagnostics {
         if (!next.crashReports && !next.performanceMetrics) return
         SentryAndroid.init(context.applicationContext) { options -> configure(options, next) }
         running = next
+        tagScreen()
+    }
+
+    /**
+     * The page on screen, on Sentry's scope so every crash and ANR names it
+     * (native crashes read the scope Sentry keeps on disk), and as a breadcrumb
+     * so a report shows the pages before it. Fixed names only ([AppScreen]).
+     */
+    fun onScreen(name: String, layout: String?) {
+        if (name == screen && layout == homeLayout) return
+        val changedPage = name != screen
+        screen = name
+        homeLayout = layout
+        if (!Sentry.isEnabled()) return
+        tagScreen()
+        if (changedPage) {
+            Sentry.addBreadcrumb(
+                Breadcrumb().apply {
+                    category = SCREEN
+                    message = name
+                    level = SentryLevel.INFO
+                },
+            )
+        }
+    }
+
+    private fun tagScreen() {
+        screen?.let { Sentry.setTag(SCREEN, it) }
+        homeLayout?.let { Sentry.setTag(HOME_LAYOUT, it) }
     }
 
     /**

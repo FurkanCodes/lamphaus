@@ -3,7 +3,10 @@ package com.lamphaus.app.tv
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -230,11 +233,14 @@ class TvNavigationBehaviorTest {
         field.assertIsFocused().assert(isEditable().not())
     }
 
+    @OptIn(ExperimentalLayoutApi::class)
     @Test
     fun selectEntersEditModeAndBackRestoresBrowseFocus() {
         val fieldRequester = FocusRequester()
+        var keyboardOpen = false
 
         compose.setContent {
+            keyboardOpen = WindowInsets.isImeVisible
             LamphausTvTheme {
                 Surface {
                     TvEditableTextField(
@@ -264,6 +270,8 @@ class TvNavigationBehaviorTest {
         }
         compose.waitForIdle()
         field.assertIsFocused().assert(isEditable())
+        // Back reaches the keyboard once it is up, as it does for a viewer.
+        compose.waitUntil(5_000) { keyboardOpen }
 
         pressBack()
         compose.waitUntil(3_000) {

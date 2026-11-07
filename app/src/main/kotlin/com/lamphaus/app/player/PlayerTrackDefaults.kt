@@ -146,6 +146,9 @@ internal class PlayerTrackDefaults(
     /** True while audio follows the defaults rather than the viewer's pick. */
     val audioFollowsDefaults: Boolean get() = !viewerChoseAudio
 
+    /** True while subtitles follow the defaults rather than the viewer's pick. */
+    val subtitlesFollowDefaults: Boolean get() = !viewerChoseText
+
     fun attach(player: Player) {
         this.player?.removeListener(this)
         this.player = player

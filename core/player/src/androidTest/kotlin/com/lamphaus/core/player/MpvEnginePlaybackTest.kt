@@ -6,6 +6,7 @@ import android.view.Surface
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.session.MediaController
 import androidx.media3.session.MediaSession
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -145,6 +146,40 @@ class MpvEnginePlaybackTest {
         }
     }
 
+    /**
+     * A main thread still delivering the last update when playback restarts
+     * (a busy TV box) must not lose the first frame: the player screen holds
+     * its loading surface over the video until the timeout without it.
+     */
+    @Test
+    fun reportsTheFirstFrameWhenTheMainThreadIsBusy() {
+        serveWithRanges()
+        val firstFrame = CountDownLatch(1)
+        val url = server.url("/movie.mp4").toString()
+        val texture = SurfaceTexture(false)
+        val surface = Surface(texture)
+        lateinit var player: MpvPlayer
+        instrumentation.runOnMainSync {
+            player = MpvPlayer(Looper.getMainLooper(), MpvCertificates.bundle(instrumentation.targetContext))
+            player.addListener(object : Player.Listener {
+                override fun onRenderedFirstFrame() = firstFrame.countDown()
+
+                override fun onVideoSizeChanged(videoSize: VideoSize) = Thread.sleep(BUSY_MAIN_THREAD_MILLIS)
+            })
+            player.setVideoSurface(surface)
+            player.setMediaItem(MediaItem.fromUri(url))
+            player.prepare()
+            player.play()
+        }
+        try {
+            assertTrue("first frame lost", firstFrame.await(10, TimeUnit.SECONDS))
+        } finally {
+            instrumentation.runOnMainSync { player.release() }
+            surface.release()
+            texture.release()
+        }
+    }
+
     @Test
     fun reportsAFileItCannotOpen() {
         server.enqueue(MockResponse().setResponseCode(200).setBody("not a video"))
@@ -187,5 +222,9 @@ class MpvEnginePlaybackTest {
                     .setBody(Buffer().write(content, start.toInt(), (end - start + 1).toInt()))
             }
         }
+    }
+
+    private companion object {
+        const val BUSY_MAIN_THREAD_MILLIS = 400L
     }
 }

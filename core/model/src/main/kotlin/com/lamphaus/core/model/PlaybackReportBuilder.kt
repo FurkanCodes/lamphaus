@@ -14,6 +14,8 @@ class PlaybackReportBuilder(
     private val app: AppFacts,
     private val device: DeviceFacts,
     private val playback: PlaybackFacts,
+    /** How long the viewer had waited when the engine began: BEGIN's value, null when unknown. */
+    private val waitedMillis: Long? = null,
 ) {
     private val events = ArrayList<ReportEvent>()
     private val eventCounts = HashMap<ReportEventType, Int>()
@@ -33,7 +35,7 @@ class PlaybackReportBuilder(
     val isOpen: Boolean get() = outcome == null
 
     init {
-        add(startedAtElapsed, ReportEventType.BEGIN, detail = playback.startEngine.ifEmpty { null })
+        add(startedAtElapsed, ReportEventType.BEGIN, value = waitedMillis, detail = playback.startEngine.ifEmpty { null })
     }
 
     fun onPhase(phase: EnginePhase, now: Long, position: Long, bufferedAheadMillis: Long, bandwidthBps: Long?) {

@@ -3,17 +3,10 @@ package com.lamphaus.app.ui
 import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.ProviderCatalog
 
-internal sealed interface CatalogHomePlan {
-    data class Request(
-        val title: String,
-        val query: CatalogQuery,
-    ) : CatalogHomePlan
-
-    data class Unavailable(
-        val title: String,
-        val reason: String,
-    ) : CatalogHomePlan
-}
+internal data class CatalogHomePlan(
+    val title: String,
+    val query: CatalogQuery,
+)
 
 data class CatalogBrowseTarget(
     val providerId: String,
@@ -40,26 +33,21 @@ internal fun ProviderCatalog.homePlans(
         id == "year" &&
         requiredExtras.any { it.canonicalExtraName() == "genre" } &&
         requiredExtras.size == 1
-    if (unresolvedRequiredExtras.isNotEmpty() && !yearGenreCatalog) {
-        return listOf(
-            CatalogHomePlan.Unavailable(
-                title = displayTitle(),
-                reason = "Missing required extras: ${unresolvedRequiredExtras.sorted().joinToString(", ")}",
-            ),
-        )
-    }
+    // Home has nothing to fill the filter with, so the catalog could only ever
+    // show an error row that Retry can't clear (TV-CNT-01).
+    if (unresolvedRequiredExtras.isNotEmpty() && !yearGenreCatalog) return emptyList()
 
     val baseQuery = request(
         genre = if (yearGenreCatalog) currentYear.toString() else null,
     )
-    val plans = mutableListOf(CatalogHomePlan.Request(displayTitle(), baseQuery))
+    val plans = mutableListOf(CatalogHomePlan(displayTitle(), baseQuery))
     if (!includeCuratedGenres || id != "top" || !supportsExtra("genre")) return plans
 
     val supportedGenres = extraOptions[wireExtraName("genre") ?: "genre"].orEmpty().toSet()
     curatedGenres(type)
         .filter { supportedGenres.isEmpty() || it in supportedGenres }
         .forEach { genre ->
-            plans += CatalogHomePlan.Request(
+            plans += CatalogHomePlan(
                 title = "$genre ${typeLabel()}",
                 query = request(genre = genre),
             )

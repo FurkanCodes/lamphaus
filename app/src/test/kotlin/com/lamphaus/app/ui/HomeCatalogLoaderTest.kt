@@ -129,7 +129,7 @@ class HomeCatalogLoaderTest {
     }
 
     @Test
-    fun `duplicates and ready errors occupy ordered slots without duplicate IO`() = runTest {
+    fun `a catalog needing a filter takes no slot and duplicates cost no extra IO`() = runTest {
         val duplicateCatalog = catalog(id = "duplicate")
         val unavailableCatalog = catalog(id = "locked").copy(requiredExtras = setOf("region"))
         val ordinaryFailureCatalog = catalog(id = "ordinary-failure")
@@ -169,13 +169,12 @@ class HomeCatalogLoaderTest {
             listOf(
                 "home:duplicate|movie|duplicate",
                 "manifest-error:error",
-                "unavailable:movie:locked:unavailable",
                 "home:catalog-error|movie|ordinary-failure",
             ),
             prepared!!.sections.map(CatalogSection::id),
         )
-        assertEquals(listOf(true, false, false, true), prepared!!.sections.map(CatalogSection::initialLoading))
-        assertEquals(4, window.consumedTargetCount)
+        assertEquals(listOf(true, false, true), prepared!!.sections.map(CatalogSection::initialLoading))
+        assertEquals(3, window.consumedTargetCount)
         assertFalse(window.hasMore)
         assertEquals(listOf("duplicate", "catalog-error"), client.catalogCalls.map(CatalogCall::providerId))
         assertEquals(2, resolved.size)

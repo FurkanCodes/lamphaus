@@ -20,6 +20,7 @@ import com.lamphaus.app.LamphausApplication
 import com.lamphaus.app.R
 import java.io.File
 import java.security.MessageDigest
+import com.lamphaus.app.assumeTelevision
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -31,6 +32,7 @@ class TvUpdateFlowTest {
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
 
     @Test fun QA07_permissionPromptKeepsSettingsReachableByRemote() {
+        assumeTelevision()
         var opened = false
         show(UpdateUiState(phase = UpdatePhase.PermissionRequired), onSettings = { opened = true })
         compose.mainClock.advanceTimeBy(200)
@@ -43,6 +45,7 @@ class TvUpdateFlowTest {
     }
 
     @Test fun QA07_pausedDownloadRemainsVisibleAndCancellable() {
+        assumeTelevision()
         var cancelled = false
         show(UpdateUiState(phase = UpdatePhase.Waiting), onCancel = { cancelled = true })
         compose.mainClock.advanceTimeBy(200)

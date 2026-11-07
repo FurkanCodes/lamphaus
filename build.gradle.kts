@@ -18,7 +18,7 @@ plugins {
  * scripts/build-media3-exoplayer.sh re-run with the new tag first.
  */
 val media3ForkBase = "1.11.0"
-val media3ForkVersion = "$media3ForkBase-lamphaus.1"
+val media3ForkVersion = "$media3ForkBase-lamphaus.2"
 check(libs.versions.media3.get() == media3ForkBase) {
     "Media3 ${libs.versions.media3.get()} has no Lamphaus ExoPlayer build; run scripts/build-media3-exoplayer.sh for it."
 }

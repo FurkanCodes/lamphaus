@@ -2,7 +2,12 @@ package com.lamphaus.app.tv
 
 import androidx.compose.foundation.lazy.itemsIndexed
 import android.text.format.DateUtils
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,9 +39,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -49,7 +58,9 @@ import androidx.tv.material3.SurfaceDefaults
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
+import com.lamphaus.app.ui.mediaFocusRestore
 import com.lamphaus.app.ui.openRatingPage
+import com.lamphaus.app.ui.rememberReducedMotion
 import com.lamphaus.app.ui.uniqueItems
 import com.lamphaus.app.ui.uniqueItemsIndexed
 import com.lamphaus.core.model.MediaFacts
@@ -64,6 +75,9 @@ import java.util.Locale
  * with no Select action is never focusable (TV-FOC-01).
  */
 
+/** Identifies a cast card, so Back from what it opened lands on it (TV-NAV-02). */
+internal fun PersonCredit.tvFocusKey(): String = "person:${personId ?: name}|${role.orEmpty()}"
+
 
 @Composable
 private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
@@ -75,73 +89,130 @@ private fun SectionTitle(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * Cast rail following the streaming-TV convention:
- * circular headshots with the actor's name and character beneath. Display-
- * only — Select performs no action here, so it is never focusable (TV-FOC-01).
+ * Cast rail following the streaming-TV convention: circular headshots with the
+ * actor's name and character beneath. Every person takes focus, so the whole
+ * rail can be reached, and Select opens them (TV-CNT-08, TV-FOC-01).
  */
 private val CastAvatarSize = 96.dp
 private val CastItemWidth = 116.dp
 
 @Composable
-internal fun TvPeopleRail(cast: List<PersonCredit>) {
+internal fun TvPeopleRail(
+    cast: List<PersonCredit>,
+    onOpen: (PersonCredit) -> Unit,
+    restoreFocusKey: String? = null,
+    onFocusRestored: () -> Unit = {},
+) {
+    val restoreIndex = remember(cast) {
+        cast.indexOfFirst { it.tvFocusKey() == restoreFocusKey }.coerceAtLeast(0)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
         SectionTitle(stringResource(R.string.cast))
+        val row = rememberTvRowFocus(restoreIndex)
         LazyRow(
+            state = rememberLazyListState(initialFirstVisibleItemIndex = restoreIndex),
+            modifier = Modifier.tvRowFocus(row),
             contentPadding = PaddingValues(
                 start = TvLayoutTokens.screenHorizontalPadding,
                 end = TvLayoutTokens.screenHorizontalPadding,
             ),
             horizontalArrangement = Arrangement.spacedBy(TvLayoutTokens.itemSpacing),
         ) {
-            uniqueItems(cast, key = { credit -> "${credit.personId ?: credit.name}|${credit.role.orEmpty()}" }) { credit ->
-                Column(
-                    modifier = Modifier.width(CastItemWidth),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(CastAvatarSize)
-                            .clip(CircleShape)
-                            .background(TvSurfaceTokens.card)
-                            .border(1.dp, TvSurfaceTokens.subtleBorder, CircleShape),
-                    ) {
-                        if (credit.profileUrl != null) {
-                            AsyncImage(
-                                model = credit.profileUrl,
-                                contentDescription = null,
-                                modifier = Modifier.size(CastAvatarSize),
-                                contentScale = ContentScale.Crop,
-                            )
-                        } else {
-                            Text(
-                                text = credit.name.trim().take(1).uppercase(),
-                                modifier = Modifier.align(Alignment.Center),
-                                style = MaterialTheme.typography.headlineSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Text(
-                        text = credit.name,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
-                    credit.role?.takeIf(String::isNotBlank)?.let { role ->
-                        Text(
-                            text = role,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                        )
+            uniqueItemsIndexed(cast, key = { _, credit -> credit.tvFocusKey() }) { index, credit ->
+                TvPersonCard(
+                    credit = credit,
+                    onClick = { onOpen(credit) },
+                    modifier = Modifier
+                        .mediaFocusRestore(credit.tvFocusKey(), restoreFocusKey, onFocusRestored)
+                        .tvRowItem(row, index),
+                )
+            }
+        }
+    }
+}
+
+/** A person in the cast rail, with the approved card focus treatment on the portrait (TV-FOC-02). */
+@Composable
+private fun TvPersonCard(credit: PersonCredit, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    var focused by remember { mutableStateOf(false) }
+    val reducedMotion = rememberReducedMotion()
+    val focusProgress by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(TvMotionTokens.focusDurationMillis),
+        label = "person focus",
+    )
+    val ambient = LocalTvContentAccent.current
+    val primary = MaterialTheme.colorScheme.primary
+    Column(
+        modifier = modifier
+            .width(CastItemWidth)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                onClickLabel = stringResource(R.string.person_open_titles),
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .focusable()
+            .semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(CastAvatarSize)
+                .graphicsLayer {
+                    val scale = 1f + ((TvMotionTokens.focusedArtworkScale - 1f) * focusProgress)
+                    scaleX = scale
+                    scaleY = scale
+                    shadowElevation = 7.dp.toPx() * focusProgress
+                    shape = CircleShape
+                    if (focusProgress > 0f) {
+                        val halo = (ambient.accent ?: primary).copy(alpha = TvFocusTokens.halo.alpha)
+                        ambientShadowColor = halo
+                        spotShadowColor = halo
                     }
                 }
+                .clip(CircleShape)
+                .background(TvSurfaceTokens.card)
+                .border(
+                    width = if (focused) TvFocusTokens.outlineWidth else 1.dp,
+                    color = if (focused) ambient.accent ?: primary else TvSurfaceTokens.subtleBorder,
+                    shape = CircleShape,
+                ),
+        ) {
+            if (credit.profileUrl != null) {
+                AsyncImage(
+                    model = credit.profileUrl,
+                    contentDescription = null,
+                    modifier = Modifier.size(CastAvatarSize).padding(if (focused) TvFocusTokens.outlineWidth else 0.dp).clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Text(
+                    text = credit.name.trim().take(1).uppercase(),
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+        }
+        Text(
+            text = credit.name,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+        credit.role?.takeIf(String::isNotBlank)?.let { role ->
+            Text(
+                text = role,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
@@ -152,11 +223,17 @@ internal fun TvSimilarRail(
     similar: List<MediaPreview>,
     onOpenMedia: (MediaPreview) -> Unit,
     onFocused: (MediaPreview) -> Unit = {},
+    restoreFocusKey: String? = null,
+    onFocusRestored: () -> Unit = {},
 ) {
+    val restoreIndex = remember(similar) {
+        similar.indexOfFirst { it.stableKey == restoreFocusKey }.coerceAtLeast(0)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
         SectionTitle(stringResource(R.string.similar_title))
-        val row = rememberTvRowFocus()
+        val row = rememberTvRowFocus(restoreIndex)
         LazyRow(
+            state = rememberLazyListState(initialFirstVisibleItemIndex = restoreIndex),
             modifier = Modifier.tvRowFocus(row),
             contentPadding = PaddingValues(
                 start = TvLayoutTokens.screenHorizontalPadding,
@@ -169,7 +246,9 @@ internal fun TvSimilarRail(
                     media = media,
                     onClick = { onOpenMedia(media) },
                     onFocused = { onFocused(media) },
-                    modifier = Modifier.tvRowItem(row, index),
+                    modifier = Modifier
+                        .mediaFocusRestore(media.stableKey, restoreFocusKey, onFocusRestored)
+                        .tvRowItem(row, index),
                     showLabel = true,
                     revealLabelOnFocus = true,
                 )

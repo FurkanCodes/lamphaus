@@ -87,4 +87,14 @@ class ParallelDownloadPolicyTest {
         assertEquals(C.LENGTH_UNSET.toLong(), ParallelRangeDataSource.contentRangeTotal(mapOf("Content-Range" to listOf("bytes 0-10/*"))))
         assertEquals(C.LENGTH_UNSET.toLong(), ParallelRangeDataSource.contentRangeTotal(emptyMap()))
     }
+
+    @Test
+    fun `PLY-NET-01 chunks start only while a connection is free`() {
+        assertEquals(2, ParallelDownloadPolicy.freeConnections(connections = 2, downloading = 0, streaming = false))
+        assertEquals(1, ParallelDownloadPolicy.freeConnections(connections = 2, downloading = 0, streaming = true))
+        assertEquals(1, ParallelDownloadPolicy.freeConnections(connections = 2, downloading = 1, streaming = false))
+        assertEquals(0, ParallelDownloadPolicy.freeConnections(connections = 2, downloading = 1, streaming = true))
+        // A reader's own chunk may briefly exceed the limit; that never goes negative.
+        assertEquals(0, ParallelDownloadPolicy.freeConnections(connections = 2, downloading = 3, streaming = true))
+    }
 }

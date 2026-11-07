@@ -100,7 +100,14 @@ object PlaybackDiagnostics {
      * Opens a report for the playback about to start, closing any report
      * still open. Returns its id, or null before [install].
      */
-    fun begin(engineSetting: String, startEngine: String, streamType: String, resumed: Boolean, labeledTraits: String): String? {
+    fun begin(
+        waitedMillis: Long,
+        engineSetting: String,
+        startEngine: String,
+        streamType: String,
+        resumed: Boolean,
+        labeledTraits: String,
+    ): String? {
         val appContext = context ?: return null
         synchronized(lock) { builder }?.let { close(it.reportId, "replaced") }
         val id = UUID.randomUUID().toString()
@@ -119,6 +126,7 @@ object PlaybackDiagnostics {
                 labeledTraits = labeledTraits,
                 settings = Media3EngineFactory.deviceConfig.diagnosticSettings(),
             ),
+            waitedMillis = waitedMillis,
         )
         synchronized(lock) { builder = opened }
         network = NetworkWatch(appContext) { description -> note(ReportEventType.NETWORK, detail = description) }

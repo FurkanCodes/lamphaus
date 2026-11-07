@@ -121,6 +121,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
@@ -326,6 +327,9 @@ internal fun PlaybackScreen(
     onSelectEpisode: (com.lamphaus.core.model.Episode) -> Unit = {},
     /** Audio follows the profile defaults (the panel's Automatic row); null reads the player's overrides. */
     audioFollowsDefaults: Boolean? = null,
+    /** Add-on subtitles that answered after the stream started (PLY-SUB-01). */
+    lateSubtitleCount: Int = 0,
+    onAddLateSubtitles: () -> Unit = {},
     /** The viewer picked a track (null format: subtitles off). */
     onTrackChosen: ((trackType: Int, format: androidx.media3.common.Format?) -> Unit)? = null,
     /** The viewer chose Automatic: hand the track type back to the defaults. */
@@ -1196,6 +1200,8 @@ internal fun PlaybackScreen(
                     addonSubtitles = remember(request.source.subtitles) {
                         request.source.subtitles.associate { it.id to it.providerName }
                     },
+                    lateSubtitleCount = lateSubtitleCount,
+                    onAddLateSubtitles = onAddLateSubtitles,
                     audioDelayMillis = audioDelayMillis,
                     onAudioDelay = onAudioDelay,
                     onOpenEditor = { opened ->
@@ -1633,6 +1639,8 @@ private fun PlayerSettingsPanel(
     trackActions: PlayerTrackActions,
     audioAutomatic: Boolean,
     addonSubtitles: Map<String, String?>,
+    lateSubtitleCount: Int,
+    onAddLateSubtitles: () -> Unit,
     audioDelayMillis: Long,
     onAudioDelay: (Long) -> Unit,
     onOpenEditor: (PlayerEditor) -> Unit,
@@ -1665,6 +1673,18 @@ private fun PlayerSettingsPanel(
     }
     val audioUsesAutoSelection = audioAutomatic
     LaunchedEffect(panel) { if (isTelevision) runCatching { firstFocus.requestFocus() } }
+    // The "Add" row goes once pressed; focus moves on to the tracks it brought
+    // instead of leaving the panel with nothing focused (TV-FOC-01).
+    var lateRowShown by remember { mutableStateOf(false) }
+    LaunchedEffect(lateSubtitleCount > 0) {
+        if (lateSubtitleCount > 0) {
+            lateRowShown = true
+        } else if (lateRowShown && isTelevision) {
+            lateRowShown = false
+            withFrameNanos { }
+            runCatching { firstFocus.requestFocus() }
+        }
+    }
     PlayerOverlayLayout(
         // "Subtitles · 14": how many tracks this source offers, at a glance.
         if ((panel == PlayerPanel.SUBTITLES || panel == PlayerPanel.AUDIO) && options.isNotEmpty()) {
@@ -1695,6 +1715,12 @@ private fun PlayerSettingsPanel(
                 }
             }
             PlayerPanel.SUBTITLES -> {
+                if (lateSubtitleCount > 0) {
+                    PlayerTextButton(
+                        pluralStringResource(R.plurals.player_add_late_subtitles, lateSubtitleCount, lateSubtitleCount),
+                        onAddLateSubtitles,
+                    )
+                }
                 if (isTelevision) {
                     TvSubtitleRailPanel(
                         options = options,
@@ -3178,10 +3204,13 @@ internal fun PlayerTextButton(
 
 private fun Player.snapshot(): PlayerSnapshot {
     val tracks = currentTracks
+    // Only a track nothing can open is a failure. One past a decoder's declared
+    // limits (4K60 on some TV boxes) still plays, and if it cannot, the decoder
+    // reports a real error instead of a card over a working picture.
     val capabilityError = when {
-        tracks.containsType(C.TRACK_TYPE_VIDEO) && !tracks.isTypeSupported(C.TRACK_TYPE_VIDEO) ->
+        tracks.containsType(C.TRACK_TYPE_VIDEO) && !tracks.isTypeSupported(C.TRACK_TYPE_VIDEO, true) ->
             "This device cannot decode this video's format or resolution. Try another source or player."
-        tracks.containsType(C.TRACK_TYPE_AUDIO) && !tracks.isTypeSupported(C.TRACK_TYPE_AUDIO) ->
+        tracks.containsType(C.TRACK_TYPE_AUDIO) && !tracks.isTypeSupported(C.TRACK_TYPE_AUDIO, true) ->
             "This device cannot decode this source's audio. Try another source or player."
         else -> null
     }

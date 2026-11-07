@@ -97,6 +97,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import androidx.core.text.HtmlCompat
 import com.lamphaus.app.R
+import com.lamphaus.app.diagnostics.AppScreen
 import com.lamphaus.app.ui.LamphausWordmark
 import androidx.compose.runtime.rememberCoroutineScope
 import com.lamphaus.app.ui.upNextEpisodeLabel
@@ -134,6 +135,21 @@ internal enum class TvDestination(
     companion object {
         /** TV-NAV-01: the centred tabs; the avatar sits at the start and Settings at the end. */
         val centerTabs = listOf(SEARCH, HOME, MOVIES, SERIES, DISCOVER, LIBRARY)
+    }
+}
+
+/** The page a crash report names (SHR-PROD-18): a person or title over the browsing page, else that page. */
+internal fun tvScreen(destination: TvDestination, detailOpen: Boolean, personOpen: Boolean): AppScreen = when {
+    personOpen -> AppScreen.PERSON
+    detailOpen -> AppScreen.DETAILS
+    else -> when (destination) {
+        TvDestination.HOME -> AppScreen.HOME
+        TvDestination.MOVIES -> AppScreen.MOVIES
+        TvDestination.SERIES -> AppScreen.SERIES
+        TvDestination.DISCOVER -> AppScreen.DISCOVER
+        TvDestination.LIBRARY -> AppScreen.LIBRARY
+        TvDestination.SEARCH -> AppScreen.SEARCH
+        TvDestination.SETTINGS -> AppScreen.SETTINGS
     }
 }
 

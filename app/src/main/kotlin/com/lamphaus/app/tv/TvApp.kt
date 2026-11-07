@@ -89,6 +89,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.State
 import androidx.compose.runtime.snapshotFlow
 
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -819,6 +821,10 @@ private fun TvSignedIn(
     val initialDestination = if (initialSearch.isNullOrBlank()) TvDestination.HOME else TvDestination.SEARCH
     val sideRail = state.tvNavigationStyle == TvNavigationStyle.SIDE_RAIL
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
+    com.lamphaus.app.diagnostics.ReportScreen(
+        screen = tvScreen(destination, detailOpen = state.selectedDetail != null, personOpen = state.personPage?.showingTitle == false),
+        homeLayout = state.tvHomeLayout.name,
+    )
     // TV-NAV-01: the top bar starts focused; the side rail starts closed, with
     // focus on the page.
     var focusDestination by remember { mutableStateOf<TvDestination?>(initialDestination.takeUnless { sideRail }) }
@@ -826,6 +832,16 @@ private fun TvSignedIn(
     val focusReturn = rememberTvContentFocusReturn()
     val focusManager = LocalFocusManager.current
     var pendingMediaKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // TV-NAV-02: a title opened from a details page sits on top of that page.
+    // Back walks this trail, and [pendingMediaKey] keeps the card that left the
+    // browsing page, so each step lands where it was opened from.
+    val detailTrail = remember { mutableStateListOf<TvDetailStop>() }
+    var detailRestoreKey by remember { mutableStateOf<String?>(null) }
+    var personCastKey by remember { mutableStateOf<String?>(null) }
+    var personTitleKey by remember { mutableStateOf<String?>(null) }
+    var nameSearchOrigin by remember { mutableStateOf<TvNameSearchOrigin?>(null) }
+    LaunchedEffect(state.selectedDetail == null) { if (state.selectedDetail == null) detailTrail.clear() }
+    LaunchedEffect(destination) { if (destination != TvDestination.SEARCH) nameSearchOrigin = null }
     var lastFocusedMedia by remember { mutableStateOf(firstDistinctMedia(state.sections, limit = 1).firstOrNull()) }
     val contentFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
     val navFocus = remember { TvDestination.entries.associateWith { FocusRequester() } }
@@ -849,6 +865,7 @@ private fun TvSignedIn(
             .toSet()
     }
     var navHasFocus by remember { mutableStateOf(true) }
+    var pageHasFocus by remember { mutableStateOf(false) }
     val profileFocus = remember { FocusRequester() }
     var profileSwitcherOpen by rememberSaveable { mutableStateOf(false) }
     var returnToProfileAvatar by remember { mutableStateOf(false) }
@@ -866,7 +883,13 @@ private fun TvSignedIn(
         }
     }
     val openMedia: (MediaPreview) -> Unit = { media ->
-        pendingMediaKey = media.stableKey
+        val origin = state.selectedDetail?.preview
+        if (origin == null) {
+            pendingMediaKey = media.stableKey
+        } else {
+            detailTrail += TvDetailStop(origin, media.stableKey)
+        }
+        detailRestoreKey = null
         viewModel.loadDetail(media)
     }
     // TV-HOME-01: keep Google TV's Continue watching in step with this
@@ -932,36 +955,95 @@ private fun TvSignedIn(
         return
     }
 
+    state.personPage?.takeUnless { it.showingTitle }?.let { page ->
+        BackHandler {
+            detailRestoreKey = personCastKey
+            viewModel.closePerson()
+        }
+        TvPersonPage(
+            page = page,
+            onRetry = viewModel::retryPerson,
+            onMedia = { media ->
+                personTitleKey = media.stableKey
+                viewModel.openPersonTitle(media)
+            },
+            onFocused = { lastFocusedMedia = it },
+            restoreMediaKey = personTitleKey,
+            onFocusRestored = { personTitleKey = null },
+        )
+        return
+    }
+
     if (state.selectedDetail != null) {
         BackHandler {
-            viewModel.clearDetail()
-            if (pendingMediaKey == null) focusDestination = destination
-        }
-        TvDetailScreen(
-            modifier = Modifier.tvPageEntrance(state.selectedDetail.preview.stableKey, pageTransitions),
-            detail = state.selectedDetail,
-            enrichment = state.detailEnrichment,
-            enrichmentFailed = state.detailEnrichmentFailed,
-            inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
-            watchedEpisodeIds = watchedEpisodeIds,
-            spoilerProtection = state.spoilerProtection,
-            progress = state.progress,
-            recapEnabled = state.seriesRecap,
-            seasonTimeLeftEnabled = state.fitsTonight,
-            onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
-            onOpenMedia = openMedia,
-            onFocusedMedia = { lastFocusedMedia = it },
-            onLibrary = {
-                val preview = state.selectedDetail.preview
-                if (state.library.any { it.mediaKey == preview.stableKey }) {
-                    viewModel.removeFromLibrary(preview.stableKey)
-                } else {
-                    viewModel.addToLibrary(preview)
+            val stop = detailTrail.lastOrNull()
+            when {
+                stop != null -> {
+                    detailTrail.removeAt(detailTrail.lastIndex)
+                    detailRestoreKey = stop.openedKey
+                    viewModel.loadDetail(stop.media)
                 }
-            },
-            onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
-            onRetryEnrichment = viewModel::retryDetailEnrichment,
-        )
+                state.personPage != null -> viewModel.returnToPerson()
+                else -> {
+                    viewModel.clearDetail()
+                    if (pendingMediaKey == null) focusDestination = destination
+                }
+            }
+        }
+        // Each title is its own page: the one opened from a rail must not
+        // inherit the scroll that hid its Play action (TV-FOC-01).
+        key(state.selectedDetail.preview.stableKey) {
+            TvDetailScreen(
+                modifier = Modifier.tvPageEntrance(state.selectedDetail.preview.stableKey, pageTransitions),
+                detail = state.selectedDetail,
+                enrichment = state.detailEnrichment,
+                enrichmentFailed = state.detailEnrichmentFailed,
+                inLibrary = state.library.any { it.mediaKey == state.selectedDetail.preview.stableKey },
+                watchedEpisodeIds = watchedEpisodeIds,
+                spoilerProtection = state.spoilerProtection,
+                progress = state.progress,
+                recapEnabled = state.seriesRecap,
+                seasonTimeLeftEnabled = state.fitsTonight,
+                onPlay = { viewModel.openSources(state.selectedDetail.preview, it) },
+                onOpenMedia = openMedia,
+                onFocusedMedia = { lastFocusedMedia = it },
+                onOpenPerson = { credit ->
+                    if (credit.personId != null && viewModel.personPagesAvailable && state.tmdbKeyInAccount) {
+                        personCastKey = credit.tvFocusKey()
+                        viewModel.openPerson(credit)
+                    } else {
+                        // No identity to look up: their name is the next best search (TV-CNT-08).
+                        nameSearchOrigin = TvNameSearchOrigin(
+                            stop = TvDetailStop(state.selectedDetail.preview, credit.tvFocusKey()),
+                            trail = detailTrail.toList(),
+                            destination = destination,
+                            browsingKey = pendingMediaKey,
+                            query = searchQuery,
+                        )
+                        pendingMediaKey = null
+                        viewModel.clearDetail()
+                        searchQuery = credit.name
+                        // Opens at the top even when the title came from Search,
+                        // whose scroll would otherwise hide the field focus enters.
+                        contentStates.removeState(TvDestination.SEARCH.name)
+                        destination = TvDestination.SEARCH
+                        if (sideRail) contentEntry = TvDestination.SEARCH else focusDestination = TvDestination.SEARCH
+                    }
+                },
+                restoreFocusKey = detailRestoreKey,
+                onFocusRestored = { detailRestoreKey = null },
+                onLibrary = {
+                    val preview = state.selectedDetail.preview
+                    if (state.library.any { it.mediaKey == preview.stableKey }) {
+                        viewModel.removeFromLibrary(preview.stableKey)
+                    } else {
+                        viewModel.addToLibrary(preview)
+                    }
+                },
+                onEditArtwork = { viewModel.openArtworkEditor(state.selectedDetail.preview) },
+                onRetryEnrichment = viewModel::retryDetailEnrichment,
+            )
+        }
         return
     }
 
@@ -974,6 +1056,18 @@ private fun TvSignedIn(
         navHasFocus = true
         focusDestination = destination
     }
+    // A cast member's name search is a layer over their title (TV-NAV-02).
+    nameSearchOrigin?.let { origin ->
+        BackHandler {
+            nameSearchOrigin = null
+            searchQuery = origin.query
+            destination = origin.destination
+            pendingMediaKey = origin.browsingKey
+            detailTrail += origin.trail
+            detailRestoreKey = origin.stop.openedKey
+            viewModel.loadDetail(origin.stop.media)
+        }
+    }
     // A page entered from the side rail may still be composing or loading;
     // keep trying its entry control briefly, then leave focus on the rail.
     LaunchedEffect(contentEntry) {
@@ -985,7 +1079,9 @@ private fun TvSignedIn(
             true
         } ?: false
         contentEntry = null
-        if (!entered) focusDestination = target
+        // The page may have taken focus by itself while its entry control was
+        // out of reach, as a row does when its Retry gives way to cards.
+        if (!entered && !pageHasFocus) focusDestination = target
     }
     // Settings opens the rail only from its section menu, so it returns to the
     // selected section; walking back could pass other sections and switch the pane.
@@ -1065,6 +1161,7 @@ private fun TvSignedIn(
             modifier = Modifier
                 .fillMaxSize()
                 .tvPageEntrance(destination, pageTransitions)
+                .onFocusChanged { pageHasFocus = it.hasFocus }
                 .padding(
                     start = if (sideRail) TvRailTokens.contentStartOffset else 0.dp,
                     top = if (sideRail) TvRailTokens.contentTopPadding else TvLayoutTokens.contentTopPadding,
@@ -1986,6 +2083,8 @@ private fun TvCatalogRow(
     restoreMediaKey: String?,
     onFocusRestored: () -> Unit,
 ) {
+    val row = rememberTvRowFocus()
+    val retryFocus = Modifier.tvRetryHandsFocusTo(row, section.items.isNotEmpty())
     Column(verticalArrangement = Arrangement.spacedBy(TvLayoutTokens.sectionTitleSpacing)) {
         Text(
             text = section.title,
@@ -2016,7 +2115,6 @@ private fun TvCatalogRow(
                 pulse = { pulse.value },
             )
         } else if (section.items.isNotEmpty() || section.hasMore || section.loadMoreError != null) {
-            val row = rememberTvRowFocus()
             val showAction = section.loadMoreError != null || section.hasMore
             val trailing = rememberTrailingActionFocus(showAction, section.items.size)
             LazyRow(
@@ -2063,9 +2161,78 @@ private fun TvCatalogRow(
                 label = stringResource(R.string.retry),
                 icon = Icons.Outlined.Refresh,
                 onClick = onRetry,
-                modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                modifier = retryFocus.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
             )
         }
+    }
+}
+
+/** A details page that opened another title, and the card that opened it (TV-NAV-02). */
+internal data class TvDetailStop(val media: MediaPreview, val openedKey: String)
+
+/** Everything Back puts back after a search for a cast member's name. */
+private data class TvNameSearchOrigin(
+    val stop: TvDetailStop,
+    val trail: List<TvDetailStop>,
+    val destination: TvDestination,
+    val browsingKey: String?,
+    val query: String,
+)
+
+/** How long a page waits for the rail holding the card it should return to. */
+private const val DETAIL_FOCUS_RESTORE_MILLIS = 1_500L
+
+/**
+ * A cast or crew member's titles (TV-CNT-08): the same poster grid as Library,
+ * opened above the details page. Failure stays on the page with Retry
+ * (SHR-PROD-04), and Back returns to the card that opened it (TV-NAV-02).
+ */
+@Composable
+internal fun TvPersonPage(
+    page: com.lamphaus.app.ui.PersonPageState,
+    onRetry: () -> Unit,
+    onMedia: (MediaPreview) -> Unit,
+    onFocused: (MediaPreview) -> Unit,
+    restoreMediaKey: String?,
+    onFocusRestored: () -> Unit,
+) {
+    val entry = remember { FocusRequester() }
+    val titles = page.filmography?.credits.orEmpty()
+    Box(Modifier.fillMaxSize().padding(top = TvLayoutTokens.contentTopPadding)) {
+        when {
+            page.loading -> TvDiscoverMessage(text = stringResource(R.string.loading))
+            page.failed -> Column(
+                modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.person_titles_failed),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                TvAction(
+                    label = stringResource(R.string.retry),
+                    icon = Icons.Outlined.Refresh,
+                    onClick = onRetry,
+                    modifier = Modifier.focusRequester(entry),
+                )
+            }
+            titles.isEmpty() -> TvDiscoverMessage(text = stringResource(R.string.person_titles_empty))
+            else -> TvMediaGrid(
+                title = page.name,
+                media = titles,
+                onMedia = onMedia,
+                onFocused = onFocused,
+                initialFocusRequester = entry,
+                restoreMediaKey = restoreMediaKey,
+                onFocusRestored = onFocusRestored,
+            )
+        }
+    }
+    LaunchedEffect(page.loading, page.failed, restoreMediaKey == null) {
+        if (restoreMediaKey != null) return@LaunchedEffect
+        withFrameNanos { }
+        runCatching { entry.requestFocus() }
     }
 }
 
@@ -2581,7 +2748,7 @@ internal fun TvSourcePickerScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(vertical = 4.dp),
                     ) {
-                        itemsIndexed(
+                        uniqueItemsIndexed(
                             picker.visibleSources,
                             key = { index, _ -> sourceKeys[index] },
                         ) { _, source ->
@@ -2752,6 +2919,10 @@ private fun TvDetailScreen(
     onPlay: (Episode?) -> Unit,
     onOpenMedia: (MediaPreview) -> Unit,
     onFocusedMedia: (MediaPreview) -> Unit,
+    onOpenPerson: (PersonCredit) -> Unit,
+    /** The cast or similar card to return to; Play takes focus when there is none. */
+    restoreFocusKey: String?,
+    onFocusRestored: () -> Unit,
     onLibrary: () -> Unit,
     onEditArtwork: () -> Unit,
     onRetryEnrichment: () -> Unit,
@@ -2769,7 +2940,7 @@ private fun TvDetailScreen(
     val libraryPulse = remember(detail.preview.stableKey) { Animatable(1f) }
     var previousLibraryState by remember(detail.preview.stableKey) { mutableStateOf(inLibrary) }
     val reducedMotion = rememberReducedMotion()
-    LaunchedEffect(detail.preview.stableKey) { playFocus.requestFocus() }
+    LaunchedEffect(detail.preview.stableKey) { if (restoreFocusKey == null) playFocus.requestFocus() }
     LaunchedEffect(inLibrary) {
         if (inLibrary && !previousLibraryState && !reducedMotion) {
             libraryPulse.animateTo(1.04f, tween(TvMotionTokens.confirmationPulseDurationMillis))
@@ -2809,9 +2980,38 @@ private fun TvDetailScreen(
             selectedSeason = nextUpSeason ?: seasonNumbers.firstOrNull()
         }
     }
+    // Enrichment upgrades the rail with portraits; the addon's own cast
+    // list keeps it useful without any integration configured.
+    val castCredits = remember(enrichment?.cast, detail.cast) {
+        enrichment?.cast?.takeIf(List<PersonCredit>::isNotEmpty)
+            ?: detail.cast.map { name -> PersonCredit(name = HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()) }
+    }
+    val similar = enrichment?.similar.orEmpty()
+    val listState = rememberLazyListState()
+    // Back from a title or person opened here: enrichment reloads with the
+    // page, so wait for the rail, bring it on screen, and its card takes focus.
+    val castIndex = 1 + if (detail.episodes.isEmpty()) {
+        0
+    } else {
+        2 + (if (showSeasonChips) 1 else 0) + (if (focusedEpisode != null || nextUp != null) 1 else 0)
+    }
+    val restoreIndex = when {
+        restoreFocusKey == null -> null
+        castCredits.any { it.tvFocusKey() == restoreFocusKey } -> castIndex
+        similar.any { it.stableKey == restoreFocusKey } -> castIndex + if (castCredits.isNotEmpty()) 1 else 0
+        else -> null
+    }
+    LaunchedEffect(restoreIndex) { restoreIndex?.let { listState.scrollToItem(it) } }
+    LaunchedEffect(restoreFocusKey) {
+        if (restoreFocusKey == null) return@LaunchedEffect
+        delay(DETAIL_FOCUS_RESTORE_MILLIS)
+        onFocusRestored()
+        playFocus.requestFocus()
+    }
     Box(modifier.fillMaxSize()) {
         TvBakedBackdrop(media = detail.preview, style = TvBackdropStyle.DETAIL, modifier = Modifier.fillMaxSize())
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = TvLayoutTokens.bottomListPadding),
         ) {
@@ -3004,19 +3204,17 @@ private fun TvDetailScreen(
                     }
                 }
             }
-            // Enrichment upgrades the rail with portraits; the addon's own cast
-            // list keeps it useful without any integration configured.
-            val castCredits = enrichment?.cast?.takeIf(List<PersonCredit>::isNotEmpty)
-                ?: detail.cast.map { name -> PersonCredit(name = HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()) }
             if (castCredits.isNotEmpty()) {
-                item("cast") { TvPeopleRail(castCredits) }
+                item("cast") { TvPeopleRail(castCredits, onOpenPerson, restoreFocusKey, onFocusRestored) }
             }
-            if (enrichment?.similar.isNullOrEmpty() == false) {
+            if (similar.isNotEmpty()) {
                 item("similar") {
                     TvSimilarRail(
-                        similar = enrichment!!.similar,
+                        similar = similar,
                         onOpenMedia = onOpenMedia,
                         onFocused = onFocusedMedia,
+                        restoreFocusKey = restoreFocusKey,
+                        onFocusRestored = onFocusRestored,
                     )
                 }
             }

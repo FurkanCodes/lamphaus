@@ -46,9 +46,9 @@ object ParallelDownloadStats {
  * - The first request of a cold open reads up to the next chunk boundary and
  *   doubles as the length probe (Content-Range). A server without ranges or a
  *   known length is read over one connection, exactly as before.
- * - Chunks ahead of the reader download in parallel once playback is ready
- *   and 1 MiB was served in this open. The reader consumes a chunk as its
- *   bytes arrive.
+ * - Chunks ahead of the reader download in parallel once 1 MiB was served in
+ *   this open, over at most [ParallelDownloadSettings.connections] connections
+ *   at a time. The reader consumes a chunk as its bytes arrive.
  * - A process-wide session keeps the chunks across Media3's close and reopen
  *   on every seek; a position no chunk holds streams over one connection to
  *   the next chunk boundary.
@@ -213,20 +213,21 @@ class ParallelRangeDataSource internal constructor(
 
     private fun prefetch(active: RangeSession) {
         nextPrefetchCheckAt = position + PREFETCH_CHECK_STEP
-        if (!prefetchAllowed()) return
+        val earned = servedThisOpen >= ParallelDownloadPolicy.EARNED_PREFETCH_BYTES
+        if (!earned && !prefetchAllowed()) return
         val chunkBytes = settings.chunkBytes
         val index = position / chunkBytes
         // Bytes a one-connection stream covers are never fetched twice: a
         // mid-chunk position without its chunk is (or will be) streamed.
+        val streaming = continuation != null && position < continuationEnd
         val first = when {
-            continuation != null && position < continuationEnd -> (continuationEnd + chunkBytes - 1) / chunkBytes
+            streaming -> (continuationEnd + chunkBytes - 1) / chunkBytes
             position == index * chunkBytes || active.resident(index) != null -> index
             else -> index + 1
         }
-        val earned = servedThisOpen >= ParallelDownloadPolicy.EARNED_PREFETCH_BYTES
         val ahead = if (earned) active.depth.allowed(SystemClock.elapsedRealtime()) else 1
         // A failed allocation only costs this prefetch; the reader's own chunk still loads.
-        runCatching { active.prefetch(first, ahead, readerIndex = index) }
+        runCatching { active.prefetch(first, ahead, readerIndex = index, streaming = streaming) }
     }
 
     private fun advance(read: Int) {
@@ -444,15 +445,20 @@ internal class RangeSession(val key: SessionKey, private val upstream: HttpDataS
         return chunk
     }
 
-    /** Ensures [ahead] chunks from [first] are resident or downloading. */
-    fun prefetch(first: Long, ahead: Int, readerIndex: Long) {
+    /** Starts chunks of the [ahead] from [first] that are missing, while a connection is free. */
+    fun prefetch(first: Long, ahead: Int, readerIndex: Long, streaming: Boolean) {
         this.readerIndex = readerIndex
         val total = totalLength
         if (total == C.LENGTH_UNSET.toLong()) return
+        val downloading = synchronized(lock) { chunks.values.count(Chunk::downloading) }
+        var free = ParallelDownloadPolicy.freeConnections(settings.connections, downloading, streaming)
         for (offset in 0 until ahead) {
+            if (free == 0) break
             val index = first + offset
             if (index * settings.chunkBytes >= total) break
+            if (resident(index) != null) continue
             schedule(index)
+            free--
         }
     }
 
@@ -670,6 +676,8 @@ internal class Chunk(
     @Volatile var task: Future<*>? = null
 
     val failed: Boolean get() = failure != null
+
+    val downloading: Boolean get() = written < length && !failed
 
     fun touch() {
         touchedAt = SystemClock.elapsedRealtime()

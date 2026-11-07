@@ -44,8 +44,8 @@ class Media3EngineFactoryTest {
         // Night listening builds its processor and PCM-only sink with the player (SHR-PROD-15).
         assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(nightListening = true)))
         // The streaming engine is built with the player too (PLY-NET-01).
-        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(nativeMemoryBuffer = true)))
-        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(parallelConnections = true)))
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(nativeMemoryBuffer = false)))
+        assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(parallelConnections = false)))
         assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(parallelConnectionCount = 3)))
         assertEquals(true, Media3EngineFactory.needsRebuild(base, base.copy(parallelChunkSizeKb = 8_192)))
     }
@@ -64,5 +64,13 @@ class Media3EngineFactoryTest {
         // Heap-bound devices cap chunks at 16 MiB.
         val big = Media3EngineFactory.parallelSettings(config.copy(parallelChunkSizeKb = 65_536), 256 * mib, null)
         assertEquals(16 * mib, big.chunkBytes)
+    }
+
+    @Test
+    fun `PLY-NET-01 parallel connections never spend a metered network`() {
+        val config = DevicePlaybackConfig()
+        assertEquals(true, Media3EngineFactory.usesParallelConnections(config, metered = false))
+        assertEquals(false, Media3EngineFactory.usesParallelConnections(config, metered = true))
+        assertEquals(false, Media3EngineFactory.usesParallelConnections(config.copy(parallelConnections = false), metered = false))
     }
 }

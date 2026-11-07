@@ -49,13 +49,13 @@ class TvActionRowTest {
                 Box(Modifier.size(120.dp, 40.dp).focusable().testTag("seasons"))
             }
         }
-        compose.runOnIdle { play.requestFocus() }
-
+        // Measured at rest: the focused action's 1.02x scale reaches its bounds (TV-FOC-02).
         val playBounds = compose.onNodeWithTag("play").getBoundsInRoot()
         val artworkBounds = compose.onNodeWithTag("artwork").getBoundsInRoot()
         assertEquals(playBounds.bottom, artworkBounds.bottom)
         assertEquals(compose.onNodeWithTag("library").getBoundsInRoot().bottom, artworkBounds.bottom)
 
+        compose.runOnIdle { play.requestFocus() }
         compose.onNodeWithTag("play").performKeyInput { keyDown(Key.DirectionDown); keyUp(Key.DirectionDown) }
         compose.onNodeWithTag("seasons").assertIsFocused()
     }
