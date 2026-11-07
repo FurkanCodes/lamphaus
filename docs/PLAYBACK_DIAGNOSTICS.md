@@ -8,7 +8,7 @@ One JSON file per playback (`kind: PLAYBACK`) or crash (`kind: CRASH`), written 
 
 - `playback`: the engine setting and the engine it started on, stream type (`progressive`, `hls`, `dash`), whether it resumed, the traits the add-on's label claims, and the device's playback settings.
 - `media`: the decoded container, video, and audio formats.
-- `events`: a timeline in milliseconds since the start. It covers readiness, first frame, buffering (with buffer level and bandwidth), seeks, and non-viewer pauses (audio focus, output removed). It also covers errors (code name, HTTP status, renderer and decoder, cause classes) and load errors. Then retries, stall skips, the Dolby Vision base-layer fallback, engine fallbacks, decoders and the audio output, dropped-frame bursts, audio underruns, network changes, low memory, background and foreground, and the close.
+- `events`: a timeline in milliseconds since the start. The first event, `BEGIN`, holds in its `value` how long the playback waited before the engine opened: add-on subtitles (`PLY-SUB-01`). It covers readiness, first frame, buffering (with buffer level and bandwidth), seeks, and non-viewer pauses (audio focus, output removed). It also covers errors (code name, HTTP status, renderer and decoder, cause classes) and load errors. Then retries, stall skips, the Dolby Vision base-layer fallback, engine fallbacks, decoders and the audio output, dropped-frame bursts, audio underruns, network changes, low memory, background and foreground, and the close.
 - `totals`: startup time, rebuffers and their time, play time, dropped frames, underruns, errors, retries, seeks.
 - `outcome`: `ENDED`, `CLOSED`, `CLOSED_WHILE_LOADING`, `CLOSED_WHILE_BUFFERING`, `FAILED`, `CLOSED_IN_BACKGROUND`, or `PROCESS_DIED`.
 - `closeReason`: why the player closed (`viewer` for Back or Close, `switched playback`, `up next declined`, `end screen timed out`, …). Android 13+ hands Back to the app as a gesture without its key, so which remote sent it is not knowable.
@@ -49,10 +49,10 @@ adb logcat -s Lamphaus.Playback
 
 Sentry runs only while Settings → Privacy allows it (TV and mobile, synced with the account):
 
-- **Crash reports** turns on Sentry's own capture: Java crashes, native crashes in libmpv, FFmpeg, or MediaCodec, and ANRs. A crash during a playback carries the tags `playback_report` (the report's id) and `playback_engine`.
+- **Crash reports** turns on Sentry's own capture: Java crashes, native crashes in libmpv, FFmpeg, or MediaCodec, and ANRs. Every crash carries the tag `screen` (`home`, `movies`, `details`, `player`, … a fixed name from `AppScreen`, never a title), on TV also `home_layout`, and breadcrumbs of the pages before it. A crash during a playback also carries the tags `playback_report` (the report's id) and `playback_engine`.
 - **Performance metrics** sends each bad playback as an event titled "Playback failed: IO_BAD_HTTP_STATUS http=403", "Playback process died: CRASH_NATIVE", "Playback closed while buffering: rebuffering", and so on. Events are grouped by outcome and cause. The tags `outcome`, `cause`, `engine`, `stream_type`, `video_codec`, `hdr`, `dolby_vision`, `exit_reason`, and `television` filter them. The timeline shows as breadcrumbs, the totals and formats as the `playback` context, and the whole report is attached as `playback-report.json`. `recent` in that context says how many playbacks the device finished in the past week, and how many were bad.
 
-Useful searches: `report:playback`, `report:playback engine:MPV`, `cause:"process died: CRASH_NATIVE"`. To see the crash behind a "process died" playback, search `playback_report:<id>`.
+Useful searches: `screen:home`, `screen:player`, `report:playback`, `report:playback engine:MPV`, `cause:"process died: CRASH_NATIVE"`. To see the crash behind a "process died" playback, search `playback_report:<id>`.
 
 ### Sending rules
 

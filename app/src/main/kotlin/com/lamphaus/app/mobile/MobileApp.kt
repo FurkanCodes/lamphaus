@@ -344,6 +344,24 @@ internal fun LoadingScreen() {
 /** Cold-start rendering phases for the mobile host. */
 internal enum class MobileStartupPhase { Startup, SignedOut, SignedIn }
 
+/** The page a crash report names (SHR-PROD-18), in the order the pages stack on each other. */
+internal fun mobileScreen(
+    destination: MobileDestination,
+    settingsOpen: Boolean,
+    detailOpen: Boolean,
+    personOpen: Boolean,
+): com.lamphaus.app.diagnostics.AppScreen = when {
+    personOpen -> com.lamphaus.app.diagnostics.AppScreen.PERSON
+    detailOpen -> com.lamphaus.app.diagnostics.AppScreen.DETAILS
+    settingsOpen -> com.lamphaus.app.diagnostics.AppScreen.SETTINGS
+    else -> when (destination) {
+        MobileDestination.HOME -> com.lamphaus.app.diagnostics.AppScreen.HOME
+        MobileDestination.DISCOVER -> com.lamphaus.app.diagnostics.AppScreen.DISCOVER
+        MobileDestination.LIBRARY -> com.lamphaus.app.diagnostics.AppScreen.LIBRARY
+        MobileDestination.SEARCH -> com.lamphaus.app.diagnostics.AppScreen.SEARCH
+    }
+}
+
 /**
  * One-shot cold-start gate (SHR-ARC-05/06/09). Holds the branded loading
  * surface above the entire application until Home is meaningfully ready for
@@ -558,6 +576,9 @@ private fun MobileSignedInApp(
 ) {
     var destination by rememberSaveable { mutableStateOf(MobileDestination.HOME) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    com.lamphaus.app.diagnostics.ReportScreen(
+        mobileScreen(destination, settingsOpen, detailOpen = state.selectedDetail != null, personOpen = state.personPage?.showingTitle == false),
+    )
     var pendingMediaFocusKey by rememberSaveable { mutableStateOf<String?>(null) }
     val destinationStates = rememberSaveableStateHolder()
     val openMedia: (MediaPreview, String) -> Unit = { media, focusKey ->

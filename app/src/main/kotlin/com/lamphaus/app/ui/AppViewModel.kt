@@ -757,7 +757,48 @@ class AppViewModel(
         pageJobs[sectionId] = job
     }
 
-    fun retryCatalogPage(sectionId: String) = loadMoreCatalog(sectionId)
+    /**
+     * Retry asks again for what failed (SHR-PROD-04): the next page, the first
+     * page of a row that never got one, or the add-on itself when its manifest
+     * failed and it has no catalog to ask.
+     */
+    fun retryCatalogPage(sectionId: String) {
+        val current = findCatalogSection(state.value, sectionId) ?: return
+        when {
+            !current.firstPageFailed() -> loadMoreCatalog(sectionId)
+            current.baseQuery.catalogId.isEmpty() -> refreshContent()
+            else -> reloadFirstCatalogPage(sectionId, current)
+        }
+    }
+
+    private fun reloadFirstCatalogPage(sectionId: String, current: CatalogSection) {
+        if (current.loadingMore) return
+        val provider = state.value.providers.firstOrNull { it.id == current.providerId && it.enabled } ?: return
+        setCatalogSection(sectionId) { it.copy(loadingMore = true) }
+        val job = viewModelScope.launch {
+            val result = container.providerClient.catalog(provider.manifestUrl, provider.id, current.baseQuery)
+            setCatalogSection(sectionId) { section ->
+                when {
+                    section.baseQuery != current.baseQuery || !section.loadingMore -> section
+                    // An answer with nothing in it keeps the row and its Retry,
+                    // so the viewer's focus isn't left on a row that vanished.
+                    result is ProviderResult.Success -> firstCatalogPage(
+                        section,
+                        result.value,
+                        // Search keeps unreleased titles, as its first answer did.
+                        filterForProfile(
+                            result.value,
+                            hideUnreleased = state.value.hideUnreleased && !sectionId.startsWith("search:"),
+                        ),
+                    ).let { if (it.items.isEmpty()) it.copy(errorMessage = "This catalog has nothing to show right now.") else it }
+                    result is ProviderResult.Failure -> section.copy(errorMessage = result.safeMessage, loadingMore = false)
+                    else -> section
+                }
+            }
+        }
+        pageJobs[sectionId]?.cancel()
+        pageJobs[sectionId] = job
+    }
 
     private fun ensureBrowseTargets() {
         if (state.value.browse.targets.isNotEmpty() || browseJob?.isActive == true) return

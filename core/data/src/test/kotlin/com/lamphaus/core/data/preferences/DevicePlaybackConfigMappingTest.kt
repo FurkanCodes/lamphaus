@@ -20,9 +20,9 @@ class DevicePlaybackConfigMappingTest {
         )
         assertEquals(PlaybackEngineKind.AUTO, config.engineKind)
         assertEquals(FrameRateMatching.SEAMLESS_ONLY, config.frameRateMatching)
-        // PLY-NET-01: both streaming switches ship off, like Nuvio.
-        assertEquals(false, config.nativeMemoryBuffer)
-        assertEquals(false, config.parallelConnections)
+        // PLY-NET-01: both streaming switches ship on.
+        assertEquals(true, config.nativeMemoryBuffer)
+        assertEquals(true, config.parallelConnections)
         assertEquals(2, config.parallelConnectionCount)
         assertEquals(16 * 1024, config.parallelChunkSizeKb)
     }

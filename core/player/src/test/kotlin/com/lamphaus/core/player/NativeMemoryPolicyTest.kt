@@ -24,7 +24,21 @@ class NativeMemoryPolicyTest {
         assertEquals((936 * mib).toInt(), NativeMemoryPolicy.targetBufferBytes(4 * gib, 64 * mib))
         assertEquals((200 * mib).toInt(), NativeMemoryPolicy.targetBufferBytes(2 * gib, 0))
         assertEquals((25 * mib).toInt(), NativeMemoryPolicy.targetBufferBytes(1 * gib, 512 * mib))
-        // The back buffer gives way first: at most half the minimum buffer.
-        assertEquals(7_500, NativeMemoryPolicy.backBufferMs)
+    }
+
+    @Test
+    fun `PLY-NET-01 time alone sets the buffer until the RAM target is reached`() {
+        // One target, so loading tops up continuously instead of idling down to a lower mark.
+        assertEquals(50_000, NativeMemoryPolicy.BUFFER_MS)
+        // A 100 Mbit/s remux keeps all 50 s on a 4 GB box: 596 MiB of its 936 MiB target.
+        val remux = 50L * 100_000_000L / 8
+        assertEquals(true, remux < NativeMemoryPolicy.targetBufferBytes(4 * gib, 64 * mib))
+    }
+
+    @Test
+    fun `PLY-NET-01 a rewind stays off the network only where the target can hold it`() {
+        assertEquals(15_000, NativeMemoryPolicy.backBufferMs(NativeMemoryPolicy.targetBufferBytes(4 * gib, 64 * mib)))
+        assertEquals(1_500, NativeMemoryPolicy.backBufferMs(NativeMemoryPolicy.targetBufferBytes(3 * gib, 64 * mib)))
+        assertEquals(1_500, NativeMemoryPolicy.backBufferMs(NativeMemoryPolicy.targetBufferBytes(1 * gib, 0)))
     }
 }

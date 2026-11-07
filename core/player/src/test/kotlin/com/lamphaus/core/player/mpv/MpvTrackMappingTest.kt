@@ -111,4 +111,31 @@ class MpvTrackMappingTest {
 
         assertEquals("no", sid)
     }
+
+    @Test
+    fun `a fresh start with no headers is a plain loadfile`() {
+        assertEquals(listOf("loadfile", "https://x/a.mkv", "replace"), MpvTrackMapping.loadCommand("https://x/a.mkv", 0, emptyMap()))
+    }
+
+    @Test
+    fun `options follow the playlist index mpv expects before them`() {
+        val command = MpvTrackMapping.loadCommand("https://x/a.mkv", 88_715, emptyMap())
+
+        assertEquals(listOf("loadfile", "https://x/a.mkv", "replace", "-1", "start=88.715"), command)
+    }
+
+    @Test
+    fun `headers share one list and a comma in a value is escaped`() {
+        val options = MpvTrackMapping.loadCommand("u", 0, linkedMapOf("A" to "1,2", "B" to "c")).last()
+
+        assertEquals("""http-header-fields=%12%A: 1\,2,B: c""", options)
+    }
+
+    @Test
+    fun `the quoted length counts bytes and a backslash stays literal`() {
+        val options = MpvTrackMapping.loadCommand("u", 5_000, linkedMapOf("É" to """a\b""")).last()
+
+        // "É: a\\b" is 7 characters but 8 bytes: É takes two.
+        assertEquals("""http-header-fields=%8%É: a\\b,start=5.0""", options)
+    }
 }

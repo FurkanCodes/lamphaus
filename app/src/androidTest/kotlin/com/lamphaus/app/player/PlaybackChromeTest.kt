@@ -15,6 +15,8 @@ import androidx.test.espresso.Espresso.pressBack
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.lamphaus.app.assumePhone
+import com.lamphaus.app.assumeTelevision
 import com.lamphaus.core.model.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -34,8 +36,10 @@ class PlaybackChromeTest {
         fontScale: Float? = null,
         startupPhase: PlaybackStartupPhase = PlaybackStartupPhase.READY,
         playbackState: Int = Player.STATE_READY,
+        videoSupport: Int? = null,
     ) {
-        compose.runOnUiThread { player = FakeChromePlayer(playbackState) }
+        if (tv) assumeTelevision() else assumePhone()
+        compose.runOnUiThread { player = FakeChromePlayer(playbackState, videoSupport) }
         compose.setContent {
             var style by remember { mutableStateOf(SubtitleStyle()) }
             var subtitleDelay by remember { mutableLongStateOf(0L) }
@@ -68,11 +72,43 @@ class PlaybackChromeTest {
         compose.onNodeWithContentDescription("Play").assertDoesNotExist()
     }
 
-    @Test fun TV_CNT_02_bufferingKeepsFullPlaybackLoadingSurface() {
-        show(true, playbackState = Player.STATE_BUFFERING)
+    @Test fun TV_CNT_02_startupKeepsFullPlaybackLoadingSurface() {
+        show(true, startupPhase = PlaybackStartupPhase.LOADING)
         compose.onNodeWithTag("playback-loading").assertIsDisplayed()
         compose.onNodeWithText("The quiet earth").assertIsDisplayed()
         compose.onNodeWithContentDescription("Play").assertDoesNotExist()
+    }
+
+    @Test fun TV_CNT_02_rebufferKeepsTheChromeTheViewerIsUsing() {
+        show(true, playbackState = Player.STATE_BUFFERING)
+        compose.mainClock.advanceTimeBy(PlayerChromeTokens.RebufferSurfaceDelayMillis + 1_000L)
+        compose.onNodeWithTag("playback-loading").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Play").assertIsDisplayed()
+    }
+
+    @Test fun TV_CNT_02_sustainedRebufferDuringCleanViewingShowsTheLoadingSurface() {
+        show(true)
+        compose.runOnUiThread { player.play() }
+        compose.mainClock.advanceTimeBy(PlayerChromeTokens.AutoHideMillis + 1_000L)
+        compose.onNodeWithContentDescription("Pause").assertDoesNotExist()
+        compose.runOnUiThread { player.simulatePlaybackState(Player.STATE_BUFFERING) }
+        compose.mainClock.advanceTimeBy(PlayerChromeTokens.RebufferSurfaceDelayMillis / 2)
+        compose.onNodeWithTag("playback-loading").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(PlayerChromeTokens.RebufferSurfaceDelayMillis)
+        compose.onNodeWithTag("playback-loading").assertIsDisplayed()
+    }
+
+    /** 4K60 past a decoder's declared limit: Media3 plays it, so no failure sits over the picture (SHR-PROD-04). */
+    @Test fun TV_CNT_02_videoBeyondDeclaredCapabilitiesPlaysWithoutAnError() {
+        show(true, videoSupport = C.FORMAT_EXCEEDS_CAPABILITIES)
+        compose.mainClock.advanceTimeBy(ERROR_REVEAL_MILLIS)
+        compose.onNodeWithText("cannot decode", substring = true).assertDoesNotExist()
+    }
+
+    @Test fun TV_CNT_02_videoNoDecoderCanOpenShowsTheError() {
+        show(true, videoSupport = C.FORMAT_UNSUPPORTED_SUBTYPE)
+        compose.mainClock.advanceTimeBy(ERROR_REVEAL_MILLIS)
+        compose.onNodeWithText("cannot decode", substring = true).assertIsDisplayed()
     }
 
     @Test fun TV_FOC_01_audioSelectionAndBackRestoreOrigin() {
@@ -93,7 +129,7 @@ class PlaybackChromeTest {
         show(true)
         compose.onNodeWithContentDescription("Subtitles").performClick()
         compose.onNodeWithText("English").performClick()
-        compose.onNodeWithText("English captions").performClick()
+        compose.onNodeWithText("English captions", substring = true).performClick()
         compose.runOnIdle { assertEquals("text-en", player.trackSelectionParameters.overrides.keys.single().id) }
         screenshot("tv-subtitles")
         compose.onNodeWithText("Font").performScrollTo().performClick()
@@ -114,11 +150,18 @@ class PlaybackChromeTest {
     @Test fun TV_NAV_05_remoteTraversesControlsAndMoreBackUnwindsOneLayer() {
         show(true)
         compose.onNodeWithContentDescription("Play").performKeyInput { pressKey(Key.DirectionRight) }
-        compose.onNodeWithContentDescription("Rewind 10 seconds").assertIsFocused()
-        compose.onNodeWithContentDescription("Rewind 10 seconds").performKeyInput { pressKey(Key.DirectionUp) }
+        compose.onNodeWithContentDescription("Subtitles").assertIsFocused()
+        compose.onNodeWithContentDescription("Subtitles").performKeyInput { pressKey(Key.DirectionRight) }
+        compose.onNodeWithContentDescription("Audio").assertIsFocused()
+        compose.onNodeWithContentDescription("Audio").performKeyInput { pressKey(Key.DirectionRight) }
+        compose.onNodeWithContentDescription("More options").assertIsFocused()
+        compose.onNodeWithContentDescription("More options").performKeyInput { pressKey(Key.DirectionUp) }
         compose.onNodeWithContentDescription("Playback position").assertIsFocused()
         compose.onNodeWithContentDescription("Playback position").performKeyInput { pressKey(Key.DirectionRight) }
+        compose.mainClock.advanceTimeBy(SEEK_GATHER_MILLIS)
         compose.runOnIdle { assertEquals(130_000L, player.currentPosition) }
+        compose.onNodeWithContentDescription("Playback position").performKeyInput { pressKey(Key.DirectionDown) }
+        compose.onNodeWithContentDescription("More options").assertIsFocused()
         compose.onNodeWithContentDescription("More options").performClick()
         compose.onNodeWithText("Playback speed").performClick()
         compose.onNodeWithText("1.5×").performClick()
@@ -132,13 +175,13 @@ class PlaybackChromeTest {
     @Test fun MOB_CMP_03_audioAndSubtitleSheetsApplySelections() {
         show(false)
         screenshot("mobile-controls")
-        compose.onNodeWithText("Audio").performClick()
+        compose.onNodeWithContentDescription("Audio").performClick()
         compose.onNodeWithText("French").performClick()
         compose.runOnIdle { assertEquals("audio-fr", player.trackSelectionParameters.overrides.keys.single().id) }
         screenshot("mobile-audio")
         compose.onNodeWithContentDescription("Done").performClick()
-        compose.onNodeWithText("Subtitles").performClick()
-        compose.onNodeWithText("English captions").performClick()
+        compose.onNodeWithContentDescription("Subtitles").performClick()
+        compose.onNodeWithText("English captions", substring = true).performClick()
         screenshot("mobile-subtitles")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Appearance · 100%", substring = true))
         compose.onNodeWithText("Appearance · 100%", substring = true).performClick()
@@ -158,8 +201,8 @@ class PlaybackChromeTest {
 
     @Test fun MOB_TYP_03_largeTextKeepsTrackAndAppearanceControlsReachable() {
         show(false, fontScale = 2f)
-        compose.onNodeWithText("Subtitles").performClick()
-        compose.onNodeWithText("English captions").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Subtitles").performClick()
+        compose.onNodeWithText("English captions", substring = true).performScrollTo().performClick()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Appearance · 100%", substring = true))
         compose.onNodeWithText("Appearance · 100%", substring = true).performClick()
         compose.onNodeWithText("Subtitle appearance").assertIsDisplayed()
@@ -169,6 +212,7 @@ class PlaybackChromeTest {
     }
 
     @Test fun MOB_LAY_16_landscapeUsesScrollableSidePane() {
+        assumePhone()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
         try {
@@ -178,11 +222,11 @@ class PlaybackChromeTest {
             }
             show(false)
             screenshot("mobile-landscape-controls")
-            compose.onNodeWithText("Audio").performClick()
+            compose.onNodeWithContentDescription("Audio").performClick()
             compose.onNodeWithText("French").performScrollTo().performClick()
             screenshot("mobile-landscape-audio")
             compose.onNodeWithContentDescription("Done").performClick()
-            compose.onNodeWithText("Subtitles").performClick()
+            compose.onNodeWithContentDescription("Subtitles").performClick()
             compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Appearance · 100%", substring = true))
         compose.onNodeWithText("Appearance · 100%", substring = true).performClick()
             compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Text color"))
@@ -191,6 +235,14 @@ class PlaybackChromeTest {
         } finally {
             automation.setRotation(UiAutomation.ROTATION_UNFREEZE)
         }
+    }
+
+    private companion object {
+        /** Longer than the wait before a remote's gathered seek lands. */
+        const val SEEK_GATHER_MILLIS = 2_000L
+
+        /** Longer than the wait before a player error is shown. */
+        const val ERROR_REVEAL_MILLIS = 6_000L
     }
 
     private fun screenshot(name: String) {
@@ -207,20 +259,26 @@ class PlaybackChromeTest {
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 private class FakeChromePlayer(
-    private val currentPlaybackState: Int = Player.STATE_READY,
+    currentPlaybackState: Int = Player.STATE_READY,
+    private val videoSupport: Int? = null,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var parameters = TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT
     private var position = 120_000L
     private var speed = PlaybackParameters.DEFAULT
     private var playing = false
+    private var currentState = currentPlaybackState
     private val groups = listOf(
         TrackGroup("audio-en", Format.Builder().setLabel("English").setLanguage("en").setSampleMimeType("audio/aac").setChannelCount(6).build()),
         TrackGroup("audio-fr", Format.Builder().setLabel("French").setLanguage("fr").setSampleMimeType("audio/aac").setChannelCount(2).build()),
         TrackGroup("text-en", Format.Builder().setLabel("English captions").setLanguage("en").setSampleMimeType("text/vtt").build()),
         TrackGroup("text-tr", Format.Builder().setLabel("Turkish captions").setLanguage("tr").setSampleMimeType("text/vtt").build()),
     )
+    private val videoGroup = TrackGroup("video", Format.Builder().setSampleMimeType("video/hevc").setWidth(3840).setHeight(2160).setFrameRate(60f).build())
     override fun getState(): State {
-        val tracks = Tracks(groups.map { group ->
+        val video = videoSupport?.let { support ->
+            listOf(Tracks.Group(videoGroup, false, intArrayOf(support), booleanArrayOf(true)))
+        }.orEmpty()
+        val tracks = Tracks(video + groups.map { group ->
             val selected = if (group.type in parameters.disabledTrackTypes) false
                 else parameters.overrides[group]?.trackIndices?.contains(0)
                     ?: (group.id == "audio-en" && parameters.overrides.keys.none { it.type == C.TRACK_TYPE_AUDIO })
@@ -234,9 +292,13 @@ private class FakeChromePlayer(
             .setPlaylist(listOf(MediaItemData.Builder("fixture").setMediaItem(MediaItem.fromUri("https://example.invalid/video"))
                 .setDurationUs(3_600_000_000L).setIsSeekable(true).setTracks(tracks).build()))
             .setCurrentMediaItemIndex(0).setContentPositionMs(position).setContentBufferedPositionMs(PositionSupplier { 600_000L })
-            .setPlaybackState(currentPlaybackState).setPlaybackParameters(speed)
+            .setPlaybackState(currentState).setPlaybackParameters(speed)
             .setPlayWhenReady(playing, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
             .setTrackSelectionParameters(parameters).build()
+    }
+    fun simulatePlaybackState(state: Int) {
+        currentState = state
+        invalidateState()
     }
     override fun handleSetTrackSelectionParameters(trackSelectionParameters: TrackSelectionParameters): ListenableFuture<*> {
         parameters = trackSelectionParameters

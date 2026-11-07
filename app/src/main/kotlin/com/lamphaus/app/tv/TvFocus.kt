@@ -36,6 +36,25 @@ internal class TvRowFocus(initialIndex: Int) {
 internal fun rememberTvRowFocus(initialIndex: Int = 0): TvRowFocus = remember { TvRowFocus(initialIndex) }
 
 /**
+ * For the Retry of a row with no cards. It goes away as the row fills in, so
+ * if it still holds focus then, focus moves on to the row's first card instead
+ * of falling out of the page (TV-NAV-01). A viewer who moved on stays put
+ * (TV-CNT-02); the check runs in composition, before the button is removed.
+ */
+@Composable
+internal fun Modifier.tvRetryHandsFocusTo(row: TvRowFocus, hasItems: Boolean): Modifier {
+    var retryFocused by remember { mutableStateOf(false) }
+    val handOff = remember(hasItems) { hasItems && retryFocused }
+    LaunchedEffect(handOff) {
+        if (handOff) {
+            withFrameNanos { }
+            runCatching { row.entry.requestFocus() }
+        }
+    }
+    return onFocusChanged { retryFocused = it.isFocused }
+}
+
+/**
  * Makes a strip enter at [row]'s entry item, and keeps Left and Right inside
  * it, so the end of a row cannot throw focus into the navigation or another
  * row. Apply it before a lazy row; for a plain `Row`, pass [plainRow] to add

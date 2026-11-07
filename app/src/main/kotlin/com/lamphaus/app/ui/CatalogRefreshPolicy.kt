@@ -121,6 +121,9 @@ internal class CatalogRefreshGate {
     }
 }
 
+/** A row that never got a first page has nothing to append to, so Retry asks for that page. */
+internal fun CatalogSection.firstPageFailed(): Boolean = errorMessage != null && items.isEmpty()
+
 internal fun firstCatalogPage(
     section: CatalogSection,
     rawItems: List<MediaPreview>,

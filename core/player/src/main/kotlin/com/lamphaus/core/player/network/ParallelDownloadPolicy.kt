@@ -16,7 +16,10 @@ object ParallelDownloadPolicy {
     /** First request of a cold open; its Content-Range tells the file length. */
     const val PROBE_BYTES = 256L * 1024L
 
-    /** Prefetch beyond the current chunk starts once this much was served in one open. */
+    /**
+     * This much served in one open means real media, not a header or index
+     * hop: prefetch then reaches its full depth, even before playback is ready.
+     */
     const val EARNED_PREFETCH_BYTES = 1L * 1024L * 1024L
 
     /** A released session survives Media3's close-and-reopen on every seek this long. */
@@ -71,6 +74,13 @@ object ParallelDownloadPolicy {
 
     /** Chunks a session may hold before evicting: the window plus a margin behind the reader. */
     fun sessionChunkCap(depth: Int, maxHeapBytes: Long): Int = depth + if (isLowRamHeap(maxHeapBytes)) 2 else 4
+
+    /**
+     * Chunks that may start now. [connections] is a real limit: hosts answer
+     * more with 429s. A one-connection [streaming] read counts as one.
+     */
+    fun freeConnections(connections: Int, downloading: Int, streaming: Boolean): Int =
+        (connections - downloading - if (streaming) 1 else 0).coerceAtLeast(0)
 
     /** Memory the downloads hold beyond the sample buffer: (connections + 2) chunks. */
     fun overheadBytes(connections: Int, chunkBytes: Long): Long = (connections + 2L) * chunkBytes

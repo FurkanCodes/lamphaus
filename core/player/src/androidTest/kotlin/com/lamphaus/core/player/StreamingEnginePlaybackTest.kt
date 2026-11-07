@@ -65,15 +65,15 @@ class StreamingEnginePlaybackTest {
     }
 
     @Test
-    fun playsToTheEndOverParallelConnectionsWithNativeMemory() {
-        val peak = play(DevicePlaybackConfig(nativeMemoryBuffer = true, parallelConnections = true, parallelChunkSizeKb = 256))
+    fun playsToTheEndOverParallelConnectionsWithNativeMemoryByDefault() {
+        val peak = play(DevicePlaybackConfig(parallelChunkSizeKb = 256))
         assertTrue("buffered media should live off-heap", peak > 0)
         assertTrue("expected ranged chunk requests, got $ranges", ranges.size >= 3)
     }
 
     @Test
-    fun playsToTheEndOnTheDefaultPath() {
-        play(DevicePlaybackConfig())
+    fun playsToTheEndOnOneConnectionOnTheHeap() {
+        play(DevicePlaybackConfig(nativeMemoryBuffer = false, parallelConnections = false))
     }
 
     /** Plays the sample to its end and returns the peak off-heap bytes seen. */
@@ -108,7 +108,7 @@ class StreamingEnginePlaybackTest {
         }
         try {
             assertTrue("playback did not end", ended.await(90, TimeUnit.SECONDS))
-            assertNull(error.get())
+            assertNull(error.get()?.stackTraceToString(), error.get())
             return peakNativeBytes.get()
         } finally {
             instrumentation.runOnMainSync { player.release() }

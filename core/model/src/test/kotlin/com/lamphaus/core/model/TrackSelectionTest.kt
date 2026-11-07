@@ -362,4 +362,17 @@ class TrackSelectionTest {
         assertEquals(false, isSeamlessDisplayMode(current, target.copy(refreshRateHz = 23.976f), listOf(24f)))
     }
 
+
+    @Test
+    fun `PLY-SUB-01 a stream waits only for subtitles that will play`() {
+        val on = ProfilePlaybackPreferences(
+            subtitleDefaultMode = SubtitleDefaultMode.PREFERRED_LANGUAGE,
+            preferredSubtitleLanguageTag = "tr",
+        )
+        assertEquals("tr", wantedSubtitleLanguage(null, on, "en"))
+        assertEquals(null, wantedSubtitleLanguage(null, on.copy(subtitleDefaultMode = SubtitleDefaultMode.OFF), "en"))
+        assertEquals(null, wantedSubtitleLanguage(null, on.copy(subtitleDefaultMode = SubtitleDefaultMode.FORCED_ONLY), "en"))
+        // With no language of its own, the profile follows the device.
+        assertEquals("en", wantedSubtitleLanguage(null, on.copy(preferredSubtitleLanguageTag = ""), "en"))
+    }
 }

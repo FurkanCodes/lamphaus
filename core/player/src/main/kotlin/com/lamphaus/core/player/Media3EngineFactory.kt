@@ -1,6 +1,7 @@
 package com.lamphaus.core.player
 
 import android.content.Context
+import android.net.ConnectivityManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.Format
 import androidx.media3.common.Player
@@ -78,13 +79,16 @@ object Media3EngineFactory {
         // chunks live off the Java heap, sized by the device's physical RAM.
         val nativeMemory = config.nativeMemoryBuffer && NativeBuffers.isAvailable()
         val totalRamBytes = if (nativeMemory) NativeMemoryPolicy.totalRamBytes(context) else 0L
-        val parallel = if (config.parallelConnections) {
+        val metered = context.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+        val parallel = if (usesParallelConnections(config, metered)) {
             parallelSettings(config, Runtime.getRuntime().maxMemory(), totalRamBytes.takeIf { nativeMemory })
         } else {
             null
         }
         // Parallel connections (PLY-NET-01): the playback's own progressive
         // stream downloads in ranged chunks; everything else stays as it was.
+        // One TCP connection is capped by the kernel's receive window, about
+        // 120 Mbit/s at 70 ms on a TV box, and no app setting can raise it.
         val streamDataSource = if (parallel != null) {
             ParallelRangeDataSource.Factory(
                 upstream = httpDataSource,
@@ -326,28 +330,34 @@ object Media3EngineFactory {
             .build()
 
     /**
-     * Native memory buffer (Nuvio's values): off-heap 64 KiB segments, 15 to
-     * 45 s of media capped by the RAM-tier byte target minus what parallel
-     * downloads hold. The byte target gates everything, back buffer included,
-     * and the back buffer gives way first.
+     * Native memory buffer: off-heap 64 KiB segments, topped up to 50 s of
+     * media and capped by the RAM-tier byte target minus what parallel
+     * downloads hold. The byte target gates everything, back buffer included.
      */
-    private fun nativeLoadControl(totalRamBytes: Long, parallelOverheadBytes: Long): DefaultLoadControl =
-        DefaultLoadControl.Builder()
+    private fun nativeLoadControl(totalRamBytes: Long, parallelOverheadBytes: Long): DefaultLoadControl {
+        val targetBytes = NativeMemoryPolicy.targetBufferBytes(totalRamBytes, parallelOverheadBytes)
+        return DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, NativeMemoryPolicy.SEGMENT_BYTES, 0, true))
-            .setTargetBufferBytes(NativeMemoryPolicy.targetBufferBytes(totalRamBytes, parallelOverheadBytes))
+            .setTargetBufferBytes(targetBytes)
             .setBufferDurationsMs(
-                NativeMemoryPolicy.MIN_BUFFER_MS,
-                NativeMemoryPolicy.MAX_BUFFER_MS,
+                NativeMemoryPolicy.BUFFER_MS,
+                NativeMemoryPolicy.BUFFER_MS,
                 NativeMemoryPolicy.BUFFER_FOR_PLAYBACK_MS,
                 NativeMemoryPolicy.BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
             )
             .setPrioritizeTimeOverSizeThresholds(false)
-            .setBackBuffer(NativeMemoryPolicy.backBufferMs, true)
+            .setBackBuffer(NativeMemoryPolicy.backBufferMs(targetBytes), true)
             .build()
+    }
+
+    /** On metered networks a stream keeps one connection: prefetched chunks spend data a viewer may not watch. */
+    internal fun usesParallelConnections(config: DevicePlaybackConfig, metered: Boolean): Boolean =
+        config.parallelConnections && !metered
 
     /**
-     * Parallel prefetch waits until playback is ready or shows its first
-     * frame, so start-up bandwidth goes to the bytes needed first.
+     * Before playback is ready a short read stays on one connection, so header
+     * and index hops prefetch nothing; an open that read real media goes
+     * parallel at once (see [ParallelRangeDataSource]).
      */
     @Volatile
     private var parallelPrefetchOpen = false

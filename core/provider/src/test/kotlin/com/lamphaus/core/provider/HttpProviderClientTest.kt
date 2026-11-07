@@ -4,6 +4,7 @@ import com.lamphaus.core.model.CatalogQuery
 import com.lamphaus.core.model.MediaDetail
 import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
+import com.lamphaus.core.model.Episode
 import com.lamphaus.core.model.ProviderFailureKind
 import com.lamphaus.core.model.ProviderManifest
 import com.lamphaus.core.model.ProviderResource
@@ -431,6 +432,29 @@ class HttpProviderClientTest {
         assertEquals("https://cdn.example/movie.mp4", detail.embeddedStreams.single().url)
         assertEquals("https://cdn.example/episode.mp4", detail.episodes.single().streams.single().url)
         assertTrue(detail.episodes.single().releasedAtEpochMillis != null)
+    }
+
+    @Test
+    fun `an HTTP error is reported as one rather than as unreachable`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500))
+
+        val result = client.catalog(server.url("/manifest.json").toString(), "fixture", CatalogQuery("movie", "top"))
+
+        assertEquals(ProviderFailureKind.HTTP, (result as ProviderResult.Failure).kind)
+        assertEquals("This provider returned HTTP 500.", result.safeMessage)
+    }
+
+    @Test
+    fun `an episode repeated by the add-on appears once`() = runTest {
+        server.enqueue(
+            jsonResponse(
+                """{"meta":{"id":"show","type":"series","name":"Show","videos":[{"id":"show:1:1","title":"First"},{"id":"show:1:1","title":"Again"},{"id":"show:1:2","title":"Second"}]}}""",
+            ),
+        )
+
+        val detail = (client.meta(server.url("/manifest.json").toString(), "fixture", "series", "show") as ProviderResult.Success).value
+
+        assertEquals(listOf("First", "Second"), detail.episodes.map(Episode::title))
     }
 
     @Test

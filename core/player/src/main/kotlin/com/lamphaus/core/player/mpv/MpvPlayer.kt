@@ -158,20 +158,7 @@ class MpvPlayer(
     // ── Public engine surface (used by the fallback handoff and panels) ──
 
     fun load(item: MediaItem, startPositionMillis: Long, headers: Map<String, String>) {
-        val args = buildList {
-            add("loadfile")
-            add(item.localConfiguration?.uri?.toString().orEmpty())
-            add("replace")
-            // Header fields ride as per-file options, never logged (SHR-PROD-06).
-            val headerOption = headers.entries.joinToString(",") { entry ->
-                "http-header-fields=${entry.key}: ${entry.value}"
-            }
-            val options = buildList {
-                headerOption.takeIf(String::isNotEmpty)?.let(::add)
-                if (startPositionMillis > 0) add("start=${startPositionMillis / 1000.0}")
-            }.joinToString(",")
-            if (options.isNotEmpty()) add(options)
-        }
+        val args = MpvTrackMapping.loadCommand(item.localConfiguration?.uri?.toString().orEmpty(), startPositionMillis, headers)
         fileLoaded = false
         eofReached = false
         ended = false
@@ -624,7 +611,6 @@ class MpvPlayer(
                     try {
                         val code = MpvLibrary.waitEvent(handle, 0.1)
                         if (released) return@Thread
-                        var restarted = false
                         when (code and 0xFF) {
                             EVENT_FILE_LOADED -> {
                                 fileLoaded = true
@@ -638,24 +624,24 @@ class MpvPlayer(
                                 val generation = (code shr 8) and 0xFFFF
                                 if (generation == loadGeneration && subtitlesPending > 0) onSubtitleAdded()
                             }
-                            EVENT_PLAYBACK_RESTART -> {
-                                restarted = true
-                                playbackStarted = true
-                            }
+                            EVENT_PLAYBACK_RESTART -> playbackStarted = true
                             EVENT_SHUTDOWN -> return@Thread
                         }
                         refreshTrackedProperties()
-                        // mpv shows the first frame of a file, paused or not, before it restarts playback.
-                        if (restarted && !firstFrameShown && videoWidth > 0) {
-                            firstFrameShown = true
-                            firstFramePending = true
-                        }
+                        // mpv shows the first frame of a file, paused or not, before it restarts
+                        // playback; the video size can land a moment after the restart.
+                        val firstFrame = playbackStarted && !firstFrameShown && videoWidth > 0
+                        if (firstFrame) firstFrameShown = true
                         handler.post {
-                            if (!released) invalidateState()
+                            if (released) return@post
+                            // Raised here, where states are built, so an update still running on
+                            // this thread cannot clear it before a state has carried it.
+                            firstFramePending = firstFrame
+                            invalidateState()
                             // Reported once: the next state no longer carries the first frame.
-                            if (firstFramePending) {
+                            if (firstFrame) {
                                 firstFramePending = false
-                                if (!released) invalidateState()
+                                invalidateState()
                             }
                         }
                     } catch (_: InterruptedException) {

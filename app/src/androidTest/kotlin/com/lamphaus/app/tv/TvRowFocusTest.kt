@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -88,5 +89,51 @@ class TvRowFocusTest {
         hasMore = false
         compose.waitForIdle()
         compose.onNodeWithTag("item1").assertIsFocused()
+    }
+
+    @Composable
+    private fun FailedRow(hasItems: Boolean) {
+        Column {
+            androidx.compose.foundation.layout.Box(Modifier.size(100.dp).focusable().testTag("above"))
+            val row = rememberTvRowFocus()
+            val retryFocus = Modifier.tvRetryHandsFocusTo(row, hasItems)
+            if (hasItems) {
+                LazyRow(Modifier.tvRowFocus(row)) {
+                    itemsIndexed(List(2) { it }) { index, _ ->
+                        androidx.compose.foundation.layout.Box(
+                            Modifier.size(100.dp).tvRowItem(row, index).focusable().testTag("item$index"),
+                        )
+                    }
+                }
+            } else {
+                androidx.compose.foundation.layout.Box(retryFocus.size(100.dp).focusable().testTag("retry"))
+            }
+        }
+    }
+
+    @Test
+    fun TV_NAV_01_aRowFillingInUnderItsRetryTakesTheFocus() {
+        var hasItems by mutableStateOf(false)
+        compose.setContent { FailedRow(hasItems) }
+        compose.onNodeWithTag("retry").requestFocus()
+        compose.onNodeWithTag("retry").assertIsFocused()
+
+        hasItems = true
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("item0").assertIsFocused()
+    }
+
+    @Test
+    fun TV_CNT_02_aViewerWhoMovedOnKeepsFocusWhenARowFillsIn() {
+        var hasItems by mutableStateOf(false)
+        compose.setContent { FailedRow(hasItems) }
+        compose.onNodeWithTag("retry").requestFocus()
+        compose.onNodeWithTag("above").requestFocus()
+
+        hasItems = true
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("above").assertIsFocused()
     }
 }

@@ -3,10 +3,12 @@ package com.lamphaus.core.player.network
 import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayOutputStream
 import java.util.Collections
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 import okhttp3.OkHttpClient
@@ -31,6 +33,7 @@ class ParallelRangeDataSourceTest {
     private val ranges = Collections.synchronizedList(mutableListOf<String>())
     private val rateLimitsLeft = AtomicInteger(0)
     private var supportsRanges = true
+    private var slowBodies = false
 
     private val chunkBytes = 256L * 1024L
 
@@ -56,6 +59,7 @@ class ParallelRangeDataSourceTest {
                     .setHeader("Content-Range", "bytes $start-$endInclusive/${content.size}")
                     .setHeader("Accept-Ranges", "bytes")
                     .setBody(Buffer().write(content, start.toInt(), (endInclusive - start + 1).toInt()))
+                    .apply { if (slowBodies) throttleBody(32L * 1024L, 5, TimeUnit.MILLISECONDS) }
             }
         }
         server.start()
@@ -67,13 +71,47 @@ class ParallelRangeDataSourceTest {
         server.shutdown()
     }
 
-    private fun factory(prefetch: Boolean = true, memory: ChunkMemory = HeapChunkMemory(keep = 2)) = ParallelRangeDataSource.Factory(
-        upstream = OkHttpDataSource.Factory(OkHttpClient()),
+    /** Tracks how many upstream connections are open at once. */
+    private class CountingFactory(private val upstream: HttpDataSource.Factory) : HttpDataSource.Factory by upstream {
+        val open = AtomicInteger()
+        val peak = AtomicInteger()
+
+        override fun createDataSource(): HttpDataSource = object : HttpDataSource by upstream.createDataSource() {
+            private val source = upstream.createDataSource()
+            private var counted = false
+
+            override fun open(dataSpec: DataSpec): Long {
+                counted = true
+                peak.accumulateAndGet(open.incrementAndGet(), ::maxOf)
+                return source.open(dataSpec)
+            }
+
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int = source.read(buffer, offset, length)
+
+            override fun getUri(): Uri? = source.uri
+
+            override fun getResponseHeaders(): Map<String, List<String>> = source.responseHeaders
+
+            override fun close() {
+                if (counted) open.decrementAndGet()
+                counted = false
+                source.close()
+            }
+        }
+    }
+
+    private fun factory(
+        prefetch: Boolean = true,
+        memory: ChunkMemory = HeapChunkMemory(keep = 2),
+        upstream: HttpDataSource.Factory = OkHttpDataSource.Factory(OkHttpClient()),
+        depth: Int = 3,
+    ) = ParallelRangeDataSource.Factory(
+        upstream = upstream,
         settings = ParallelDownloadSettings(
             connections = 2,
             chunkBytes = chunkBytes,
-            depth = 3,
-            sessionChunkCap = 7,
+            depth = depth,
+            sessionChunkCap = depth + 4,
             memory = memory,
         ),
         prefetchAllowed = { prefetch },
@@ -136,6 +174,40 @@ class ParallelRangeDataSourceTest {
         val position = chunkBytes + 1_000L
         assertArrayEquals(content.copyOfRange(position.toInt(), content.size), readAll(position, prefetch = false))
         assertEquals("bytes=$position-${2 * chunkBytes - 1}", ranges.first())
+    }
+
+    @Test
+    fun chunksNeverExceedTheConnectionLimit() {
+        slowBodies = true
+        val upstream = CountingFactory(OkHttpDataSource.Factory(OkHttpClient()))
+        // A window deeper than the limit: only the limit may decide how many run at once.
+        assertArrayEquals(content, readAll(factory = factory(upstream = upstream, depth = 8)))
+        assertEquals(2, upstream.peak.get())
+    }
+
+    @Test
+    fun readingRealMediaGoesParallelBeforePlaybackIsReady() {
+        val source = factory(prefetch = false).createDataSource()
+        source.open(DataSpec.Builder().setUri(Uri.parse(server.url("/movie.mkv").toString())).build())
+        val buffer = ByteArray(16 * 1024)
+        var served = 0L
+        while (served <= ParallelDownloadPolicy.EARNED_PREFETCH_BYTES) served += source.read(buffer, 0, buffer.size)
+        val ahead = "bytes=${(served / chunkBytes + 1) * chunkBytes}-"
+        val deadline = System.currentTimeMillis() + 3_000
+        while (ranges.toList().none { it.startsWith(ahead) } && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        source.close()
+        assertTrue("nothing downloaded ahead of the reader: $ranges", ranges.toList().any { it.startsWith(ahead) })
+    }
+
+    @Test
+    fun headerHopsPrefetchNothingBeforePlaybackIsReady() {
+        val source = factory(prefetch = false).createDataSource()
+        source.open(DataSpec.Builder().setUri(Uri.parse(server.url("/movie.mkv").toString())).build())
+        val buffer = ByteArray(16 * 1024)
+        repeat(4) { source.read(buffer, 0, buffer.size) }
+        Thread.sleep(200)
+        source.close()
+        assertEquals("a short read must stay on one connection: $ranges", 1, ranges.size)
     }
 
     @Test

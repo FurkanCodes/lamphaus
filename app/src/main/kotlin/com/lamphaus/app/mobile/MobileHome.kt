@@ -52,6 +52,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -1023,6 +1024,13 @@ internal fun CatalogRow(
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (section.items.isEmpty()) {
+                TextButton(
+                    onClick = { onRetry(section.id) },
+                    enabled = !section.loadingMore,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) { Text(stringResource(R.string.retry)) }
+            }
         }
         if (section.initialLoading && section.items.isEmpty()) {
             val pulse by rememberInfiniteTransition(label = "catalog row loading").animateFloat(

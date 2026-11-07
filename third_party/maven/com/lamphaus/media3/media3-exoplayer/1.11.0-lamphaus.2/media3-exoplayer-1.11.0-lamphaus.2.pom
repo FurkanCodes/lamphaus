@@ -7,7 +7,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.lamphaus.media3</groupId>
   <artifactId>media3-exoplayer</artifactId>
-  <version>1.11.0-lamphaus.1</version>
+  <version>1.11.0-lamphaus.2</version>
   <packaging>aar</packaging>
   <name>Media3 ExoPlayer module (Lamphaus patches)</name>
   <licenses>

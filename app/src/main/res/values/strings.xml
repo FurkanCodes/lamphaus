@@ -118,9 +118,9 @@
     <string name="streaming_settings">Streaming</string>
     <string name="streaming_settings_applies">Streaming · changes apply from the next playback</string>
     <string name="native_memory_setting">Native memory buffer</string>
-    <string name="native_memory_setting_description">Keeps up to 45 seconds of video outside app memory, sized by this device\'s RAM, so large 4K files play without stopping</string>
+    <string name="native_memory_setting_description">Keeps 50 seconds of video ready outside app memory, sized by this device\'s RAM, however large the file</string>
     <string name="parallel_connections_setting">Parallel connections</string>
-    <string name="parallel_connections_setting_description">Downloads a file over several connections at once. Turn on when files stop to buffer although your connection is fast enough</string>
+    <string name="parallel_connections_setting_description">Downloads files over several connections at once, so 4K remuxes never run out of speed. Stays on one connection on metered networks</string>
     <string name="parallel_connection_count">Connections</string>
     <string name="parallel_connection_count_description">More connections can be faster but use more memory</string>
     <string name="parallel_chunk_size">Chunk size</string>
@@ -698,6 +698,10 @@
     <string name="search_clear_query">Clear search</string>
     <string name="search_by_voice">Search by voice</string>
     <!-- Cast member pages (MOB-SRCH-01) -->
+    <plurals name="player_add_late_subtitles">
+        <item quantity="one">Add %d more subtitle</item>
+        <item quantity="other">Add %d more subtitles</item>
+    </plurals>
     <string name="person_open_titles">see their titles</string>
     <string name="person_known_for">Known for %1$s</string>
     <string name="person_titles_failed">Titles could not be loaded.</string>

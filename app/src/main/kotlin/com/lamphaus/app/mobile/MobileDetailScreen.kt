@@ -94,6 +94,7 @@ import androidx.core.text.HtmlCompat
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.releaseCountdownText
+import com.lamphaus.app.ui.uniqueKeys
 import com.lamphaus.app.ui.ReleaseKind
 import com.lamphaus.app.ui.episodeAirDateText
 import com.lamphaus.app.ui.ContentMenuOrigin
@@ -290,8 +291,9 @@ internal fun MobileDetailScreen(
                     }
                     EpisodesHeader(seasons, selectedSeason, timeLeft, onSeason = { pickedSeason = it })
                 }
-                visibleEpisodes.forEach { episode ->
-                    constrained("episode:${episode.id}", section(4), contentType = "episode") {
+                val episodeKeys = visibleEpisodes.uniqueKeys { "episode:${it.id}" }
+                visibleEpisodes.forEachIndexed { index, episode ->
+                    constrained(episodeKeys[index].toString(), section(4), contentType = "episode") {
                         EpisodeCard(
                             media = detail.preview,
                             episode = episode,

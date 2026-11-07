@@ -4,6 +4,7 @@ import com.lamphaus.core.model.MediaPreview
 import com.lamphaus.core.model.MediaType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 
 import org.junit.Test
@@ -309,4 +310,30 @@ class CatalogRefreshPolicyTest {
         rawType = "movie",
         name = id,
     )
+
+    @Test
+    fun `retry asks for the first page only when the row never got one`() {
+        val row = CatalogSection("row", "p", "Row", "P", items = emptyList(), supportsSkip = true)
+        val item = MediaPreview(id = "tt1", type = MediaType.MOVIE, rawType = "movie", name = "Title")
+
+        assertTrue(row.copy(errorMessage = "failed").firstPageFailed())
+        assertFalse(row.firstPageFailed())
+        assertFalse(row.copy(items = listOf(item), errorMessage = "failed").firstPageFailed())
+    }
+
+    @Test
+    fun `a first page that arrives on retry clears the failure and resumes paging`() {
+        val failed = CatalogSection(
+            "row", "p", "Row", "P", items = emptyList(), errorMessage = "failed",
+            supportsSkip = true, hasMore = false, loadingMore = true,
+        )
+        val item = MediaPreview(id = "tt1", type = MediaType.MOVIE, rawType = "movie", name = "Title")
+
+        val recovered = firstCatalogPage(failed, listOf(item))
+
+        assertEquals(listOf(item), recovered.items)
+        assertNull(recovered.errorMessage)
+        assertTrue(recovered.hasMore)
+        assertFalse(recovered.loadingMore)
+    }
 }

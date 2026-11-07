@@ -41,16 +41,35 @@ class UniqueKeysTest {
         // Compose throws on a repeated key, and these lists show add-on data.
         // Fixed-count lists (skeletons) key by position and are fine.
         val sources = listOf(File("src/main/kotlin"), File("app/src/main/kotlin")).first(File::isDirectory)
-        val rawKeyedCall = Regex("""\b(items|itemsIndexed)\((?!\s*(count\s*=\s*)?\d)[^\n]*\bkey\s*=""")
+        val rawKeyedCall = Regex("""\b(items|itemsIndexed)\((?!\s*(count\s*=\s*)?\d)[^{}]*?\bkey\s*=""")
         val offenders = sources.walkTopDown()
             .filter { it.extension == "kt" && it.name != "UniqueKeys.kt" }
             .flatMap { file ->
-                file.readLines().mapIndexedNotNull { index, line ->
-                    "${file.relativeTo(sources)}:${index + 1}".takeIf { rawKeyedCall.containsMatchIn(line) }
+                val text = file.readText()
+                rawKeyedCall.findAll(text).map { match ->
+                    "${file.relativeTo(sources)}:${text.take(match.range.first).count { it == '\n' } + 1}"
                 }
             }
             .toList()
 
         assertTrue("Use uniqueItems/uniqueItemsIndexed: $offenders", offenders.isEmpty())
+    }
+
+    @Test
+    fun `no single lazy item builds its key from data`() {
+        // A loop of item() calls repeats a key the same way a keyed items() call does.
+        val sources = listOf(File("src/main/kotlin"), File("app/src/main/kotlin")).first(File::isDirectory)
+        val dataKey = Regex("""\b(?:item\(\s*key\s*=\s*|stickyHeader\(\s*key\s*=\s*|constrained\(\s*)"[^"]*\$""")
+        val offenders = sources.walkTopDown()
+            .filter { it.extension == "kt" }
+            .flatMap { file ->
+                val text = file.readText()
+                dataKey.findAll(text).map { match ->
+                    "${file.relativeTo(sources)}:${text.take(match.range.first).count { it == '\n' } + 1}"
+                }
+            }
+            .toList()
+
+        assertTrue("Key these through uniqueKeys/uniqueItems: $offenders", offenders.isEmpty())
     }
 }

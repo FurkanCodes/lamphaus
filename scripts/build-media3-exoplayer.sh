@@ -6,8 +6,9 @@
 # without re-running this script. Gradle swaps androidx.media3:media3-exoplayer
 # for this artifact everywhere (see the root build.gradle.kts).
 #
-# Patches: 0001 keeps buffered samples in off-heap memory when "Native memory
-# buffer" is on (PLY-NET-01). Every other Media3 module stays stock.
+# Patches: 0001 keeps buffered samples in off-heap memory (PLY-NET-01). 0002
+# stops a side-loaded subtitle from holding back the audio and video loaded
+# beside it. Every other Media3 module stays stock.
 #
 # Licensing: Media3 and the patches are Apache-2.0 (see core/player/NOTICE.md).
 #
@@ -20,7 +21,7 @@
 set -euo pipefail
 
 MEDIA3_TAG="1.11.0"
-FORK_VERSION="1.11.0-lamphaus.1"
+FORK_VERSION="1.11.0-lamphaus.2"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${WORK:-$ROOT/build/media3-fork}"

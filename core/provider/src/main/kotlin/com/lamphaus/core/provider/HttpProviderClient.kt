@@ -631,7 +631,7 @@ class HttpProviderClient(
         val preview = toPreview(providerId, fallbackType) ?: throw ProviderProtocolException("Missing media id")
         val videos = array("videos").orEmpty().mapNotNull { item ->
             (item as? JsonObject)?.let { video ->
-                val episodeId = video.string("id") ?: return@let null
+                val episodeId = video.string("id")?.takeIf(String::isNotBlank) ?: return@let null
                 Episode(
                     id = episodeId,
                     title = video.string("title") ?: video.string("name") ?: "Episode",
@@ -645,7 +645,7 @@ class HttpProviderClient(
                     },
                 )
             }
-        }
+        }.distinctBy(Episode::id)
         val appExtras = obj("app_extras")
         val cast = people("cast").ifEmpty { appExtras?.people("cast").orEmpty() }
         val directors = people("director", "directors", "writer", "writers").ifEmpty {
@@ -871,10 +871,11 @@ internal suspend fun <T> guardedProviderCall(block: suspend () -> ProviderResult
     throw error
 } catch (_: SocketTimeoutException) {
     ProviderResult.Failure(ProviderFailureKind.TIMEOUT, "This provider took too long to respond.")
+} catch (error: ProviderHttpException) {
+    // Before IOException, which it extends.
+    ProviderResult.Failure(ProviderFailureKind.HTTP, "This provider returned HTTP ${error.code}.")
 } catch (_: IOException) {
     ProviderResult.Failure(ProviderFailureKind.NETWORK, "This provider is temporarily unreachable.")
-} catch (error: ProviderHttpException) {
-    ProviderResult.Failure(ProviderFailureKind.HTTP, "This provider returned HTTP ${error.code}.")
 } catch (_: Exception) {
     ProviderResult.Failure(ProviderFailureKind.MALFORMED_RESPONSE, "This provider returned data Lamphaus could not read.")
 }

@@ -5,21 +5,27 @@ import android.content.Context
 import java.io.File
 
 /**
- * "Native memory buffer" sizing (PLY-NET-01), Nuvio's ExoPlayer native memory
- * values: buffered media lives off the Java heap, so the byte target follows
- * the device's physical RAM instead of the app's heap limit.
+ * "Native memory buffer" sizing (PLY-NET-01): buffered media lives off the Java
+ * heap, so a high-bitrate remux holds as many seconds as any other stream. The
+ * RAM tiers are Nuvio's. Stock Media3 stops at a fixed 144 MiB, about 12 s of a
+ * 100 Mbit/s remux; here time sets the buffer and RAM only caps it.
  */
 object NativeMemoryPolicy {
 
     const val SEGMENT_BYTES = 64 * 1024
-    const val MIN_BUFFER_MS = 15_000
-    const val MAX_BUFFER_MS = 45_000
-    const val BUFFER_FOR_PLAYBACK_MS = 3_000
+
+    /**
+     * One target rather than a low and a high mark: loading tops up as the
+     * buffer drains, so it never idles the socket and sags before refilling.
+     */
+    const val BUFFER_MS = 50_000
+    const val BUFFER_FOR_PLAYBACK_MS = 2_000
     const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 3_000
 
-    /** Wanted back buffer; it gives way first, so it never exceeds half of [MIN_BUFFER_MS]. */
     private const val BACK_BUFFER_MS = 15_000
-    val backBufferMs: Int = BACK_BUFFER_MS.coerceAtMost(MIN_BUFFER_MS / 2)
+
+    /** 50 s ahead plus 15 s behind of a 100 Mbit/s remux; smaller targets keep every byte ahead. */
+    private const val BACK_BUFFER_MIN_TARGET_BYTES = 800 * 1024 * 1024
 
     /** A starting bandwidth estimate for adaptive streams, so HLS opens at a high rendition. */
     const val INITIAL_BITRATE_ESTIMATE = 50_000_000L
@@ -41,6 +47,10 @@ object NativeMemoryPolicy {
             else -> 2_000
         }
     }
+
+    /** Keeps a rewind off the network, but only where it cannot cost the buffer ahead. */
+    fun backBufferMs(targetBufferBytes: Int): Int =
+        if (targetBufferBytes >= BACK_BUFFER_MIN_TARGET_BYTES) BACK_BUFFER_MS else StreamingPolicy.STOCK_BACK_BUFFER_MS
 
     /** The sample buffer's byte target once parallel downloads took their share. */
     fun targetBufferBytes(totalRamBytes: Long, parallelOverheadBytes: Long): Int {

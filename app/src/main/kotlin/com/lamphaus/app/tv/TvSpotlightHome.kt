@@ -263,6 +263,7 @@ internal fun TvSpotlightRow(
     val firstItem = section.items.firstOrNull()
     LaunchedEffect(firstItem?.stableKey) { firstItem?.let(warmArtwork) }
     val row = rememberTvRowFocus()
+    val retryFocus = Modifier.tvRetryHandsFocusTo(row, section.items.isNotEmpty())
     TvSpotlightRowFrame(
         title = section.title,
         subtitle = section.providerName,
@@ -324,7 +325,7 @@ internal fun TvSpotlightRow(
                 label = stringResource(R.string.retry),
                 icon = Icons.Outlined.Refresh,
                 onClick = onRetry,
-                modifier = Modifier.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
+                modifier = retryFocus.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
             )
         }
     }

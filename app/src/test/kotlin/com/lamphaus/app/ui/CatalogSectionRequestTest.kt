@@ -10,7 +10,6 @@ class CatalogSectionRequestTest {
         val catalog = genreCatalog("movie")
 
         val requests = catalog.homePlans(includeCuratedGenres = false, currentYear = 2026)
-            .filterIsInstance<CatalogHomePlan.Request>()
 
         assertEquals(1, requests.size)
         assertEquals("Popular Movies", requests.single().title)
@@ -22,7 +21,6 @@ class CatalogSectionRequestTest {
         val catalog = genreCatalog("series")
 
         val requests = catalog.homePlans(includeCuratedGenres = true, currentYear = 2026)
-            .filterIsInstance<CatalogHomePlan.Request>()
 
         assertEquals(listOf("Popular Series", "Drama Series", "Comedy Series"), requests.map { it.title })
         assertEquals(listOf(null, "Drama", "Comedy"), requests.map { it.query.genre })
@@ -39,7 +37,6 @@ class CatalogSectionRequestTest {
         )
 
         val request = catalog.homePlans(includeCuratedGenres = true, currentYear = 2026)
-            .filterIsInstance<CatalogHomePlan.Request>()
             .single()
 
         assertEquals("New Movies", request.title)
@@ -63,13 +60,13 @@ class CatalogSectionRequestTest {
             extraDefaults = mapOf("region" to "US"),
         )
 
-        val request = catalog.homePlans(false, 2026).single() as CatalogHomePlan.Request
+        val request = catalog.homePlans(false, 2026).single()
 
         assertEquals(mapOf("region" to "US"), request.query.extras)
     }
 
     @Test
-    fun `required extra without default produces an unavailable plan`() {
+    fun `required extra without default stays off home`() {
         val catalog = ProviderCatalog(
             type = "movie",
             id = "provider",
@@ -77,10 +74,7 @@ class CatalogSectionRequestTest {
             requiredExtras = setOf("region"),
         )
 
-        val unavailable = catalog.homePlans(false, 2026).single() as CatalogHomePlan.Unavailable
-
-        assertEquals("Provider Movies", unavailable.title)
-        assertEquals("Missing required extras: region", unavailable.reason)
+        assertEquals(emptyList<CatalogHomePlan>(), catalog.homePlans(false, 2026))
     }
 
     @Test
@@ -99,7 +93,7 @@ class CatalogSectionRequestTest {
     fun `custom catalog type gets a generic home shelf`() {
         val catalog = ProviderCatalog(type = "anime", id = "featured", name = "Anime")
 
-        val request = catalog.homePlans(false, 2026).single() as CatalogHomePlan.Request
+        val request = catalog.homePlans(false, 2026).single()
 
         assertEquals("Anime", request.title)
         assertEquals("anime", request.query.type)
