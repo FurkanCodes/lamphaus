@@ -149,7 +149,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
-import androidx.core.text.HtmlCompat
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.SurfaceDefaults
@@ -166,6 +165,7 @@ import com.lamphaus.app.ui.bedtimeLabel
 import com.lamphaus.app.ui.seasonTimeLeft
 import com.lamphaus.app.ui.seasonTimeLeftText
 import com.lamphaus.app.ui.recapEpisodeTitle
+import com.lamphaus.app.ui.detailCredits
 import com.lamphaus.app.ui.seriesRecap
 import com.lamphaus.app.ui.LocalSourceFit
 import com.lamphaus.app.ui.SourceFitAdvisor
@@ -2980,11 +2980,11 @@ private fun TvDetailScreen(
             selectedSeason = nextUpSeason ?: seasonNumbers.firstOrNull()
         }
     }
-    // Enrichment upgrades the rail with portraits; the addon's own cast
-    // list keeps it useful without any integration configured.
-    val castCredits = remember(enrichment?.cast, detail.cast) {
-        enrichment?.cast?.takeIf(List<PersonCredit>::isNotEmpty)
-            ?: detail.cast.map { name -> PersonCredit(name = HtmlCompat.fromHtml(name, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()) }
+    // Directors lead the cast rail (TV-CNT-08). Enrichment upgrades it with
+    // portraits; the addon's own names keep it useful without any integration.
+    val directorRole = stringResource(R.string.director)
+    val castCredits = remember(enrichment, detail.cast, detail.directors, directorRole) {
+        detailCredits(detail, enrichment, directorRole)
     }
     val similar = enrichment?.similar.orEmpty()
     val listState = rememberLazyListState()
@@ -3107,11 +3107,6 @@ private fun TvDetailScreen(
                     recap?.let { episode ->
                         TvSeriesRecap(episode)
                     }
-                    TvExpandablePeopleSection(
-                        labelRes = R.string.directors,
-                        people = detail.directors,
-                        returnFocusProvider = { lastActionFocus },
-                    )
                 }
             }
             if (detail.episodes.isNotEmpty()) {
