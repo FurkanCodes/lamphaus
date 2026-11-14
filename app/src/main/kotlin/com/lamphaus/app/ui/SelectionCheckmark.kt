@@ -1,5 +1,6 @@
 package com.lamphaus.app.ui
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,8 +12,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -57,7 +56,7 @@ internal fun SelectionCheckmark(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = Icons.Filled.Check,
+                imageVector = LamphausIcons.Check,
                 contentDescription = null,
                 tint = selectedContentColor,
                 modifier = Modifier.size(20.dp),

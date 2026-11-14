@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -15,8 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,7 +86,7 @@ internal fun RecapCard(recap: MonthlyRecap, onOpen: () -> Unit, onDismiss: () ->
                 )
             }
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.recap_hide))
+                Icon(LamphausIcons.XMark, contentDescription = stringResource(R.string.recap_hide))
             }
         }
     }

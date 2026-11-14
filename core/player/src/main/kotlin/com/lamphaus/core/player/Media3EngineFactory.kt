@@ -227,7 +227,7 @@ object Media3EngineFactory {
             preserveMapping = config.dolbyVisionPreserveMapping,
             stripHdr10Plus = config.stripHdr10Plus,
         )
-        return ExoPlayer.Builder(context, renderersFactory.withAssSupport(assHandler))
+        return ExoPlayer.Builder(context, renderersFactory.withAssSupport(assHandler).withSubtitleOffset())
             .setTrackSelector(trackSelector)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(resolvingDataSource, extractorsFactory)
@@ -395,6 +395,9 @@ object Media3EngineFactory {
      */
     @Volatile
     var sessionPlayer: ExoPlayer? = null
+
+    /** True while the session runs libmpv, which clears [sessionPlayer]. */
+    val sessionRunsMpv: Boolean get() = sessionPlayer == null
 
     private val videoCadenceEstimator = VideoCadenceEstimator()
 

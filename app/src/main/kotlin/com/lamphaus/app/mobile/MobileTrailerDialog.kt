@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,8 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -146,7 +145,7 @@ internal fun MobileTrailerDialog(
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(4.dp),
             ) {
-                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.close), tint = Color.White)
+                Icon(LamphausIcons.XMark, contentDescription = stringResource(R.string.close), tint = Color.White)
             }
         }
     }

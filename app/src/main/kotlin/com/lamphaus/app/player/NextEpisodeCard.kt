@@ -1,5 +1,6 @@
 package com.lamphaus.app.player
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,9 +27,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -160,7 +158,7 @@ internal fun NextEpisodeCard(
             if (!isTelevision) {
                 IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
                     Icon(
-                        Icons.Filled.Close,
+                        LamphausIcons.XMark,
                         contentDescription = stringResource(R.string.next_episode_close),
                         tint = PlayerOnSurfaceMuted,
                     )
@@ -188,7 +186,7 @@ private fun PlayPill(aired: Boolean, modifier: Modifier = Modifier) {
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+        Icon(LamphausIcons.PlaySolid, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
         Text(
             text = stringResource(if (aired) R.string.next_episode_play else R.string.next_episode_unaired),
             color = tint,

@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
@@ -32,14 +33,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Tv
-import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -121,13 +114,13 @@ internal enum class TvDestination(
     /** Movies and Series show the Home layout filtered to this catalog type (TV-CNT-01). */
     val catalogType: String? = null,
 ) {
-    HOME(R.string.home, Icons.Filled.Home),
-    MOVIES(R.string.movies, Icons.Filled.Movie, catalogType = "movie"),
-    SERIES(R.string.series, Icons.Filled.Tv, catalogType = "series"),
-    DISCOVER(R.string.discover, Icons.Filled.Explore),
-    LIBRARY(R.string.library, Icons.Filled.VideoLibrary),
-    SEARCH(R.string.search, Icons.Filled.Search, showLabel = false),
-    SETTINGS(R.string.settings, Icons.Filled.Settings, showLabel = false),
+    HOME(R.string.home, LamphausIcons.HomeSolid),
+    MOVIES(R.string.movies, LamphausIcons.FilmSolid, catalogType = "movie"),
+    SERIES(R.string.series, LamphausIcons.TvSolid, catalogType = "series"),
+    DISCOVER(R.string.discover, LamphausIcons.CompassSolid),
+    LIBRARY(R.string.library, LamphausIcons.RectangleStackSolid),
+    SEARCH(R.string.search, LamphausIcons.MagnifyingGlassSolid, showLabel = false),
+    SETTINGS(R.string.settings, LamphausIcons.CogSolid, showLabel = false),
     ;
 
     companion object {

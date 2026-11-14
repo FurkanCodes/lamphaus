@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,8 +13,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -116,7 +115,7 @@ internal fun TvEpisodeCard(
                     veilOpacity = 0.35f,
                     veilContent = {
                         TvIcon(
-                            icon = Icons.Outlined.VisibilityOff,
+                            icon = LamphausIcons.EyeSlash,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                             modifier = Modifier.align(Alignment.TopStart).padding(12.dp).size(20.dp),
@@ -273,7 +272,7 @@ internal fun TvEpisodeDetailLine(
         if (synopsisHidden) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TvIcon(
-                    icon = Icons.Outlined.VisibilityOff,
+                    icon = LamphausIcons.EyeSlash,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp),

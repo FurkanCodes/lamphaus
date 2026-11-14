@@ -207,6 +207,14 @@ class MpvPlayer(
         MpvLibrary.setPropertyString(handle, "audio-delay", (millis / 1000.0).toString())
     }
 
+    /** The Picture panel (PLY-PIC-01): mpv's own video equalizer, on the same -100..100 scale. */
+    fun setPictureAdjustment(adjustment: com.lamphaus.core.player.PictureAdjustment) {
+        MpvLibrary.setPropertyString(handle, "brightness", adjustment.brightness.toString())
+        MpvLibrary.setPropertyString(handle, "contrast", adjustment.contrast.toString())
+        MpvLibrary.setPropertyString(handle, "saturation", adjustment.saturation.toString())
+        MpvLibrary.setPropertyString(handle, "hue", adjustment.hue.toString())
+    }
+
     /**
      * Applies the resolved Dolby Vision action (plan §2). Native and P7
      * conversion need no configuration: mediacodec_embed passes the stream

@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.annotation.StringRes
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -17,8 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -208,7 +207,7 @@ private fun TvHomeLayoutOption(
             }
             if (selected) {
                 TvIcon(
-                    Icons.Outlined.Check,
+                    LamphausIcons.Check,
                     contentDescription = null,
                     tint = if (focused) content else MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),

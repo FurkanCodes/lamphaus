@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -40,18 +41,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ArrowDropDown
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.MoreHoriz
-import androidx.compose.material.icons.outlined.Movie
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -492,7 +481,7 @@ private fun DetailTopBar(title: String, progress: () -> Float, onBack: () -> Uni
                         .background(Color.Black.copy(alpha = 0.42f), CircleShape),
                 )
                 Icon(
-                    Icons.AutoMirrored.Outlined.ArrowBack,
+                    LamphausIcons.ArrowLeft,
                     contentDescription = stringResource(R.string.back),
                     tint = Color.White,
                 )
@@ -606,7 +595,7 @@ private fun DetailActions(
             shape = RoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(containerColor = MobileTokens.textPrimary, contentColor = Color.Black),
         ) {
-            Icon(Icons.Rounded.PlayArrow, null, modifier = Modifier.size(28.dp))
+            Icon(LamphausIcons.PlaySolid, null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(6.dp))
             Text(
                 text = when {
@@ -656,14 +645,14 @@ private fun DetailActions(
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
             LabeledAction(
-                icon = if (inLibrary) Icons.Outlined.Check else Icons.Outlined.Add,
+                icon = if (inLibrary) LamphausIcons.Check else LamphausIcons.Plus,
                 label = stringResource(if (inLibrary) R.string.in_library else R.string.my_list),
                 highlighted = inLibrary,
                 onClick = onLibrary,
             )
-            onTrailer?.let { LabeledAction(Icons.Outlined.Movie, stringResource(R.string.trailer), onClick = it) }
-            LabeledAction(Icons.Outlined.Edit, stringResource(R.string.detail_artwork), onClick = onEditArtwork)
-            LabeledAction(Icons.Outlined.MoreHoriz, stringResource(R.string.content_menu_more), onClick = onOpenMenu)
+            onTrailer?.let { LabeledAction(LamphausIcons.Film, stringResource(R.string.trailer), onClick = it) }
+            LabeledAction(LamphausIcons.PencilSquare, stringResource(R.string.detail_artwork), onClick = onEditArtwork)
+            LabeledAction(LamphausIcons.EllipsisHorizontal, stringResource(R.string.content_menu_more), onClick = onOpenMenu)
         }
     }
 }
@@ -781,7 +770,7 @@ private fun EpisodesHeader(seasons: List<Int>, selected: Int?, timeLeft: SeasonT
                         style = MaterialTheme.typography.labelLarge,
                         color = MobileTokens.textPrimary,
                     )
-                    Icon(Icons.Outlined.ArrowDropDown, null, tint = MobileTokens.textPrimary)
+                    Icon(LamphausIcons.ChevronDown, null, tint = MobileTokens.textPrimary)
                 }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                     seasons.forEach { season ->
@@ -858,7 +847,7 @@ internal fun EpisodeCard(
                         modifier = Modifier.fillMaxSize(),
                         veilContent = {
                             Icon(
-                                Icons.Outlined.Visibility,
+                                LamphausIcons.Eye,
                                 null,
                                 tint = MobileTokens.textMuted,
                                 modifier = Modifier.align(Alignment.Center),
@@ -887,7 +876,7 @@ internal fun EpisodeCard(
                         .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Outlined.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    Icon(LamphausIcons.PlaySolid, null, tint = Color.White, modifier = Modifier.size(20.dp))
                 }
                 progress?.fraction?.takeIf { it > 0f && !watched }?.let { fraction ->
                     Box(
@@ -906,7 +895,7 @@ internal fun EpisodeCard(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (watched) {
-                        Icon(Icons.Rounded.CheckCircle, null, tint = MobileTokens.accent, modifier = Modifier.size(14.dp))
+                        Icon(LamphausIcons.CheckCircleSolid, null, tint = MobileTokens.accent, modifier = Modifier.size(14.dp))
                     }
                     airDate?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MobileTokens.textMuted) }
                 }

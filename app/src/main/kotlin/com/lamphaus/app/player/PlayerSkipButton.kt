@@ -1,5 +1,6 @@
 package com.lamphaus.app.player
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -24,8 +25,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -129,7 +128,7 @@ internal fun PlayerSkipButton(
                 Modifier.heightIn(min = 48.dp).padding(horizontal = 18.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Rounded.SkipNext, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
+                Icon(LamphausIcons.SkipNextSolid, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
                 Text(
                     text = skipLabel(lastSegment?.type, targetsPostCredits, movie),
                     color = content,

@@ -144,6 +144,10 @@ class PlayerActivity : ComponentActivity() {
     private val subtitleStyleState = mutableStateOf(com.lamphaus.core.model.SubtitleStyle())
     private val subtitleDelayState = mutableStateOf(0L)
     private val audioDelayState = mutableStateOf(0L)
+
+    /** The Picture panel's values for this playback, never saved (PLY-PIC-01). */
+    private val pictureState = mutableStateOf(com.lamphaus.core.player.PictureAdjustment.NEUTRAL)
+    private val pictureAvailableState = mutableStateOf(false)
     private val pictureInPictureState = mutableStateOf(false)
     private val profilePlaybackPreferencesState = mutableStateOf(ProfilePlaybackPreferences())
     /** Profile language defaults and this title's remembered choice, applied once tracks are known. */
@@ -367,6 +371,8 @@ class PlayerActivity : ComponentActivity() {
                     onSelectEpisode = ::selectEpisode,
                     audioFollowsDefaults = audioFollowsDefaultsState.value,
                     lateSubtitleCount = lateSubtitlesState.value.size,
+                    picture = pictureState.value.takeIf { pictureAvailableState.value },
+                    onPicture = ::applyPicture,
                     onAddLateSubtitles = ::attachLateSubtitles,
                     onTrackChosen = ::onViewerTrackChoice,
                     onTrackDefaults = ::restoreTrackDefaults,
@@ -429,7 +435,11 @@ class PlayerActivity : ComponentActivity() {
                     command: androidx.media3.session.SessionCommand,
                     args: Bundle,
                 ): com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.SessionResult> {
-                    if (command.customAction == ACTION_ENGINE_CHANGED) resendVideoSurface()
+                    if (command.customAction == ACTION_ENGINE_CHANGED) {
+                        resendVideoSurface()
+                        // A new engine starts at its defaults; carry the viewer's picture over.
+                        pictureState.value.takeUnless { it.isNeutral }?.let(::applyPicture)
+                    }
                     return com.google.common.util.concurrent.Futures.immediateFuture(
                         androidx.media3.session.SessionResult(androidx.media3.session.SessionResult.RESULT_SUCCESS),
                     )
@@ -441,8 +451,7 @@ class PlayerActivity : ComponentActivity() {
             {
                 runCatching { future.get() }.onSuccess { mediaController ->
                     PerfTrace.mark(PerfTrace.CONTROLLER_CONNECT)
-                    val delayed = com.lamphaus.core.player.DelayedCuePlayer(mediaController)
-                    uiPlayer = delayed
+                    uiPlayer = com.lamphaus.core.player.RtlCuePlayer(mediaController)
                     controllerState.value = mediaController
                     // The engine is in place before the media item: libmpv when Settings
                     // (or Auto, for anime) asks for it, ExoPlayer otherwise (PLY-ENG-01).
@@ -508,6 +517,7 @@ class PlayerActivity : ComponentActivity() {
                                     events.contains(Player.EVENT_TRACKS_CHANGED)
                                 ) {
                                     updateDisplayVideoFormat()
+                                    updatePictureAvailability(player)
                                 }
                             }
 
@@ -1203,6 +1213,31 @@ class PlayerActivity : ComponentActivity() {
     }
 
     /** Reloads the stream at this position with the late subtitles among its tracks. */
+    /** Whether the Picture panel can adjust what is playing now (PLY-PIC-01). */
+    private fun updatePictureAvailability(player: Player) {
+        val video = player.currentTracks.groups
+            .firstOrNull { it.type == C.TRACK_TYPE_VIDEO && it.isSelected }
+            ?.let { group -> (0 until group.length).firstOrNull(group::isTrackSelected)?.let(group::getTrackFormat) }
+        pictureAvailableState.value = com.lamphaus.core.player.PictureAdjustment.isAvailable(
+            // The session publishes ExoPlayer only while it runs; libmpv clears it.
+            mpv = Media3EngineFactory.sessionRunsMpv,
+            tunneled = Media3EngineFactory.deviceConfig.tunneledPlayback,
+            hasVideo = video != null || player.videoSize.width > 0,
+            videoFormat = video,
+        )
+    }
+
+    private fun applyPicture(adjustment: com.lamphaus.core.player.PictureAdjustment) {
+        pictureState.value = adjustment
+        controller?.sendCustomCommand(
+            androidx.media3.session.SessionCommand(
+                com.lamphaus.core.player.PictureAdjustment.ACTION_SET_PICTURE,
+                Bundle.EMPTY,
+            ),
+            adjustment.toBundle(),
+        )
+    }
+
     private fun attachLateSubtitles() {
         val playback = request ?: return
         val mediaController = controller?.takeIf { it.currentMediaItem != null } ?: return
@@ -1479,7 +1514,7 @@ class PlayerActivity : ComponentActivity() {
         (attachedPlayerView as? androidx.media3.ui.PlayerView)?.player = null
         attachedPlayerView = null
         trackDefaults.detach()
-        (uiPlayer as? com.lamphaus.core.player.DelayedCuePlayer)?.release()
+        (uiPlayer as? com.lamphaus.core.player.RtlCuePlayer)?.release()
         uiPlayer = null
         controllerFuture?.let(MediaController::releaseFuture)
         controllerFuture = null
@@ -1633,7 +1668,6 @@ class PlayerActivity : ComponentActivity() {
 
     private fun applySubtitleDelayToEngine(delayMillis: Long) {
         subtitleDelayState.value = delayMillis
-        (uiPlayer as? com.lamphaus.core.player.DelayedCuePlayer)?.delayMillis = delayMillis
         controller?.sendCustomCommand(
             androidx.media3.session.SessionCommand(
                 ACTION_SET_SUBTITLE_DELAY,

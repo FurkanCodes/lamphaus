@@ -13,6 +13,10 @@ class LamphausPlaybackService : MediaSessionService() {
     /** The device settings the current session player was built with. */
     private var playerConfig = Media3EngineFactory.deviceConfig
 
+    /** The Picture panel's effect, and the ExoPlayer it was installed on (PLY-PIC-01). */
+    private val pictureEffect = PictureAdjustmentEffect()
+    private var pictureEffectPlayer: androidx.media3.exoplayer.ExoPlayer? = null
+
     override fun onCreate() {
         super.onCreate()
         playerConfig = Media3EngineFactory.deviceConfig
@@ -43,11 +47,17 @@ class LamphausPlaybackService : MediaSessionService() {
      */
     private fun refreshPlayerIfSettingsChanged(session: MediaSession) {
         val wanted = Media3EngineFactory.deviceConfig
-        if (!Media3EngineFactory.needsRebuild(playerConfig, wanted)) return
         val current = session.player
+        // Picture adjustments last one playback: the next one starts on a player
+        // without the effect pipeline, and mpv back at its defaults.
+        (current as? com.lamphaus.core.player.mpv.MpvPlayer)?.setPictureAdjustment(PictureAdjustment.NEUTRAL)
+        SubtitleOffset.delayUs = 0L
+        val carriesPictureEffect = pictureEffectPlayer != null && pictureEffectPlayer === current
+        if (!Media3EngineFactory.needsRebuild(playerConfig, wanted) && !carriesPictureEffect) return
         if (current.mediaItemCount > 0 && current.playbackState != androidx.media3.common.Player.STATE_IDLE) return
         val fresh = Media3EngineFactory.createPlayer(this, wanted)
         playerConfig = wanted
+        pictureEffectPlayer = null
         session.player = fresh
         Media3EngineFactory.sessionPlayer = fresh
         PlaybackDiagnostics.attach(fresh)
@@ -82,9 +92,9 @@ class LamphausPlaybackService : MediaSessionService() {
 
     /**
      * Engine-side commands that have no Media3 Player equivalent: subtitle
-     * and audio timing for the MPV engine (plan §2/§4). The Media3 engine
-     * receives the same values through DelayedCuePlayer / DelayAudioProcessor
-     * on the client side, so both engines honor one activity contract.
+     * timing for both engines (mpv's sub-delay, ExoPlayer's SubtitleOffset)
+     * and audio timing for MPV (plan §2/§4); ExoPlayer's audio delay is the
+     * client's DelayAudioProcessor, so both engines honor one activity contract.
      */
     private val sessionCallback = object : MediaSession.Callback {
         /**
@@ -126,10 +136,19 @@ class LamphausPlaybackService : MediaSessionService() {
                         ?.let { name -> runCatching { com.lamphaus.core.model.PlaybackEngineKind.valueOf(name) }.getOrNull() }
                     if (engine != null) PlaybackEngineFallback.select(this@LamphausPlaybackService, session, engine) { adoptPlayer(session, it) }
                 }
-                ACTION_SET_SUBTITLE_DELAY ->
-                    mpv?.setSubtitleDelayMillis(args.getLong(EXTRA_DELAY_MILLIS, 0L))
+                ACTION_SET_SUBTITLE_DELAY -> {
+                    val millis = args.getLong(EXTRA_DELAY_MILLIS, 0L)
+                    if (mpv != null) mpv.setSubtitleDelayMillis(millis) else applySubtitleOffset(session.player, millis)
+                }
                 ACTION_SET_AUDIO_DELAY ->
                     mpv?.setAudioDelayMillis(args.getLong(EXTRA_DELAY_MILLIS, 0L))
+                PictureAdjustment.ACTION_SET_PICTURE -> {
+                    val adjustment = PictureAdjustment.fromBundle(args)
+                    when (val player = session.player) {
+                        is com.lamphaus.core.player.mpv.MpvPlayer -> player.setPictureAdjustment(adjustment)
+                        is androidx.media3.exoplayer.ExoPlayer -> applyPicture(player, adjustment)
+                    }
+                }
                 ACTION_APPLY_SUBTITLE_STYLE -> {
                     val payload = args.getString(EXTRA_STYLE_JSON)
                     if (payload != null && mpv != null) {
@@ -149,6 +168,42 @@ class LamphausPlaybackService : MediaSessionService() {
                 androidx.media3.session.SessionResult(androidx.media3.session.SessionResult.RESULT_SUCCESS),
             )
         }
+    }
+
+    /**
+     * ExoPlayer's subtitle offset ([SubtitleOffsetRenderer]). A change while
+     * playing re-reads the text track at the same position, an in-buffer seek,
+     * so cues already shown or passed resolve against the new offset.
+     */
+    private fun applySubtitleOffset(player: androidx.media3.common.Player, millis: Long) {
+        val delayUs = millis.coerceIn(-MAX_SUBTITLE_OFFSET_MILLIS, MAX_SUBTITLE_OFFSET_MILLIS) * 1000
+        if (delayUs == SubtitleOffset.delayUs) return
+        SubtitleOffset.delayUs = delayUs
+        if (player.playbackState == androidx.media3.common.Player.STATE_READY) player.seekTo(player.currentPosition)
+    }
+
+    /**
+     * ExoPlayer builds its effect pipeline only when its renderers start, so
+     * the first adjustment of a playback reloads it in place once; after that
+     * the effect reads each change on the next frame. A paused frame is shown
+     * again by seeking to where it is: Media3's redraw needs a replayable
+     * frame cache the player does not keep, and fails playback without one.
+     */
+    private fun applyPicture(player: androidx.media3.exoplayer.ExoPlayer, adjustment: PictureAdjustment) {
+        pictureEffect.adjustment = adjustment
+        if (pictureEffectPlayer === player) {
+            if (!player.isPlaying) player.seekTo(player.currentPosition)
+            return
+        }
+        if (adjustment.isNeutral || player.mediaItemCount == 0) return
+        if (!PictureAdjustment.isAvailable(mpv = false, playerConfig.tunneledPlayback, hasVideo = true, player.videoFormat)) return
+        pictureEffectPlayer = player
+        val position = player.currentPosition
+        player.setVideoEffects(listOf(pictureEffect))
+        // stop() resets the renderers, so the video renderer starts again with the effect.
+        player.stop()
+        player.seekTo(position)
+        player.prepare()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -184,8 +239,10 @@ class LamphausPlaybackService : MediaSessionService() {
             ACTION_SET_AUDIO_DELAY,
             ACTION_APPLY_SUBTITLE_STYLE,
             ACTION_SELECT_ENGINE,
+            PictureAdjustment.ACTION_SET_PICTURE,
         )
         const val EXTRA_DELAY_MILLIS = "delay_millis"
+        const val MAX_SUBTITLE_OFFSET_MILLIS = 180_000L
         const val EXTRA_STYLE_JSON = "style_json"
 
         /** Chrome-visibility subtitle lift as a fraction of the video frame (PLY-IMM-03). */

@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.foundation.lazy.itemsIndexed
 import android.text.format.DateUtils
 import androidx.compose.animation.core.animateFloatAsState
@@ -24,10 +25,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -334,14 +331,14 @@ internal fun TvRatingDetailsDialog(
                     if (detailsUrl != null) {
                         TvAction(
                             label = stringResource(R.string.rating_open_source, rating.displayName),
-                            icon = Icons.AutoMirrored.Outlined.OpenInNew,
+                            icon = LamphausIcons.ArrowTopRightOnSquare,
                             modifier = Modifier.focusRequester(firstFocus),
                             onClick = { openFailed = !openRatingPage(context, detailsUrl) },
                         )
                     }
                     TvAction(
                         label = stringResource(R.string.close),
-                        icon = Icons.Outlined.Close,
+                        icon = LamphausIcons.XMark,
                         modifier = if (detailsUrl == null) Modifier.focusRequester(firstFocus) else Modifier,
                         onClick = onDismiss,
                     )
@@ -414,7 +411,7 @@ internal fun TvInlineError(onRetry: () -> Unit) {
         )
         TvAction(
             label = stringResource(R.string.retry),
-            icon = Icons.Outlined.Refresh,
+            icon = LamphausIcons.ArrowPath,
             onClick = onRetry,
         )
     }

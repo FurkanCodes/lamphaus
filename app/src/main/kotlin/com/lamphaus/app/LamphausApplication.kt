@@ -1,5 +1,6 @@
 package com.lamphaus.app
 
+import com.lamphaus.app.ui.icons.HeroIconWeight
 import android.app.Application
 import android.content.pm.PackageManager
 import androidx.work.Configuration
@@ -24,6 +25,8 @@ class LamphausApplication : Application(), Configuration.Provider, SingletonImag
         super.onCreate()
         // First, so a crash anywhere after this still leaves a report (SHR-PROD-18).
         AppDiagnostics.install(this)
+        // Before any icon is drawn: television outlines are heavier (TV-FND-01).
+        if (isTelevision()) HeroIconWeight.useTelevision()
         if (
             BuildConfig.CAST_APPLICATION_ID.isNotBlank() &&
             packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)

@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.activity.compose.BackHandler
 import android.app.Activity
 import android.content.Intent
@@ -10,9 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
@@ -56,17 +54,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.VideoLibrary
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChipDefaults
@@ -143,10 +130,10 @@ internal enum class MobileDestination(
     val selectedIcon: ImageVector,
     val icon: ImageVector,
 ) {
-    HOME(R.string.home, Icons.Filled.Home, Icons.Outlined.Home),
-    DISCOVER(R.string.discover, Icons.Filled.Explore, Icons.Outlined.Explore),
-    LIBRARY(R.string.library, Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
-    SEARCH(R.string.search, Icons.Filled.Search, Icons.Outlined.Search),
+    HOME(R.string.home, LamphausIcons.HomeSolid, LamphausIcons.Home),
+    DISCOVER(R.string.discover, LamphausIcons.CompassSolid, LamphausIcons.Compass),
+    LIBRARY(R.string.library, LamphausIcons.RectangleStackSolid, LamphausIcons.RectangleStack),
+    SEARCH(R.string.search, LamphausIcons.MagnifyingGlassSolid, LamphausIcons.MagnifyingGlass),
 }
 
 /** Rows with content required before the signed-in home is revealed. */
@@ -805,7 +792,7 @@ private fun MobileSignedInApp(
                                 NavigationRailItem(
                                     selected = false,
                                     onClick = { settingsOpen = true },
-                                    icon = { Icon(Icons.Outlined.Person, null) },
+                                    icon = { Icon(LamphausIcons.User, null) },
                                     label = { Text(stringResource(R.string.profile)) },
                                 )
                             }
@@ -855,7 +842,7 @@ internal fun MobileNavBar(
         NavigationBarItem(
             selected = false,
             onClick = onProfile,
-            icon = { Icon(Icons.Outlined.Person, contentDescription = null) },
+            icon = { Icon(LamphausIcons.User, contentDescription = null) },
             label = { Text(stringResource(R.string.profile), style = MaterialTheme.typography.labelSmall) },
             colors = NavigationBarItemDefaults.colors(
                 unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1050,19 +1037,19 @@ private fun SearchScreen(
             value = query,
             onValueChange = { query = it },
             placeholder = { Text(stringResource(R.string.search_movies_series), color = MobileTokens.textMuted) },
-            leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MobileTokens.textMuted) },
+            leadingIcon = { Icon(LamphausIcons.MagnifyingGlass, null, tint = MobileTokens.textMuted) },
             trailingIcon = when {
                 query.isNotEmpty() -> {
                     {
                         IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Outlined.Close, stringResource(R.string.search_clear_query), tint = MobileTokens.textMuted)
+                            Icon(LamphausIcons.XMark, stringResource(R.string.search_clear_query), tint = MobileTokens.textMuted)
                         }
                     }
                 }
                 voiceLauncher != null -> {
                     {
                         IconButton(onClick = voiceLauncher) {
-                            Icon(Icons.Outlined.Mic, stringResource(R.string.search_by_voice), tint = MobileTokens.textMuted)
+                            Icon(LamphausIcons.Microphone, stringResource(R.string.search_by_voice), tint = MobileTokens.textMuted)
                         }
                     }
                 }
@@ -1226,7 +1213,7 @@ private fun RecentSearches(
                     .padding(start = MobileTokens.spacingScreen, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Outlined.History, null, tint = MobileTokens.textMuted, modifier = Modifier.size(20.dp))
+                Icon(LamphausIcons.Clock, null, tint = MobileTokens.textMuted, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(16.dp))
                 Text(
                     entry,
@@ -1237,7 +1224,7 @@ private fun RecentSearches(
                 )
                 IconButton(onClick = { onForget(entry) }) {
                     Icon(
-                        Icons.Outlined.Close,
+                        LamphausIcons.XMark,
                         stringResource(R.string.search_recent_remove, entry),
                         tint = MobileTokens.textMuted,
                     )
@@ -1281,7 +1268,7 @@ private fun rememberVoiceSearch(onResult: (String) -> Unit): (() -> Unit)? {
 @Composable
 internal fun EmptyProviders(modifier: Modifier = Modifier, onAddSource: (() -> Unit)? = null) {
     Column(modifier.padding(vertical = 48.dp), horizontalAlignment = Alignment.Start) {
-        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(36.dp))
+        Icon(LamphausIcons.Plus, contentDescription = null, modifier = Modifier.size(36.dp))
         Spacer(Modifier.height(16.dp))
         Text(stringResource(R.string.install_first_addon), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
@@ -1293,7 +1280,7 @@ internal fun EmptyProviders(modifier: Modifier = Modifier, onAddSource: (() -> U
         if (onAddSource != null) {
             Spacer(Modifier.height(20.dp))
             Button(onClick = onAddSource) {
-                Icon(Icons.Outlined.Add, contentDescription = null)
+                Icon(LamphausIcons.Plus, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.install_addon))
             }

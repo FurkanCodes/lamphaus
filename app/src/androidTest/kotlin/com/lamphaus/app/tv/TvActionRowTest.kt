@@ -1,14 +1,11 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -42,9 +39,9 @@ class TvActionRowTest {
         compose.setContent {
             Column(Modifier.width(462.dp)) {
                 TvActionRow(row = rememberTvRowFocus()) {
-                    TvAction("Resume S12 · E10", Icons.Outlined.PlayArrow, {}, Modifier.focusRequester(play).testTag("play"))
-                    TvAction("Add to library", Icons.Outlined.Add, {}, Modifier.testTag("library"))
-                    TvAction("Edit artwork", Icons.Outlined.Palette, {}, Modifier.testTag("artwork"))
+                    TvAction("Resume S12 · E10", LamphausIcons.PlaySolid, {}, Modifier.focusRequester(play).testTag("play"))
+                    TvAction("Add to library", LamphausIcons.Plus, {}, Modifier.testTag("library"))
+                    TvAction("Edit artwork", LamphausIcons.Swatch, {}, Modifier.testTag("artwork"))
                 }
                 Box(Modifier.size(120.dp, 40.dp).focusable().testTag("seasons"))
             }
