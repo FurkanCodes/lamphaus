@@ -52,7 +52,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,7 +94,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntSize
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import androidx.core.text.HtmlCompat
 import com.lamphaus.app.R
 import com.lamphaus.app.diagnostics.AppScreen
 import com.lamphaus.app.ui.LamphausWordmark
@@ -1066,97 +1064,6 @@ internal fun TvExpandableText(
             .animateContentSize(animationSpec = expansionSpec)
             .focusable(enabled = overflows || focused),
     )
-}
-
-/**
- * Cast / directors section that mirrors [TvExpandableText]: collapsed it keeps
- * the compact name line, focused it grows into a wrapped chip list that shows
- * every name instead of an ellipsized summary.
- *
- * Shares the same focus restore rule — see [TvExpandableText].
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun TvExpandablePeopleSection(
-    @StringRes labelRes: Int,
-    people: List<String>,
-    modifier: Modifier = Modifier,
-    returnFocusProvider: () -> FocusRequester? = { null },
-) {
-    if (people.isEmpty()) return
-    val names = remember(people) {
-        people.map { HtmlCompat.fromHtml(it, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim() }
-    }
-    val reducedMotion = rememberReducedMotion()
-    var focused by remember { mutableStateOf(false) }
-    var overflows by remember { mutableStateOf(false) }
-    var returnTarget by remember { mutableStateOf<FocusRequester?>(null) }
-    // The collapsed summary shows at most six names in two lines; anything
-    // beyond that must stay reachable through focus expansion even when the
-    // summary itself happens to fit.
-    val collapsedNameCount = 6
-    val truncates = overflows || names.size > collapsedNameCount
-    val expansionSpec: FiniteAnimationSpec<IntSize> =
-        if (reducedMotion) snap() else tween(TvMotionTokens.heroTransitionDurationMillis)
-
-    Column(
-        modifier = modifier
-            .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-                    val target = returnTarget
-                    if (target != null) {
-                        target.requestFocus()
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) returnTarget = returnFocusProvider()
-            }
-            .animateContentSize(animationSpec = expansionSpec)
-            .focusable(enabled = truncates || focused)
-            .padding(top = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(
-            text = stringResource(labelRes),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium,
-        )
-        if (focused && truncates) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                names.forEach { name ->
-                    Text(
-                        text = name,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier
-                            .background(TvSurfaceTokens.elevated, TvShapeTokens.button)
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        } else {
-            Text(
-                text = names.take(6).joinToString("  •  "),
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                onTextLayout = { layoutResult ->
-                    if (!focused) overflows = layoutResult.hasVisualOverflow
-                },
-            )
-        }
-    }
 }
 
 

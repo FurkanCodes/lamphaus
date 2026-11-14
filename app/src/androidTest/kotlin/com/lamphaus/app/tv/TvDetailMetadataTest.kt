@@ -186,39 +186,6 @@ class TvDetailMetadataTest {
     }
 
     @Test
-    fun peopleSectionGrowsIntoFullChipListWhileFocused() {
-        // More than six names, and long enough that the collapsed two-line
-        // summary truncates at the test width — both expansion triggers.
-        val cast = List(24) { index -> "Actor With A Distinctly Long Name $index" }
-        val castRequester = FocusRequester()
-
-        compose.setContent {
-            LamphausTvTheme {
-                TvDetailTestSurface {
-                    Column(Modifier.width(520.dp)) {
-                        TvExpandablePeopleSection(
-                            labelRes = R.string.cast,
-                            people = cast,
-                            modifier = Modifier
-                                .focusRequester(castRequester)
-                                .testTag("cast"),
-                        )
-                    }
-                }
-            }
-        }
-
-        compose.waitForIdle()
-        val collapsedHeight = heightOf("cast")
-
-        compose.runOnIdle { castRequester.requestFocus() }
-        compose.waitForIdle()
-        val expandedHeight = heightOf("cast")
-
-        assertTrue("focused cast section should show the full list", expandedHeight > collapsedHeight)
-    }
-
-    @Test
     fun TV_CLR_01_heroRatingValueReadsOnTheDarkCanvas() {
         var background = Color.Unspecified
 

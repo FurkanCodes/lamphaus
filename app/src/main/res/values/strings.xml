@@ -138,7 +138,7 @@
     <string name="recap_episode_format">%1$s  %2$s</string>
     <string name="season_format">Season %1$d</string>
     <string name="episode_number_format">Episode %1$d</string>
-    <string name="directors">Directors</string>
+    <string name="director">Director</string>
     <string name="profiles">Profiles</string>
     <string name="child_profile">Child profile</string>
     <string name="adult_profile">Adult profile</string>

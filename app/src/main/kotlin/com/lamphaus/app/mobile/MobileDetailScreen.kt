@@ -90,10 +90,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.core.text.HtmlCompat
 import coil3.compose.AsyncImage
 import com.lamphaus.app.R
 import com.lamphaus.app.ui.releaseCountdownText
+import com.lamphaus.app.ui.detailCredits
 import com.lamphaus.app.ui.uniqueKeys
 import com.lamphaus.app.ui.ReleaseKind
 import com.lamphaus.app.ui.episodeAirDateText
@@ -218,8 +218,11 @@ internal fun MobileDetailScreen(
         metadata = metadataImdbScore(preview.rating, preview.ratingSource, stringResource(R.string.source_imdb)),
         enrichment = enrichment?.ratings.orEmpty(),
     )
-    val cast: List<PersonCredit> = enrichment?.cast?.takeIf { it.isNotEmpty() }
-        ?: detail.cast.map { PersonCredit(name = plainName(it)) }
+    // Directors lead the Cast row rather than a line under the synopsis.
+    val directorRole = stringResource(R.string.director)
+    val cast: List<PersonCredit> = remember(enrichment, detail.cast, detail.directors, directorRole) {
+        detailCredits(detail, enrichment, directorRole)
+    }
     val similar = enrichment?.similar.orEmpty()
     val listState = rememberLazyListState()
     val density = LocalDensity.current
@@ -740,26 +743,7 @@ private fun DetailSynopsis(detail: MediaDetail) {
                 )
             }
         }
-        if (detail.directors.isNotEmpty()) {
-            CreditLine(stringResource(R.string.directors), detail.directors.joinToString(", ") { plainName(it) })
-        }
     }
-}
-
-@Composable
-private fun CreditLine(label: String, value: String) {
-    Text(
-        text = androidx.compose.ui.text.buildAnnotatedString {
-            pushStyle(androidx.compose.ui.text.SpanStyle(color = MobileTokens.textMuted))
-            append("$label  ")
-            pop()
-            append(value)
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = MobileTokens.textPrimary.copy(alpha = 0.86f),
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-    )
 }
 
 @Composable
@@ -1072,7 +1056,4 @@ private fun usd(value: Long): String = when {
     value >= 1_000_000 -> "$" + "${(value / 1e6).roundToInt()}M"
     else -> "$" + "%,d".format(value)
 }
-
-private fun plainName(value: String): String =
-    HtmlCompat.fromHtml(value, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
 
