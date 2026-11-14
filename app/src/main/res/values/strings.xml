@@ -585,6 +585,14 @@
     <string name="player_speed">Playback speed</string>
     <string name="player_speed_normal">Normal · 1×</string>
     <string name="player_display">Display mode</string>
+    <string name="player_picture">Picture</string>
+    <string name="settings_group_expanded">Expanded</string>
+    <string name="settings_group_collapsed">Collapsed</string>
+    <string name="player_picture_brightness">Brightness</string>
+    <string name="player_picture_contrast">Contrast</string>
+    <string name="player_picture_saturation">Saturation</string>
+    <string name="player_picture_hue">Hue</string>
+    <string name="player_picture_reset">Reset picture</string>
     <string name="player_info">Stream info</string>
     <string name="player_external">Open in external player</string>
     <string name="player_fit">Fit</string>

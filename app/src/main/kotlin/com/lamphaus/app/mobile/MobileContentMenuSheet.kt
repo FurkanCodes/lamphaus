@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,14 +14,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Replay
-import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -189,11 +182,11 @@ internal fun ContentMenuAction.menuLabel(
 }
 
 internal fun ContentMenuAction.menuIcon(inLibrary: Boolean): ImageVector = when (this) {
-    ContentMenuAction.ViewDetails -> Icons.Outlined.Info
+    ContentMenuAction.ViewDetails -> LamphausIcons.InformationCircle
     ContentMenuAction.ToggleLibrary ->
-        if (inLibrary) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder
-    ContentMenuAction.MarkWatched -> Icons.Outlined.Check
-    ContentMenuAction.MarkUnwatched -> Icons.Outlined.Close
-    ContentMenuAction.RemoveFromContinueWatching -> Icons.Outlined.Delete
-    ContentMenuAction.StartFromBeginning -> Icons.Filled.Replay
+        if (inLibrary) LamphausIcons.BookmarkSolid else LamphausIcons.Bookmark
+    ContentMenuAction.MarkWatched -> LamphausIcons.Check
+    ContentMenuAction.MarkUnwatched -> LamphausIcons.XMark
+    ContentMenuAction.RemoveFromContinueWatching -> LamphausIcons.Trash
+    ContentMenuAction.StartFromBeginning -> LamphausIcons.ArrowUturnLeft
 }

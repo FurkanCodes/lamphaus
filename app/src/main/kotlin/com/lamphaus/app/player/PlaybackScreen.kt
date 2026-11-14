@@ -1,5 +1,6 @@
 package com.lamphaus.app.player
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -63,24 +64,6 @@ import com.lamphaus.app.tv.LamphausTvTheme
 import com.lamphaus.app.tv.TvFilterChip
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.BrightnessMedium
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.ClosedCaption
-import androidx.compose.material.icons.rounded.FastForward
-import androidx.compose.material.icons.rounded.FastRewind
-import androidx.compose.material.icons.rounded.Forward10
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.LockOpen
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PictureInPictureAlt
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Replay
-import androidx.compose.material.icons.rounded.Replay10
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -96,11 +79,8 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -214,14 +194,13 @@ internal val PlayerOnPrimary = Color(0xFF003062)
 // over video without adding glass or saturated chrome (SHR-PROD-01/03).
 internal val PlayerControlContainer = Color.White.copy(alpha = 0.10f)
 internal val PlayerTrack = Color.White.copy(alpha = 0.28f)
-internal val PlayerBuffered = Color.White.copy(alpha = 0.45f)
 internal val PlayerFont = FontFamily(
     Font(R.font.inter_regular, FontWeight.Normal),
     Font(R.font.inter_medium, FontWeight.Medium),
     Font(R.font.inter_semi_bold, FontWeight.SemiBold),
 )
 
-internal enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, DISPLAY, MORE, INFO, SOURCES, EPISODES }
+internal enum class PlayerPanel { AUDIO, SUBTITLES, SPEED, DISPLAY, PICTURE, MORE, INFO, SOURCES, EPISODES }
 
 internal enum class PlaybackStartupPhase { LOADING, READY, FAILED }
 
@@ -330,6 +309,9 @@ internal fun PlaybackScreen(
     /** Add-on subtitles that answered after the stream started (PLY-SUB-01). */
     lateSubtitleCount: Int = 0,
     onAddLateSubtitles: () -> Unit = {},
+    /** This playback's picture adjustment; null when the playing video cannot be adjusted (PLY-PIC-01). */
+    picture: com.lamphaus.core.player.PictureAdjustment? = null,
+    onPicture: (com.lamphaus.core.player.PictureAdjustment) -> Unit = {},
     /** The viewer picked a track (null format: subtitles off). */
     onTrackChosen: ((trackType: Int, format: androidx.media3.common.Format?) -> Unit)? = null,
     /** The viewer chose Automatic: hand the track type back to the defaults. */
@@ -373,7 +355,7 @@ internal fun PlaybackScreen(
         keySeekTarget = next
         lastKeySeekTarget = next
         showHud(
-            if (forward) Icons.Rounded.FastForward else Icons.Rounded.FastRewind,
+            if (forward) LamphausIcons.ForwardSolid else LamphausIcons.BackwardSolid,
             next.asPlaybackTime(),
         )
     }
@@ -495,8 +477,16 @@ internal fun PlaybackScreen(
     }
     val nextEpisodeDue = nextEpisodeAvailable && !nextEpisodeDismissed && (timingReady || endingNear)
     LaunchedEffect(nextEpisodeDue, nextEpisode?.id) { if (nextEpisodeDue) onPrefetchNextEpisode() }
-    // The end screen replaces the chrome; Watch again brings the chrome back with playback.
-    LaunchedEffect(endPromptShown) { if (endPromptShown) controlsVisible = false }
+    // The end screen replaces the chrome and any open panel; Watch again comes
+    // back to clean playback, never a panel that lost its focus (PLY-AUTO-01).
+    LaunchedEffect(endPromptShown) {
+        if (endPromptShown) {
+            controlsVisible = false
+            panel = null
+            panelParent = null
+            editor = null
+        }
+    }
     val nextEpisodeSkipInCard = nextEpisodeCardVisible && !wideLayout && !isTelevision &&
         activeSegment?.type == PlaybackSegmentType.ENDING
 
@@ -558,8 +548,10 @@ internal fun PlaybackScreen(
         }
     }
 
-    LaunchedEffect(controlsVisible, panel) {
-        if (!controlsVisible && panel == null) rootFocus.requestFocus()
+    // The end screens own focus while shown; taking it here would leave their
+    // answers unreachable, since this catcher ignores keys under them (TV-FOC-01).
+    LaunchedEffect(controlsVisible, panel, endPromptShown) {
+        if (!controlsVisible && panel == null && !endPromptShown) rootFocus.requestFocus()
     }
 
     LaunchedEffect(loadingSurfaceVisible, controlsVisible, inPictureInPicture, panel) {
@@ -751,7 +743,7 @@ internal fun PlaybackScreen(
                         PlaybackSeeks.prepare(if (forward) SeekKind.STEP_FORWARD else SeekKind.STEP_BACK)
                         player?.seekTo(target)
                         showHud(
-                            if (forward) Icons.Rounded.Forward10 else Icons.Rounded.Replay10,
+                            if (forward) LamphausIcons.Forward10 else LamphausIcons.Replay10,
                             "${if (forward) "+" else "\u2212"}10 s",
                         )
                     }
@@ -763,7 +755,7 @@ internal fun PlaybackScreen(
                         val next = ((seekTarget ?: snapshot.positionMillis) +
                             PlayerGesturePolicy.seekDeltaMillis(deltaPx, widthPx)).coerceIn(0L, duration)
                         seekTarget = next
-                        showHud(Icons.Rounded.FastForward, next.asPlaybackTime())
+                        showHud(LamphausIcons.ForwardSolid, next.asPlaybackTime())
                     }
                 },
                 onSeekEnd = {
@@ -777,12 +769,12 @@ internal fun PlaybackScreen(
                 onBrightnessDelta = { deltaPx, heightPx ->
                     brightnessFraction = PlayerGesturePolicy.levelFor(brightnessFraction, deltaPx, heightPx)
                     applyWindowBrightness(hostActivity, brightnessFraction)
-                    showHud(Icons.Rounded.BrightnessMedium, "${(brightnessFraction * 100).toInt()}%")
+                    showHud(LamphausIcons.Sun, "${(brightnessFraction * 100).toInt()}%")
                 },
                 onVolumeDelta = { deltaPx, heightPx ->
                     volumeFraction = PlayerGesturePolicy.levelFor(volumeFraction, deltaPx, heightPx)
                     if (!setMediaVolumeFraction(context, volumeFraction)) player?.volume = volumeFraction
-                    showHud(Icons.AutoMirrored.Rounded.VolumeUp, "${(volumeFraction * 100).toInt()}%")
+                    showHud(LamphausIcons.SpeakerWave, "${(volumeFraction * 100).toInt()}%")
                 },
             )
         }
@@ -907,7 +899,7 @@ internal fun PlaybackScreen(
             // Locked mode only blocks video-surface touches; Back still unwinds and
             // the chip is a visible, screen-reader reachable unlock (MOB-A11Y-03).
             PlayerActionButton(
-                Icons.Rounded.LockOpen,
+                LamphausIcons.LockOpen,
                 stringResource(R.string.player_unlock),
                 Modifier.align(Alignment.CenterStart)
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
@@ -1075,7 +1067,7 @@ internal fun PlaybackScreen(
 
         if (!loadingSurfaceVisible && !isTelevision && !inPictureInPicture && !locked && wideLayout && (controlsVisible || panel != null)) {
             PlayerSideRail(
-                icon = Icons.Rounded.BrightnessMedium,
+                icon = LamphausIcons.Sun,
                 label = stringResource(R.string.player_brightness),
                 value = brightnessFraction,
                 onValueChange = { value ->
@@ -1089,7 +1081,7 @@ internal fun PlaybackScreen(
                     .heightIn(max = 320.dp),
             )
             PlayerSideRail(
-                icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                icon = LamphausIcons.SpeakerWave,
                 label = stringResource(R.string.player_volume),
                 value = volumeFraction,
                 onValueChange = { value ->
@@ -1218,6 +1210,8 @@ internal fun PlaybackScreen(
                     onPanel = { panelParent = panel; panel = it },
                     onOpenExternally = onOpenExternally,
                     showEpisodes = request.episodeQueue.size > 1,
+                    picture = picture,
+                    onPicture = onPicture,
                 )
             }
         }
@@ -1477,15 +1471,36 @@ internal fun PlayerProgress(
                 valueRange = 0f..durationMillis.coerceAtLeast(1L).toFloat(),
                 enabled = durationMillis > 0,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = seekDescription },
-                thumb = { Box(Modifier.size(12.dp).background(PlayerPrimary, CircleShape)) },
+                // A pill thumb on a thick rounded track that grows while dragging;
+                // buffered media is a dim accent and intro/credits edges are cut
+                // into the bar, as on TV.
+                thumb = {
+                    Box(
+                        Modifier.size(width = 6.dp, height = if (scrubPosition != null) 22.dp else 18.dp)
+                            .background(PlayerPrimary, RoundedCornerShape(3.dp)),
+                    )
+                },
                 track = { state ->
-                    Canvas(Modifier.fillMaxWidth().height(4.dp)) {
-                        val radius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                        val played = state.value / durationMillis.coerceAtLeast(1L)
-                        val buffered = bufferedPositionMillis.toFloat() / durationMillis.coerceAtLeast(1L)
+                    Canvas(Modifier.fillMaxWidth().height(if (scrubPosition != null) 8.dp else 6.dp)) {
+                        val radius = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
+                        val total = durationMillis.coerceAtLeast(1L)
+                        val played = state.value / total
+                        val buffered = bufferedPositionMillis.toFloat() / total
                         drawRoundRect(PlayerTrack, cornerRadius = radius)
-                        drawRoundRect(PlayerBuffered, size = size.copy(width = size.width * buffered.coerceIn(0f, 1f)), cornerRadius = radius)
+                        drawRoundRect(PlayerPrimary.copy(alpha = 0.35f), size = size.copy(width = size.width * buffered.coerceIn(0f, 1f)), cornerRadius = radius)
                         drawRoundRect(PlayerPrimary, size = size.copy(width = size.width * played.coerceIn(0f, 1f)), cornerRadius = radius)
+                        if (durationMillis > 0) {
+                            segments.forEach { segment ->
+                                listOf(segment.startMillis, segment.endMillis ?: durationMillis).forEach { edge ->
+                                    val x = size.width * (edge.toFloat() / total).coerceIn(0f, 1f)
+                                    drawRect(
+                                        PlayerBackground,
+                                        topLeft = androidx.compose.ui.geometry.Offset(x - 1.dp.toPx(), 0f),
+                                        size = androidx.compose.ui.geometry.Size(2.dp.toPx(), size.height),
+                                    )
+                                }
+                            }
+                        }
                     }
                 },
             )
@@ -1654,6 +1669,8 @@ private fun PlayerSettingsPanel(
     onPanel: (PlayerPanel) -> Unit,
     onOpenExternally: () -> Unit,
     showEpisodes: Boolean = false,
+    picture: com.lamphaus.core.player.PictureAdjustment? = null,
+    onPicture: (com.lamphaus.core.player.PictureAdjustment) -> Unit = {},
 ) {
     val firstFocus = remember(panel) { FocusRequester() }
     val title = stringResource(when (panel) {
@@ -1661,6 +1678,7 @@ private fun PlayerSettingsPanel(
         PlayerPanel.SUBTITLES -> R.string.player_subtitles
         PlayerPanel.SPEED -> R.string.player_speed
         PlayerPanel.DISPLAY -> R.string.player_display
+        PlayerPanel.PICTURE -> R.string.player_picture
         PlayerPanel.MORE -> R.string.player_more
         PlayerPanel.INFO -> R.string.player_info
         PlayerPanel.SOURCES -> R.string.player_sources
@@ -1779,9 +1797,13 @@ private fun PlayerSettingsPanel(
                         if (showEpisodes) Modifier else Modifier.focusRequester(firstFocus), actionRole = Role.Button) { onPanel(PlayerPanel.SPEED) }
                 }
                 item { PlayerChoiceRow(stringResource(R.string.player_display), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.DISPLAY) } }
+                if (picture != null) {
+                    item { PlayerChoiceRow(stringResource(R.string.player_picture), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.PICTURE) } }
+                }
                 item { PlayerChoiceRow(stringResource(R.string.player_info), null, false, actionRole = Role.Button) { onPanel(PlayerPanel.INFO) } }
                 item { PlayerChoiceRow(stringResource(R.string.player_external), null, false, actionRole = Role.Button, onClick = onOpenExternally) }
             }
+            PlayerPanel.PICTURE -> picture?.let { PlayerPictureControls(it, onPicture, firstFocus) }
             PlayerPanel.INFO, PlayerPanel.SOURCES, PlayerPanel.EPISODES -> Unit
         }
     }
@@ -1972,6 +1994,7 @@ private fun TvSubtitleRailPanel(
                                 title = option.title,
                                 supportingText = null,
                                 badges = listOf(trackOriginLabel(option.origin)) + option.badges,
+                                leadingIcon = option.origin.icon,
                                 selected = option.selected,
                                 enabled = option.supported,
                                 modifier = if (index == selectedIndex) Modifier.focusRequester(selectedFocus) else Modifier,
@@ -2018,6 +2041,13 @@ private fun List<TrackOption>.originCounts(): List<Pair<TrackOrigin, Int>> =
     groupBy(TrackOption::origin)
         .map { (origin, tracks) -> origin to tracks.size }
         .sortedBy { (origin, _) -> if (origin == TrackOrigin.BuiltIn) 0 else 1 }
+
+/** A subtitle file from an add-on, or text carried in the stream itself. */
+private val TrackOrigin.icon: ImageVector
+    get() = when (this) {
+        TrackOrigin.BuiltIn -> LamphausIcons.Film
+        is TrackOrigin.Addon -> LamphausIcons.DocumentText
+    }
 
 @Composable
 private fun trackOriginLabel(origin: TrackOrigin): String = when (origin) {
@@ -2385,6 +2415,7 @@ private fun PlayerTrackList(
                     } else {
                         option.badges
                     },
+                    leadingIcon = option.origin.icon.takeIf { trackType == C.TRACK_TYPE_TEXT },
                     selected = option.selected && (!includeAutomatic || !automaticSelected),
                     enabled = option.supported,
                     compact = compactRows,
@@ -2456,6 +2487,8 @@ internal fun PlayerChoiceRow(
     actionRole: Role = Role.RadioButton,
     /** Short facts under the title as chips (Built-in, SRT, Forced); read as part of the row. */
     badges: List<String> = emptyList(),
+    /** Decorative glyph before the title; the row's text already says what it shows. */
+    leadingIcon: ImageVector? = null,
     onClick: () -> Unit,
 ) {
     val interactionModifier = when (actionRole) {
@@ -2466,6 +2499,7 @@ internal fun PlayerChoiceRow(
     if (!LocalPlayerTelevision.current) {
         ListItem(
             headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+            leadingContent = leadingIcon?.let { icon -> { Icon(icon, null) } },
             supportingContent = if (supportingText == null && badges.isEmpty()) {
                 null
             } else {
@@ -2484,7 +2518,7 @@ internal fun PlayerChoiceRow(
             },
             trailingContent = {
                 when (actionRole) {
-                    Role.Button -> Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null)
+                    Role.Button -> Icon(LamphausIcons.ChevronRight, null)
                     Role.Checkbox -> Checkbox(selected, onCheckedChange = null, enabled = enabled)
                     else -> RadioButton(selected, onClick = null, enabled = enabled)
                 }
@@ -2522,6 +2556,9 @@ internal fun PlayerChoiceRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        leadingIcon?.let { icon ->
+            Icon(icon, null, tint = if (focused) PlayerFocusedContent else PlayerOnSurfaceMuted)
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = title,
@@ -2557,7 +2594,7 @@ internal fun PlayerChoiceRow(
         }
         if (selected) {
             Icon(
-                imageVector = Icons.Rounded.Check,
+                imageVector = LamphausIcons.Check,
                 contentDescription = null,
                 tint = if (focused) PlayerFocusedContent else PlayerPrimary,
             )
@@ -2800,13 +2837,13 @@ private fun PlayerDelayRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             PlayerDelayLabel(label, valueText, Modifier.weight(1f))
             FilledTonalIconButton(onClick = { onStep(-1) }) {
-                Icon(Icons.Rounded.Remove, stringResource(R.string.player_decrease_value, label))
+                Icon(LamphausIcons.Minus, stringResource(R.string.player_decrease_value, label))
             }
             FilledTonalIconButton(onClick = onReset) {
-                Icon(Icons.Rounded.Replay, stringResource(R.string.player_reset_value, label))
+                Icon(LamphausIcons.ArrowUturnLeft, stringResource(R.string.player_reset_value, label))
             }
             FilledTonalIconButton(onClick = { onStep(1) }) {
-                Icon(Icons.Rounded.Add, stringResource(R.string.player_increase_value, label))
+                Icon(LamphausIcons.Plus, stringResource(R.string.player_increase_value, label))
             }
         }
         return

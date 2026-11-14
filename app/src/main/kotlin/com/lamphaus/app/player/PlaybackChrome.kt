@@ -1,10 +1,8 @@
 package com.lamphaus.app.player
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -97,9 +95,9 @@ internal fun PlayerControls(
         else -> R.string.player_play
     })
     val playIcon = when {
-        ended -> Icons.Rounded.Replay
-        snapshot.playing -> Icons.Rounded.Pause
-        else -> Icons.Rounded.PlayArrow
+        ended -> LamphausIcons.ArrowUturnLeft
+        snapshot.playing -> LamphausIcons.PauseSolid
+        else -> LamphausIcons.PlaySolid
     }
     val toggle = { if (ended) onReplay() else onTogglePlay(); onInteraction() }
     LaunchedEffect(focusRequestVersion) {
@@ -141,20 +139,20 @@ internal fun PlayerControls(
                         containerSize = PlayerChromeTokens.TvControlContainer,
                         onClick = toggle,
                     )
-                    if (canPlayNext) PlayerActionButton(Icons.Rounded.SkipNext,
+                    if (canPlayNext) PlayerActionButton(LamphausIcons.SkipNextSolid,
                         stringResource(R.string.player_next_episode),
                         visualSize = PlayerChromeTokens.TvControlGlyph,
                         containerSize = PlayerChromeTokens.TvControlContainer) {
                         if (!nextEpisodeLoading) onNextEpisode()
                         onInteraction()
                     }
-                    PlayerSettingButton(Icons.Rounded.ClosedCaption, stringResource(R.string.player_subtitles),
+                    PlayerSettingButton(LamphausIcons.Subtitles, stringResource(R.string.player_subtitles),
                         subtitlesActive, Modifier.focusRequester(subtitlesFocus)) { onPanel(PlayerPanel.SUBTITLES) }
-                    PlayerSettingButton(Icons.AutoMirrored.Rounded.VolumeUp, stringResource(R.string.player_audio),
+                    PlayerSettingButton(LamphausIcons.SpeakerWave, stringResource(R.string.player_audio),
                         false, Modifier.focusRequester(audioFocus)) { onPanel(PlayerPanel.AUDIO) }
-                    if (canSwitchSource) PlayerSettingButton(Icons.Rounded.Layers, stringResource(R.string.player_sources),
+                    if (canSwitchSource) PlayerSettingButton(LamphausIcons.Square3Stack3d, stringResource(R.string.player_sources),
                         false, Modifier.focusRequester(sourcesFocus)) { onPanel(PlayerPanel.SOURCES) }
-                    PlayerSettingButton(Icons.Rounded.MoreHoriz, stringResource(R.string.player_more),
+                    PlayerSettingButton(LamphausIcons.EllipsisHorizontal, stringResource(R.string.player_more),
                         false, Modifier.focusRequester(moreFocus)) { onPanel(PlayerPanel.MORE) }
                     Spacer(Modifier.weight(1f))
                     PlayerTvTime(snapshot.positionMillis, snapshot.durationMillis)
@@ -169,14 +167,14 @@ internal fun PlayerControls(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                PlayerActionButton(Icons.Rounded.Close, stringResource(R.string.player_close), onClick = onExit)
+                PlayerActionButton(LamphausIcons.XMark, stringResource(R.string.player_close), onClick = onExit)
                 PlayerTitle(request, false, Modifier.weight(1f))
-                PlayerActionButton(Icons.Rounded.ScreenRotation, stringResource(R.string.player_rotate),
+                PlayerActionButton(LamphausIcons.RotateScreen, stringResource(R.string.player_rotate),
                     onClick = onToggleOrientation)
-                PlayerActionButton(Icons.Rounded.Lock, stringResource(R.string.player_lock), onClick = onLock)
-                if (pictureInPictureAvailable) PlayerActionButton(Icons.Rounded.PictureInPictureAlt,
+                PlayerActionButton(LamphausIcons.LockClosed, stringResource(R.string.player_lock), onClick = onLock)
+                if (pictureInPictureAvailable) PlayerActionButton(LamphausIcons.PictureInPicture,
                     stringResource(R.string.player_pip), onClick = onEnterPictureInPicture)
-                PlayerActionButton(Icons.Rounded.MoreHoriz, stringResource(R.string.player_more),
+                PlayerActionButton(LamphausIcons.EllipsisHorizontal, stringResource(R.string.player_more),
                     Modifier.focusRequester(moreFocus)) { onPanel(PlayerPanel.MORE) }
             }
             Row(
@@ -184,12 +182,12 @@ internal fun PlayerControls(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(if (compactHeight) 24.dp else 32.dp),
             ) {
-                PlayerActionButton(Icons.Rounded.Replay10, stringResource(R.string.player_rewind),
+                PlayerActionButton(LamphausIcons.Replay10, stringResource(R.string.player_rewind),
                     containerSize = 56.dp, visualSize = 32.dp) { onSeekBack(); onInteraction() }
                 PlayerActionButton(playIcon, playLabel, Modifier.focusRequester(playFocus),
                     containerSize = if (compactHeight) 64.dp else 80.dp, visualSize = 40.dp,
                     primary = true, onClick = toggle)
-                PlayerActionButton(Icons.Rounded.Forward10, stringResource(R.string.player_forward),
+                PlayerActionButton(LamphausIcons.Forward10, stringResource(R.string.player_forward),
                     containerSize = 56.dp, visualSize = 32.dp) { onSeekForward(); onInteraction() }
             }
             Column(
@@ -210,16 +208,16 @@ internal fun PlayerControls(
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PlayerSettingButton(Icons.AutoMirrored.Rounded.VolumeUp, stringResource(R.string.player_audio),
+                    PlayerSettingButton(LamphausIcons.SpeakerWave, stringResource(R.string.player_audio),
                         false, Modifier.focusRequester(audioFocus)) { onPanel(PlayerPanel.AUDIO) }
-                    PlayerSettingButton(Icons.Rounded.ClosedCaption, stringResource(R.string.player_subtitles),
+                    PlayerSettingButton(LamphausIcons.Subtitles, stringResource(R.string.player_subtitles),
                         subtitlesActive, Modifier.focusRequester(subtitlesFocus)) { onPanel(PlayerPanel.SUBTITLES) }
-                    if (canPlayNext) PlayerSettingButton(Icons.Rounded.SkipNext,
+                    if (canPlayNext) PlayerSettingButton(LamphausIcons.SkipNextSolid,
                         stringResource(R.string.player_next_episode), false) {
                         if (!nextEpisodeLoading) onNextEpisode()
                         onInteraction()
                     }
-                    if (canSwitchSource) PlayerSettingButton(Icons.Rounded.Layers, stringResource(R.string.player_sources),
+                    if (canSwitchSource) PlayerSettingButton(LamphausIcons.Square3Stack3d, stringResource(R.string.player_sources),
                         false, Modifier.focusRequester(sourcesFocus)) { onPanel(PlayerPanel.SOURCES) }
                 }
             }
@@ -293,7 +291,7 @@ private fun PlayerPanelHeading(title: String, onClose: () -> Unit) {
         Text(title, Modifier.weight(1f).semantics { heading() },
             style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         IconButton(onClick = onClose) {
-            Icon(Icons.Rounded.Close, stringResource(R.string.player_done))
+            Icon(LamphausIcons.XMark, stringResource(R.string.player_done))
         }
     }
 }

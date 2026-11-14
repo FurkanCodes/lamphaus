@@ -29,11 +29,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -79,7 +74,6 @@ import com.lamphaus.app.ui.LocalStreamBadges
 import com.lamphaus.app.ui.artworkImageUrl
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.material.icons.outlined.MoreVert
 import com.lamphaus.app.ui.ContentMenuTarget
 import com.lamphaus.app.ui.ContentMenuOrigin
 import com.lamphaus.app.ui.MediaArtwork

@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import com.lamphaus.app.ui.withUpNext
 import com.lamphaus.app.ui.UpNextItem
 import com.lamphaus.app.ui.releaseCountdownText
@@ -62,25 +63,9 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Extension
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.PrivacyTip
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Replay
-import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -626,7 +611,7 @@ internal fun TvContentMenuDialog(
                         )
                         TvAction(
                             label = stringResource(R.string.retry),
-                            icon = Icons.Outlined.Refresh,
+                            icon = LamphausIcons.ArrowPath,
                             onClick = { onAction(ContentMenuAction.StartFromBeginning) },
                         )
                     }
@@ -674,12 +659,12 @@ private fun tvContentMenuLabel(
 }
 
 private fun tvContentMenuIcon(action: ContentMenuAction, inLibrary: Boolean): ImageVector = when (action) {
-    ContentMenuAction.ViewDetails -> Icons.Outlined.Info
-    ContentMenuAction.ToggleLibrary -> if (inLibrary) Icons.Outlined.Check else Icons.Outlined.BookmarkBorder
-    ContentMenuAction.MarkWatched -> Icons.Outlined.Check
-    ContentMenuAction.MarkUnwatched -> Icons.Outlined.Close
-    ContentMenuAction.RemoveFromContinueWatching -> Icons.Outlined.Delete
-    ContentMenuAction.StartFromBeginning -> Icons.Outlined.Replay
+    ContentMenuAction.ViewDetails -> LamphausIcons.InformationCircle
+    ContentMenuAction.ToggleLibrary -> if (inLibrary) LamphausIcons.Check else LamphausIcons.Bookmark
+    ContentMenuAction.MarkWatched -> LamphausIcons.Check
+    ContentMenuAction.MarkUnwatched -> LamphausIcons.XMark
+    ContentMenuAction.RemoveFromContinueWatching -> LamphausIcons.Trash
+    ContentMenuAction.StartFromBeginning -> LamphausIcons.ArrowUturnLeft
 }
 
 /**
@@ -780,7 +765,7 @@ internal fun TvPairingContent(
             }
             TvAction(
                 label = stringResource(R.string.refresh_code),
-                icon = Icons.Outlined.Refresh,
+                icon = LamphausIcons.ArrowPath,
                 modifier = Modifier
                     .focusRequester(initialFocus)
                     .testTag(TvTestTags.PairingRefresh),
@@ -789,7 +774,7 @@ internal fun TvPairingContent(
             if (showDevelopmentAction) {
                 TvAction(
                     label = stringResource(R.string.open_development_session),
-                    icon = Icons.Outlined.Person,
+                    icon = LamphausIcons.User,
                     modifier = Modifier.testTag(TvTestTags.PairingDevelopment),
                     onClick = onDevelopmentSession,
                 )
@@ -1576,7 +1561,7 @@ private fun TvHome(
                             )
                             TvAction(
                                 label = stringResource(R.string.install_addon),
-                                icon = Icons.Outlined.Add,
+                                icon = LamphausIcons.Plus,
                                 modifier = Modifier.focusRequester(initialFocusRequester),
                                 onClick = onAddSource,
                             )
@@ -1616,7 +1601,7 @@ private fun TvHome(
                     state.homeCatalogBatch.loadMoreFailed -> item("home-catalog-retry") {
                         TvAction(
                             label = stringResource(R.string.retry),
-                            icon = Icons.Outlined.Refresh,
+                            icon = LamphausIcons.ArrowPath,
                             modifier = Modifier.focusRequester(initialFocusRequester),
                             onClick = onRetryHome,
                         )
@@ -1958,7 +1943,7 @@ private fun TvHero(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TvIcon(
-                        icon = Icons.Outlined.PlayArrow,
+                        icon = LamphausIcons.PlaySolid,
                         contentDescription = null,
                         tint = TvFocusTokens.focusedContent,
                     )
@@ -2143,7 +2128,7 @@ private fun TvCatalogRow(
                     item("catalog-action") {
                         TvAction(
                             label = stringResource(if (section.loadMoreError != null) R.string.retry else R.string.load_more),
-                            icon = Icons.Outlined.Refresh,
+                            icon = LamphausIcons.ArrowPath,
                             modifier = Modifier.trailingAction(trailing),
                             onClick = {
                                 trailing.onPressed(section.items.size)
@@ -2159,7 +2144,7 @@ private fun TvCatalogRow(
             // when the next row is not composed yet.
             TvAction(
                 label = stringResource(R.string.retry),
-                icon = Icons.Outlined.Refresh,
+                icon = LamphausIcons.ArrowPath,
                 onClick = onRetry,
                 modifier = retryFocus.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
             )
@@ -2212,7 +2197,7 @@ internal fun TvPersonPage(
                 )
                 TvAction(
                     label = stringResource(R.string.retry),
-                    icon = Icons.Outlined.Refresh,
+                    icon = LamphausIcons.ArrowPath,
                     onClick = onRetry,
                     modifier = Modifier.focusRequester(entry),
                 )
@@ -2300,7 +2285,7 @@ private fun TvMediaGrid(
                     item("catalog-action", contentType = "action") {
                         TvAction(
                             label = stringResource(if (section?.loadMoreError != null) R.string.retry else R.string.load_more),
-                            icon = Icons.Outlined.Refresh,
+                            icon = LamphausIcons.ArrowPath,
                             onClick = if (section?.loadMoreError != null) onRetry else onLoadMore,
                         )
                     }
@@ -2502,7 +2487,7 @@ private fun TvDiscover(
                     )
                     TvAction(
                         label = stringResource(R.string.retry),
-                        icon = Icons.Outlined.Refresh,
+                        icon = LamphausIcons.ArrowPath,
                         onClick = onRetry,
                     )
                 }
@@ -2535,7 +2520,7 @@ private fun TvDiscover(
                     item(key = "discover-retry", span = fullSpan) {
                         TvAction(
                             label = stringResource(R.string.retry),
-                            icon = Icons.Outlined.Refresh,
+                            icon = LamphausIcons.ArrowPath,
                             onClick = onRetry,
                         )
                     }
@@ -3075,7 +3060,7 @@ private fun TvDetailScreen(
                                 nextUp.kind == NextUpKind.RESUME -> stringResource(R.string.resume_episode_format, nextUpLabel)
                                 else -> stringResource(R.string.play_episode_format, nextUpLabel)
                             },
-                            icon = Icons.Outlined.PlayArrow,
+                            icon = LamphausIcons.PlaySolid,
                             modifier = Modifier
                                 .focusRequester(playFocus)
                                 .tvRowItem(actionRow, 0)
@@ -3085,7 +3070,7 @@ private fun TvDetailScreen(
                         )
                         TvAction(
                             label = stringResource(if (inLibrary) R.string.in_library else R.string.add_to_library),
-                            icon = if (inLibrary) Icons.Outlined.Check else Icons.Outlined.Add,
+                            icon = if (inLibrary) LamphausIcons.Check else LamphausIcons.Plus,
                             modifier = Modifier
                                 .graphicsLayer {
                                     scaleX = libraryPulse.value
@@ -3099,7 +3084,7 @@ private fun TvDetailScreen(
                         )
                         TvAction(
                             label = stringResource(R.string.edit_artwork),
-                            icon = Icons.Outlined.Palette,
+                            icon = LamphausIcons.Swatch,
                             modifier = Modifier.tvRowItem(actionRow, 2),
                             onClick = onEditArtwork,
                         )
@@ -3477,7 +3462,7 @@ private fun TvArtworkEditorScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TvAction(
                     label = stringResource(R.string.save_artwork),
-                    icon = Icons.Outlined.Check,
+                    icon = LamphausIcons.Check,
                     enabled = editor.selectedPoster != null ||
                         editor.selectedBackdrop != null ||
                         editor.selectedLogo != null,
@@ -3485,7 +3470,7 @@ private fun TvArtworkEditorScreen(
                 )
                 TvAction(
                     label = stringResource(R.string.back),
-                    icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                    icon = LamphausIcons.ArrowLeft,
                     onClick = onBack,
                 )
             }
@@ -3540,14 +3525,14 @@ private enum class TvSettingsSection(
     @StringRes val labelRes: Int,
     val icon: ImageVector,
 ) {
-    PROFILES(R.string.profiles, Icons.Outlined.Person),
-    SOURCES(R.string.addons, Icons.Outlined.Add),
-    INTEGRATIONS(R.string.integrations, Icons.Outlined.Extension),
-    PLAYBACK(R.string.playback, Icons.Outlined.PlayArrow),
-    APPEARANCE(R.string.appearance, Icons.Outlined.Palette),
-    SPOILERS(R.string.spoiler_protection, Icons.Outlined.Visibility),
-    PRIVACY(R.string.privacy, Icons.Outlined.PrivacyTip),
-    ABOUT(R.string.about, Icons.Outlined.Info),
+    PROFILES(R.string.profiles, LamphausIcons.User),
+    SOURCES(R.string.addons, LamphausIcons.Plus),
+    INTEGRATIONS(R.string.integrations, LamphausIcons.PuzzlePiece),
+    PLAYBACK(R.string.playback, LamphausIcons.PlaySolid),
+    APPEARANCE(R.string.appearance, LamphausIcons.Swatch),
+    SPOILERS(R.string.spoiler_protection, LamphausIcons.Eye),
+    PRIVACY(R.string.privacy, LamphausIcons.ShieldCheck),
+    ABOUT(R.string.about, LamphausIcons.InformationCircle),
 }
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -4249,7 +4234,7 @@ private fun TvPlaybackLanguageDialog(
                                 )
                                 if (selected) {
                                     TvIcon(
-                                        Icons.Outlined.Check,
+                                        LamphausIcons.Check,
                                         contentDescription = null,
                                         tint = if (focused) content else MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(20.dp),
@@ -4608,7 +4593,7 @@ private fun TvStreamBadgeSettings(state: AppUiState, viewModel: AppViewModel) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvAction(
                 label = stringResource(if (state.streamBadgesImporting) R.string.stream_badges_importing else R.string.stream_badges_import),
-                icon = Icons.Outlined.Add,
+                icon = LamphausIcons.Plus,
                 enabled = importEnabled,
                 modifier = Modifier.focusRequester(importFocus),
                 onClick = { viewModel.importStreamBadges(address) },
@@ -4616,7 +4601,7 @@ private fun TvStreamBadgeSettings(state: AppUiState, viewModel: AppViewModel) {
             if (state.streamBadges != null) {
                 TvAction(
                     label = stringResource(R.string.stream_badges_remove),
-                    icon = Icons.Outlined.Delete,
+                    icon = LamphausIcons.Trash,
                     onClick = viewModel::removeStreamBadges,
                 )
             }
@@ -4778,7 +4763,7 @@ private fun TvSeekrIntegrationCard(state: AppUiState, viewModel: AppViewModel) {
                 label = stringResource(
                     if (connected) R.string.integration_replace_key else R.string.integration_connect,
                 ),
-                icon = Icons.Outlined.Check,
+                icon = LamphausIcons.Check,
                 enabled = seekrKey.isNotBlank(),
                 onClick = {
                     viewModel.saveIntegrationCredential(SEEKR_INTEGRATION, seekrKey)
@@ -4788,7 +4773,7 @@ private fun TvSeekrIntegrationCard(state: AppUiState, viewModel: AppViewModel) {
             if (connected) {
                 TvAction(
                     label = stringResource(R.string.integration_remove),
-                    icon = Icons.Outlined.Delete,
+                    icon = LamphausIcons.Trash,
                     onClick = { viewModel.removeIntegration(SEEKR_INTEGRATION) },
                 )
             }
@@ -4853,7 +4838,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                 Text(state.artworkProviderCatalogError, color = MaterialTheme.colorScheme.error)
                 TvAction(
                     label = stringResource(R.string.retry),
-                    icon = Icons.Outlined.Refresh,
+                    icon = LamphausIcons.ArrowPath,
                     onClick = viewModel::refreshArtworkKeyStatus,
                 )
             }
@@ -4881,7 +4866,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                     )
                     TvAction(
                         label = stringResource(R.string.remove_artwork_key),
-                        icon = Icons.Outlined.Delete,
+                        icon = LamphausIcons.Trash,
                         enabled = provider.configured && !state.artworkStorageModeChanging,
                         onClick = { viewModel.deleteArtworkKey(providerId) },
                     )
@@ -4893,7 +4878,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                     )
                     TvAction(
                         label = stringResource(R.string.artwork_get_key, providerName),
-                        icon = Icons.Outlined.Info,
+                        icon = LamphausIcons.InformationCircle,
                         enabled = !state.artworkStorageModeChanging,
                         onClick = { viewModel.openArtworkProviderKeyPage(providerId) },
                     )
@@ -4917,14 +4902,14 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                     )
                     TvAction(
                         label = stringResource(R.string.artwork_get_help),
-                        icon = Icons.Outlined.Info,
+                        icon = LamphausIcons.InformationCircle,
                         enabled = !state.artworkStorageModeChanging,
                         onClick = { viewModel.reportMessage(provider.helpText) },
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         TvAction(
                             label = stringResource(R.string.save_artwork_key),
-                            icon = Icons.Outlined.Check,
+                            icon = LamphausIcons.Check,
                             enabled = !state.artworkStorageModeChanging && apiKey.isNotBlank(),
                             onClick = {
                                 viewModel.saveArtworkKey(providerId, apiKey)
@@ -4933,7 +4918,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                         )
                         TvAction(
                             label = stringResource(R.string.remove_artwork_key),
-                            icon = Icons.Outlined.Delete,
+                            icon = LamphausIcons.Trash,
                             enabled = provider.configured && !state.artworkStorageModeChanging,
                             onClick = { viewModel.deleteArtworkKey(providerId) },
                         )
@@ -4998,7 +4983,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                         label = stringResource(
                             if (connected) R.string.integration_replace_key else R.string.integration_connect,
                         ),
-                        icon = Icons.Outlined.Check,
+                        icon = LamphausIcons.Check,
                         enabled = mdblistKey.isNotBlank(),
                         onClick = {
                             viewModel.saveIntegrationCredential("mdblist", mdblistKey)
@@ -5008,7 +4993,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                     if (connected) {
                         TvAction(
                             label = stringResource(R.string.integration_remove),
-                            icon = Icons.Outlined.Delete,
+                            icon = LamphausIcons.Trash,
                             onClick = { viewModel.removeIntegration("mdblist") },
                         )
                     }
@@ -5050,7 +5035,7 @@ private fun TvIntegrationsSettings(state: AppUiState, viewModel: AppViewModel) {
                     )
                     TvAction(
                         label = stringResource(R.string.retry),
-                        icon = Icons.Outlined.Refresh,
+                        icon = LamphausIcons.ArrowPath,
                         onClick = { viewModel.refreshIntegrations() },
                     )
                 }
@@ -5104,13 +5089,13 @@ private fun TvArtworkStorageModeDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TvAction(
                         label = stringResource(R.string.cancel),
-                        icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                        icon = LamphausIcons.ArrowLeft,
                         modifier = Modifier.focusRequester(cancelFocusRequester),
                         onClick = onDismiss,
                     )
                     TvAction(
                         label = stringResource(R.string.delete_keys_and_switch),
-                        icon = Icons.Outlined.Delete,
+                        icon = LamphausIcons.Trash,
                         onClick = onConfirm,
                     )
                 }
@@ -5237,7 +5222,7 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
             item {
                 TvAction(
                     label = stringResource(R.string.install_developer_source),
-                    icon = Icons.Outlined.Add,
+                    icon = LamphausIcons.Plus,
                     enabled = installEnabled,
                     modifier = Modifier.focusRequester(installFocusRequester),
                     onClick = { viewModel.addProvider(providerAddress) },
@@ -5247,7 +5232,7 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
         item {
             TvAction(
                 label = stringResource(R.string.refresh_catalogs),
-                icon = Icons.Outlined.Refresh,
+                icon = LamphausIcons.ArrowPath,
                 enabled = state.providers.isNotEmpty() && !state.refreshing,
                 modifier = Modifier.focusRequester(refreshFocusRequester),
                 onClick = viewModel::refreshContent,
@@ -5292,12 +5277,12 @@ private fun TvSourcesSettings(state: AppUiState, viewModel: AppViewModel) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TvAction(
                             label = stringResource(if (provider.enabled) R.string.disable else R.string.enable),
-                            icon = Icons.Outlined.Refresh,
+                            icon = LamphausIcons.ArrowPath,
                             onClick = { viewModel.toggleProvider(provider.id, !provider.enabled) },
                         )
                         TvAction(
                             label = stringResource(R.string.remove),
-                            icon = Icons.Outlined.Delete,
+                            icon = LamphausIcons.Trash,
                             onClick = { viewModel.removeProvider(provider.id) },
                         )
                     }

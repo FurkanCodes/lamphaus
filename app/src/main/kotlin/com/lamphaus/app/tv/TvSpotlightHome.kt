@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -30,8 +31,6 @@ import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -306,7 +305,7 @@ internal fun TvSpotlightRow(
                         item("catalog-action") {
                             TvAction(
                                 label = stringResource(if (section.loadMoreError != null) R.string.retry else R.string.load_more),
-                                icon = Icons.Outlined.Refresh,
+                                icon = LamphausIcons.ArrowPath,
                                 onClick = {
                                     trailing.onPressed(section.items.size)
                                     if (section.loadMoreError != null) onRetry() else onLoadMore()
@@ -323,7 +322,7 @@ internal fun TvSpotlightRow(
             // passes through it (SHR-PROD-04).
             TvAction(
                 label = stringResource(R.string.retry),
-                icon = Icons.Outlined.Refresh,
+                icon = LamphausIcons.ArrowPath,
                 onClick = onRetry,
                 modifier = retryFocus.padding(horizontal = TvLayoutTokens.screenHorizontalPadding),
             )

@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -38,13 +39,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material3.Button
-import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -68,7 +63,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -734,7 +728,7 @@ private fun HeroOverlayContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             HeroIconAction(
-                icon = if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                icon = if (saved) LamphausIcons.BookmarkSolid else LamphausIcons.Bookmark,
                 label = stringResource(if (saved) R.string.saved else R.string.save),
                 tint = if (saved) MaterialTheme.colorScheme.primary else Color.White,
                 onClick = { onToggleLibrary(media) },
@@ -747,12 +741,12 @@ private fun HeroOverlayContent(
                     contentColor = Color.Black,
                 ),
             ) {
-                Icon(Icons.Outlined.PlayArrow, null)
+                Icon(LamphausIcons.PlaySolid, null)
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.play), style = MaterialTheme.typography.titleMedium)
             }
             HeroIconAction(
-                icon = Icons.Outlined.Info,
+                icon = LamphausIcons.InformationCircle,
                 label = stringResource(R.string.info),
                 tint = Color.White,
                 onClick = { onMedia(media) },
@@ -908,7 +902,7 @@ private fun MobileContinueWatchingCard(
                         .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                    Icon(LamphausIcons.PlaySolid, null, tint = Color.White, modifier = Modifier.size(24.dp))
                 }
             }
             (upNextBadge ?: timeLeft?.let { stringResource(R.string.continue_watching_time_left, it) })?.let { badge ->

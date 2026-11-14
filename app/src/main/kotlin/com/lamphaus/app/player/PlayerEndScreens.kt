@@ -1,5 +1,6 @@
 package com.lamphaus.app.player
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,10 +26,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
@@ -130,8 +127,8 @@ internal fun UpNextPrompt(
         secondsLeft = secondsLeft,
         blurArtwork = blurArtwork,
         isTelevision = isTelevision,
-        accept = PlayerEndAction(stringResource(R.string.up_next_yes), Icons.Rounded.PlayArrow, onYes),
-        decline = PlayerEndAction(stringResource(R.string.up_next_no), Icons.Rounded.Close, onNo),
+        accept = PlayerEndAction(stringResource(R.string.up_next_yes), LamphausIcons.PlaySolid, onYes),
+        decline = PlayerEndAction(stringResource(R.string.up_next_no), LamphausIcons.XMark, onNo),
         progress = progress,
         failureMessage = failureMessage,
         onCancel = onCancel,
@@ -157,8 +154,8 @@ internal fun StillWatchingPrompt(
     failureMessage: String? = null,
     onCancel: () -> Unit = {},
 ) {
-    val continueAction = PlayerEndAction(stringResource(R.string.still_watching_continue), Icons.Rounded.PlayArrow, onContinue)
-    val stopAction = PlayerEndAction(stringResource(R.string.still_watching_stop), Icons.Rounded.Close, onStop)
+    val continueAction = PlayerEndAction(stringResource(R.string.still_watching_continue), LamphausIcons.PlaySolid, onContinue)
+    val stopAction = PlayerEndAction(stringResource(R.string.still_watching_stop), LamphausIcons.XMark, onStop)
     if (nextEpisode != null) {
         NextEpisodeEndScreen(
             label = stringResource(R.string.still_watching_title),
@@ -224,7 +221,7 @@ private fun NextEpisodeEndScreen(
     LaunchedEffect(starting) { runCatching { primaryFocus.requestFocus() } }
     BackHandler(onBack = if (starting) onCancel else decline.onClick)
     val actions = if (starting) {
-        listOf(PlayerEndAction(stringResource(R.string.cancel), Icons.Rounded.Close, onCancel))
+        listOf(PlayerEndAction(stringResource(R.string.cancel), LamphausIcons.XMark, onCancel))
     } else {
         listOf(accept, decline)
     }
@@ -442,8 +439,8 @@ internal fun FinishedPrompt(
         secondsLeft = secondsLeft,
         isTelevision = isTelevision,
         actions = listOf(
-            PlayerEndAction(stringResource(R.string.player_finished_watch_again), Icons.Rounded.Replay, onWatchAgain),
-            PlayerEndAction(stringResource(R.string.player_finished_close), Icons.Rounded.Close, onClose),
+            PlayerEndAction(stringResource(R.string.player_finished_watch_again), LamphausIcons.ArrowUturnLeft, onWatchAgain),
+            PlayerEndAction(stringResource(R.string.player_finished_close), LamphausIcons.XMark, onClose),
         ),
         onBack = onClose,
         titleLogoUrl = logo,

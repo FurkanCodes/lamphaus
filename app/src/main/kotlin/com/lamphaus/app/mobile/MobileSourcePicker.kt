@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -36,9 +37,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -182,7 +180,7 @@ internal fun MobileSourcePickerScreen(
                 .size(48.dp),
         ) {
             Box(Modifier.size(40.dp).background(Color.Black.copy(alpha = 0.42f), CircleShape))
-            Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back), tint = Color.White)
+            Icon(LamphausIcons.ArrowLeft, stringResource(R.string.back), tint = Color.White)
         }
     }
 }
@@ -437,7 +435,7 @@ internal fun SourceCard(
                     .background(MobileTokens.textPrimary, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Rounded.PlayArrow, stringResource(R.string.play), tint = Color.Black, modifier = Modifier.size(24.dp))
+                Icon(LamphausIcons.PlaySolid, stringResource(R.string.play), tint = Color.Black, modifier = Modifier.size(24.dp))
             }
         }
     }

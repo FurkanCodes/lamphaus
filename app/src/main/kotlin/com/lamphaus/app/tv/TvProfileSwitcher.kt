@@ -1,5 +1,6 @@
 package com.lamphaus.app.tv
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -10,8 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ManageAccounts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -96,7 +95,7 @@ internal fun TvProfileSwitcher(
             }
             TvAction(
                 label = stringResource(R.string.manage_profiles),
-                icon = Icons.Outlined.ManageAccounts,
+                icon = LamphausIcons.UserGroup,
                 modifier = if (profiles.isEmpty()) Modifier.focusRequester(activeFocus) else Modifier,
                 onClick = onManageProfiles,
             )

@@ -1,5 +1,6 @@
 package com.lamphaus.app.mobile
 
+import com.lamphaus.app.ui.icons.LamphausIcons
 import android.text.format.DateUtils
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
@@ -32,20 +33,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Extension
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.PlayCircle
-import androidx.compose.material.icons.outlined.GridView
-import androidx.compose.material.icons.outlined.SystemUpdate
-import androidx.compose.material.icons.outlined.Tv
-import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -56,7 +43,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -79,6 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
@@ -125,17 +112,17 @@ internal enum class SettingsSection(
     @StringRes val labelRes: Int,
     val icon: ImageVector,
 ) {
-    PROFILES(R.string.profiles, Icons.Outlined.Person),
-    ADDONS(R.string.addons, Icons.Outlined.Extension),
-    PLAYBACK(R.string.playback, Icons.Outlined.PlayCircle),
-    BROWSING(R.string.browsing, Icons.Outlined.GridView),
-    NOTIFICATIONS(R.string.notifications, Icons.Outlined.Notifications),
-    PAIRED_DEVICES(R.string.paired_devices, Icons.Outlined.Tv),
-    SPOILER_PROTECTION(R.string.spoiler_protection, Icons.Outlined.Visibility),
-    INTEGRATIONS(R.string.integrations, Icons.Outlined.Key),
-    PRIVACY(R.string.privacy, Icons.Outlined.Lock),
-    ACCOUNT(R.string.account, Icons.Outlined.AccountCircle),
-    UPDATES(R.string.update_check, Icons.Outlined.SystemUpdate),
+    PROFILES(R.string.profiles, LamphausIcons.User),
+    ADDONS(R.string.addons, LamphausIcons.PuzzlePiece),
+    PLAYBACK(R.string.playback, LamphausIcons.PlayCircle),
+    BROWSING(R.string.browsing, LamphausIcons.Squares2x2),
+    NOTIFICATIONS(R.string.notifications, LamphausIcons.Bell),
+    PAIRED_DEVICES(R.string.paired_devices, LamphausIcons.Tv),
+    SPOILER_PROTECTION(R.string.spoiler_protection, LamphausIcons.Eye),
+    INTEGRATIONS(R.string.integrations, LamphausIcons.Key),
+    PRIVACY(R.string.privacy, LamphausIcons.LockClosed),
+    ACCOUNT(R.string.account, LamphausIcons.UserCircle),
+    UPDATES(R.string.update_check, LamphausIcons.ArrowDownTray),
 }
 @Composable
 internal fun MobileSettingsScreen(
@@ -229,7 +216,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
     val subtitlesOn = profile.subtitleDefaultMode != SubtitleDefaultMode.OFF
     SettingsPage(title = stringResource(R.string.playback)) {
         item {
-            SettingsCard("Language and color defaults") {
+            SettingsCard("Language and color defaults", collapsedByDefault = false) {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.playback_default_audio)) },
                     supportingContent = { Text(stringResource(R.string.playback_default_audio_description)) },
@@ -281,7 +268,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
-            SettingsCard("Display matching") {
+            SettingsCard("Display matching", collapsedByDefault = true) {
                 ListItem(
                     headlineContent = { Text("Match frame rate") },
                     supportingContent = { Text("Change refresh rate to reduce judder") },
@@ -305,7 +292,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
-            SettingsCard("Audio and video") {
+            SettingsCard("Audio and video", collapsedByDefault = true) {
                 PlaybackEngineChoiceRow(
                     title = "Audio output",
                     description = PlaybackEngineOptions.AUDIO_OUTPUT_DESCRIPTION,
@@ -430,7 +417,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
         }
         item {
             // Streaming engine (PLY-NET-01): device-local, off by default.
-            SettingsCard(stringResource(R.string.streaming_settings)) {
+            SettingsCard(stringResource(R.string.streaming_settings), collapsedByDefault = true) {
                 PlaybackSettingRow(
                     title = stringResource(R.string.native_memory_setting),
                     description = stringResource(R.string.native_memory_setting_description),
@@ -477,7 +464,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
         }
         item {
             // Default player and what travels to another app (PLY-EXT-01).
-            SettingsCard(stringResource(R.string.default_player_setting)) {
+            SettingsCard(stringResource(R.string.default_player_setting), collapsedByDefault = true) {
                 if (com.lamphaus.core.player.mpv.MpvLibrary.isAvailable()) {
                     PlaybackEngineChoiceRow(
                         title = stringResource(R.string.playback_engine_setting),
@@ -517,7 +504,7 @@ private fun SettingsPlaybackPage(state: AppUiState, viewModel: AppViewModel) {
             }
         }
         item {
-            SettingsCard(stringResource(R.string.episode_playback)) {
+            SettingsCard(stringResource(R.string.episode_playback), collapsedByDefault = false) {
                 PlaybackSettingRow(
                     title = stringResource(R.string.skip_intro),
                     description = stringResource(R.string.skip_intro_description),
@@ -1056,7 +1043,7 @@ internal fun SettingsMenuList(sections: List<SettingsSection>, onSelect: (Settin
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    LamphausIcons.ChevronRight,
                     contentDescription = null,
                     tint = MobileTokens.textMuted,
                 )
@@ -1095,7 +1082,7 @@ private fun SettingsProfilesPage(state: AppUiState, viewModel: AppViewModel) {
                         supportingContent = {
                             Text(stringResource(if (profile.kind == ProfileKind.CHILD) R.string.child_profile else R.string.adult_profile))
                         },
-                        leadingContent = { Icon(Icons.Outlined.Person, null) },
+                        leadingContent = { Icon(LamphausIcons.User, null) },
                         trailingContent = {
                             TextButton(onClick = { viewModel.selectProfile(profile.id) }, enabled = state.activeProfileId != profile.id) {
                                 Text(stringResource(if (state.activeProfileId == profile.id) R.string.active else R.string.switch_profile))
@@ -1113,7 +1100,7 @@ private fun SettingsProfilesPage(state: AppUiState, viewModel: AppViewModel) {
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Outlined.Add, null, tint = MobileTokens.accent)
+                    Icon(LamphausIcons.Plus, null, tint = MobileTokens.accent)
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.add_child_profile), color = MobileTokens.accent)
                 }
@@ -1169,7 +1156,7 @@ private fun SettingsAddonsPage(state: AppUiState, viewModel: AppViewModel) {
                                     )
                                     IconButton(onClick = { viewModel.removeProvider(provider.id) }) {
                                         Icon(
-                                            Icons.Outlined.Delete,
+                                            LamphausIcons.Trash,
                                             contentDescription = stringResource(R.string.remove_provider_format, provider.displayName),
                                         )
                                     }
@@ -1247,7 +1234,7 @@ private fun SettingsPairedDevicesPage(state: AppUiState, viewModel: AppViewModel
                     ListItem(
                         headlineContent = { Text(device.label) },
                         supportingContent = { Text(device.createdAt?.take(10) ?: device.platform) },
-                        leadingContent = { Icon(Icons.Outlined.Tv, null) },
+                        leadingContent = { Icon(LamphausIcons.Tv, null) },
                         trailingContent = {
                             TextButton(onClick = {
                                 deviceToRevoke = device
@@ -1294,7 +1281,7 @@ private fun SettingsSpoilerPage(state: AppUiState, viewModel: AppViewModel) {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.protect_spoilers)) },
                     supportingContent = { Text(stringResource(R.string.spoiler_protection_description)) },
-                    leadingContent = { Icon(Icons.Outlined.Visibility, null) },
+                    leadingContent = { Icon(LamphausIcons.Eye, null) },
                     trailingContent = {
                         Switch(
                             checked = state.spoilerProtection.enabled,
@@ -1694,19 +1681,71 @@ private fun SettingsAccountPage(state: AppUiState, viewModel: AppViewModel) {
 private fun SettingsCard(
     title: String,
     modifier: Modifier = Modifier,
+    /** Non-null makes the group collapsible from its heading, starting collapsed when true (MOB-SET-04). */
+    collapsedByDefault: Boolean? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (collapsedByDefault == null) {
+        Column(modifier = modifier) {
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Spacer(Modifier.height(10.dp))
+            SettingsCardBody(content)
+        }
+        return
+    }
+    var expanded by androidx.compose.runtime.saveable.rememberSaveable(title) { mutableStateOf(!collapsedByDefault) }
+    val reducedMotion = com.lamphaus.app.ui.rememberReducedMotion()
+    val turn by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(if (reducedMotion) 0 else 200),
+        label = "settings group chevron",
+    )
+    val state = stringResource(if (expanded) R.string.settings_group_expanded else R.string.settings_group_collapsed)
     Column(modifier = modifier) {
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
-        Spacer(Modifier.height(10.dp))
-        Column(
+        Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(MobileTokens.radiusSection))
-                .background(MobileTokens.surfaceRaised),
-            content = content,
-        )
+                .sizeIn(minHeight = 48.dp)
+                .clip(RoundedCornerShape(MobileTokens.radiusCard))
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .semantics(mergeDescendants = true) {
+                    heading()
+                    stateDescription = state
+                },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Icon(
+                LamphausIcons.ChevronDown,
+                contentDescription = null,
+                tint = MobileTokens.textMuted,
+                modifier = Modifier.rotate(turn),
+            )
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = expanded,
+            enter = androidx.compose.animation.expandVertically(tween(if (reducedMotion) 0 else 200)) +
+                fadeIn(tween(if (reducedMotion) 0 else 200)),
+            exit = androidx.compose.animation.shrinkVertically(tween(if (reducedMotion) 0 else 160)) +
+                fadeOut(tween(if (reducedMotion) 0 else 160)),
+        ) {
+            Column {
+                Spacer(Modifier.height(10.dp))
+                SettingsCardBody(content)
+            }
+        }
     }
+}
+
+@Composable
+private fun SettingsCardBody(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(MobileTokens.radiusSection))
+            .background(MobileTokens.surfaceRaised),
+        content = content,
+    )
 }
 
 @Composable
